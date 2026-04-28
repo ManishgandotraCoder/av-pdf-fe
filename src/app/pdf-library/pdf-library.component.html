@@ -1,0 +1,57 @@
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__dot"></div>
+      <div class="brand__title">Avyro Editor</div>
+      <div class="brand__sub">Your PDFs from the backend</div>
+    </div>
+
+    <div class="actions">
+      <label class="btn btn--primary">
+        <input class="file" type="file" accept="application/pdf" (change)="onPickFile($event)" />
+        Upload PDF
+      </label>
+      <button class="btn btn--ghost" type="button" (click)="refresh()" [disabled]="isLoading()">
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  @if (errorText()) {
+    <div class="banner banner--error">{{ errorText() }}</div>
+  }
+  @if (isLoading()) {
+    <div class="banner">Working…</div>
+  }
+
+  <main class="main">
+    @if (!hasItems()) {
+      <div class="empty">
+        <div class="empty__card">
+          <div class="empty__title">No PDFs yet</div>
+          <div class="empty__sub">Upload one, then click it to open the editor.</div>
+        </div>
+      </div>
+    } @else {
+      <div class="grid">
+        @for (item of items(); track item.id) {
+          <div class="card">
+            <button class="card__open" type="button" (click)="open(item)">
+              <div class="card__name">{{ item.name }}</div>
+              <div class="card__meta">
+                <span>{{ formatSize(item.size) }}</span>
+                <span class="dot">•</span>
+                <span>Updated {{ formatDate(item.updatedAt) }}</span>
+              </div>
+            </button>
+            <div class="card__actions">
+              <button class="chip" type="button" (click)="open(item)">Edit</button>
+              <button class="chip chip--danger" type="button" (click)="delete(item)">Delete</button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </main>
+</div>
+
