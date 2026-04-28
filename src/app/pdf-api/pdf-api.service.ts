@@ -8,8 +8,16 @@ export type PdfMeta = {
   updatedAt: number;
 };
 
+const BACKEND_ORIGIN = 'https://av-pdf-be.vercel.app';
+
 @Injectable({ providedIn: 'root' })
 export class PdfApiService {
+  private apiUrl(pathname: string): string {
+    const path = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    // Keep `/api/...` paths stable across environments.
+    return `${BACKEND_ORIGIN}${path}`;
+  }
+
   private async readErrorMessage(res: Response): Promise<string | null> {
     try {
       const text = await res.text();
@@ -45,7 +53,7 @@ export class PdfApiService {
   }
 
   async list(): Promise<PdfMeta[]> {
-    const res = await fetch('/api/pdfs');
+    const res = await fetch(this.apiUrl('/api/pdfs'));
     if (!res.ok) {
       const msg = (await this.readErrorMessage(res)) ?? 'Failed to load library.';
       throw new Error(msg);
@@ -56,7 +64,7 @@ export class PdfApiService {
   async upload(file: File): Promise<PdfMeta> {
     const fd = new FormData();
     fd.set('file', file);
-    const res = await fetch('/api/pdfs', { method: 'POST', body: fd });
+    const res = await fetch(this.apiUrl('/api/pdfs'), { method: 'POST', body: fd });
     if (!res.ok) {
       const msg = (await this.readErrorMessage(res)) ?? 'Upload failed.';
       throw new Error(msg);
@@ -65,13 +73,13 @@ export class PdfApiService {
   }
 
   async getMeta(id: string): Promise<PdfMeta> {
-    const res = await fetch(`/api/pdfs/${encodeURIComponent(id)}/meta`);
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/meta`));
     if (!res.ok) throw new Error('Failed to load PDF meta.');
     return (await res.json()) as PdfMeta;
   }
 
   async getBytes(id: string): Promise<Uint8Array> {
-    const res = await fetch(`/api/pdfs/${encodeURIComponent(id)}`);
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}`));
     if (!res.ok) {
       const msg = (await this.readErrorMessage(res)) ?? 'Failed to load PDF.';
       throw new Error(msg);
@@ -87,7 +95,7 @@ export class PdfApiService {
     const safe = new Uint8Array(bytes.byteLength);
     safe.set(bytes);
     const body = new Blob([safe.buffer], { type: 'application/pdf' });
-    const res = await fetch(`/api/pdfs/${encodeURIComponent(id)}`, {
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}`), {
       method: 'PUT',
       body
     });
@@ -99,7 +107,7 @@ export class PdfApiService {
   }
 
   async delete(id: string): Promise<void> {
-    const res = await fetch(`/api/pdfs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}`), { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete PDF.');
   }
 }
