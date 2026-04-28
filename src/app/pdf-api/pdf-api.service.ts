@@ -8,7 +8,20 @@ export type PdfMeta = {
   updatedAt: number;
 };
 
-const BACKEND_ORIGIN = 'https://av-pdf-be.vercel.app';
+const PROD_BACKEND_ORIGIN = 'https://av-pdf-be.vercel.app';
+const LOCAL_BACKEND_ORIGIN = 'http://localhost:5050';
+
+function resolveBackendOrigin(): string {
+  // If the frontend is being served locally, hit the local backend.
+  // Covers common local hosts (localhost + loopback IP).
+  if (typeof window !== 'undefined') {
+    const host = window.location?.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return LOCAL_BACKEND_ORIGIN;
+  }
+  return PROD_BACKEND_ORIGIN;
+}
+
+const BACKEND_ORIGIN = resolveBackendOrigin();
 
 @Injectable({ providedIn: 'root' })
 export class PdfApiService {
