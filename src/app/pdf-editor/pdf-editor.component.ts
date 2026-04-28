@@ -20,6 +20,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import { PdfApiService } from '../pdf-api/pdf-api.service';
+import { AssetMetaService } from '../asset-meta/asset-meta.service';
 
 type Tool = 'pan' | 'pen' | 'text' | 'image';
 type FontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
@@ -62,6 +63,7 @@ type ToolbarIcon =
   | 'redo'
   | 'print'
   | 'spellcheck'
+  | 'template'
   | 'zoomOut'
   | 'zoomIn'
   | 'bold'
@@ -312,6 +314,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(PdfApiService);
+  private readonly assetMeta = inject(AssetMetaService);
 
   protected readonly Math = Math;
   protected readonly range = (n: number) => Array.from({ length: Math.max(0, n) }, (_, i) => i);
@@ -1200,6 +1203,14 @@ export class PdfEditorComponent implements AfterViewInit {
     },
     {
       kind: 'button',
+      id: 'extract-template',
+      title: 'Extract template',
+      icon: 'template',
+      onClick: () => void this.extractTemplate(),
+      disabled: () => this.pageCount() === 0 || this.isLoading() || this.isSaving()
+    },
+    {
+      kind: 'button',
       id: 'spellcheck',
       title: 'Spellcheck (noop)',
       icon: 'spellcheck',
@@ -1614,19 +1625,22 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private exportNeedsFlatten(): boolean {
-    const hasWidgets = Object.values(this.widgetsByPage()).some((list) => (list ?? []).length > 0);
+  private exportNeedsFlatten(opts?: {
+    edits?: Record<number, PageEdits>;
+    widgetsByPage?: Record<number, Widget[]>;
+  }): boolean {
+    const widgetsByPage = opts?.widgetsByPage ?? this.widgetsByPage();
+    const editsByPage = opts?.edits ?? this.editsByPage();
+    const hasWidgets = Object.values(widgetsByPage).some((list) => (list ?? []).length > 0);
     if (hasWidgets) return true;
-    return Object.values(this.editsByPage()).some((e) =>
-      (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint')
-    );
+    return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
   }
 
   /** Semantic PDF with annotations (pen, text, images, etc.). Not used when `exportNeedsFlatten()`. */
-  private async buildSemanticExportBytes(): Promise<Uint8Array> {
+  private async buildSemanticExportBytes(editsOverride?: Record<number, PageEdits>): Promise<Uint8Array> {
     if (!this.pdfBytes) throw new Error('PDF not loaded.');
     this.assertReadablePdfHeader(this.pdfBytes);
-    const edits = this.editsByPage();
+    const edits = editsOverride ?? this.editsByPage();
     const pdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
       const fontsByFamily: Record<
         Exclude<FontFamily, 'poppins' | 'montserrat' | 'abcdee_helvetica_bold'>,
@@ -1768,7 +1782,10 @@ export class PdfEditorComponent implements AfterViewInit {
   /**
    * Rasterize each page and rebuild a PDF (required when inpaint masking is used).
    */
-  private async buildFlattenedExportBytes(): Promise<Uint8Array> {
+  private async buildFlattenedExportBytes(
+    editsOverride?: Record<number, PageEdits>,
+    widgetsOverride?: Record<number, Widget[]>
+  ): Promise<Uint8Array> {
     if (!this.pdfBytes || !this.pdfDoc) throw new Error('PDF not loaded.');
 
     // Load original for page sizes.
@@ -1777,7 +1794,8 @@ export class PdfEditorComponent implements AfterViewInit {
     const outPdf = await PDFDocument.create();
 
     const srcPages = srcPdf.getPages();
-    const edits = this.editsByPage();
+    const edits = editsOverride ?? this.editsByPage();
+    const widgetsByPage = widgetsOverride ?? this.widgetsByPage();
 
     // Render at higher scale for better quality.
     const renderScale = Math.max(2, this.scale());
@@ -1878,7 +1896,7 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         // Widgets (table/text/image/signature/video)
-        await this.drawWidgetsToFlattenCanvas(pageIndex, ctx, fx, fy);
+        await this.drawWidgetsToFlattenCanvas(pageIndex, ctx, fx, fy, widgetsByPage);
       }
 
       // Embed rendered page image into output PDF page at original size.
@@ -1899,9 +1917,11 @@ export class PdfEditorComponent implements AfterViewInit {
     pageIndex: number,
     ctx: CanvasRenderingContext2D,
     fx: number,
-    fy: number
+    fy: number,
+    widgetsByPageOverride?: Record<number, Widget[]>
   ) {
-    const widgets = this.widgetsByPage()[pageIndex] ?? [];
+    const widgetsByPage = widgetsByPageOverride ?? this.widgetsByPage();
+    const widgets = widgetsByPage[pageIndex] ?? [];
     if (widgets.length === 0) return;
 
     for (const w of widgets) {
@@ -2055,6 +2075,89 @@ export class PdfEditorComponent implements AfterViewInit {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  protected async extractTemplate() {
+    if (!this.pdfBytes || this.pageCount() === 0) return;
+
+    const baseName = (this.fileName() ?? 'Document').replace(/\.pdf$/i, '');
+    const templateName = (prompt('Template name', `${baseName} Template`) ?? '').trim();
+    if (!templateName) return;
+    const tagsCsv = (prompt('Tags (comma-separated)', '') ?? '').trim();
+
+    this.errorText.set(null);
+    this.isLoading.set(true);
+
+    try {
+      const cleanedEdits = this.buildTemplateEdits(this.editsByPage());
+      const cleanedWidgets = this.buildTemplateWidgets(this.widgetsByPage());
+
+      const safeBytes = this.exportNeedsFlatten({ edits: cleanedEdits, widgetsByPage: cleanedWidgets })
+        ? await this.buildFlattenedExportBytes(cleanedEdits, cleanedWidgets)
+        : await this.buildSemanticExportBytes(cleanedEdits);
+
+      const blobBytes = new Uint8Array(safeBytes.byteLength);
+      blobBytes.set(safeBytes);
+      const blob = new Blob([blobBytes.buffer], { type: 'application/pdf' });
+      const file = new File([blob], `${templateName.replace(/\.pdf$/i, '')}.pdf`, { type: 'application/pdf' });
+
+      const meta = await this.api.upload(file);
+      this.assetMeta.setTemplateMeta(meta.id, { templateName, tagsCsv });
+
+      await this.router.navigate(['/edit', meta.id]);
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to extract template.');
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  private buildTemplateEdits(src: Record<number, PageEdits>): Record<number, PageEdits> {
+    // Wipe "content" while preserving geometry + typography choices.
+    // - text annotations: keep style/position, clear text
+    // - replaces: keep mask + style + box, clear newText so the region is blank
+    // - ink/images: cleared (these are usually user-specific content)
+    const out: Record<number, PageEdits> = {};
+    for (const [k, v] of Object.entries(src)) {
+      const pageIndex = Number(k);
+      if (!v) continue;
+      out[pageIndex] = {
+        ...v,
+        ink: [],
+        images: [],
+        text: (v.text ?? []).map((t) => ({ ...t, text: '' })),
+        replaces: (v.replaces ?? []).map((r) => ({ ...r, newText: '' }))
+      };
+    }
+    return out;
+  }
+
+  private buildTemplateWidgets(src: Record<number, Widget[]>): Record<number, Widget[]> {
+    const out: Record<number, Widget[]> = {};
+    for (const [k, list] of Object.entries(src)) {
+      const pageIndex = Number(k);
+      const widgets = (list ?? []).map((w) => {
+        if (w.kind === 'text') return { ...w, textValue: '' };
+        if (w.kind === 'table' && w.table) {
+          const rows = w.table.rows;
+          const cols = w.table.cols;
+          return {
+            ...w,
+            table: {
+              rows,
+              cols,
+              cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''))
+            }
+          };
+        }
+        if (w.kind === 'image') return { ...w, imageSrc: undefined };
+        if (w.kind === 'signature') return { ...w, signatureSrc: undefined };
+        if (w.kind === 'video') return { ...w, videoSrc: undefined };
+        return { ...w };
+      });
+      out[pageIndex] = widgets;
+    }
+    return out;
   }
 
   protected readonly isSaving = signal(false);
@@ -2519,19 +2622,8 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!this.pdfBytes) return;
     const count = this.pageCount();
     if (count <= 1) {
-      this.pdfBytes = null;
-      this.pdfDoc = null;
-      this.pageCount.set(0);
-      this.activePageIndex.set(0);
-      this.openPageMenuIndex.set(null);
-      this.pageThumbUrlByPage.set({});
-      this.editsByPage.set({});
-      this.detectedTextByPage.set({});
-      this.detectedBlocksByPage.set({});
-      this.baseSnapshotByPage.clear();
-      this.pageRotateByPage.clear();
-      this.renderTaskByPage.clear();
-      this.resetHistory();
+      // Don't allow deleting the last page; it would leave an empty PDF and disable save/export flows.
+      this.errorText.set('Cannot delete the last page.');
       return;
     }
 

@@ -38,6 +38,14 @@
           <div class="card">
             <button class="card__open" type="button" (click)="open(item)">
               <div class="card__name">{{ item.name }}</div>
+              @if (isTemplate(item)) {
+                <div class="card__badges">
+                  <span class="badge">Template</span>
+                  @for (t of tags(item); track t) {
+                    <span class="tag">{{ t }}</span>
+                  }
+                </div>
+              }
               <div class="card__meta">
                 <span>{{ formatSize(item.size) }}</span>
                 <span class="dot">•</span>

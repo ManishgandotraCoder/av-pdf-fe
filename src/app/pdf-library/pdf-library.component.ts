@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { PdfApiService, type PdfMeta } from '../pdf-api/pdf-api.service';
+import { AssetMetaService } from '../asset-meta/asset-meta.service';
 
 @Component({
   selector: 'app-pdf-library',
@@ -14,6 +15,7 @@ import { PdfApiService, type PdfMeta } from '../pdf-api/pdf-api.service';
 export class PdfLibraryComponent {
   private readonly api = inject(PdfApiService);
   private readonly router = inject(Router);
+  private readonly assetMeta = inject(AssetMetaService);
 
   protected readonly isLoading = signal(false);
   protected readonly errorText = signal<string | null>(null);
@@ -59,6 +61,14 @@ export class PdfLibraryComponent {
 
   protected open(item: PdfMeta) {
     void this.router.navigate(['/edit', item.id]);
+  }
+
+  protected isTemplate(item: PdfMeta) {
+    return this.assetMeta.isTemplate(item.id);
+  }
+
+  protected tags(item: PdfMeta) {
+    return this.assetMeta.tags(item.id);
   }
 
   protected async delete(item: PdfMeta) {
