@@ -66,57 +66,7 @@
       </div>
     </div>
 
-    <!-- Row 2: menus -->
-    <div class="docsRow docsRow--menu">
-      <div class="docsLeft">
-        <div class="docsMenus" aria-label="Menus">
-
-          <div class="docsMenuWrap">
-            <button
-              class="docsMenuBtn"
-              type="button"
-              [class.isOpen]="openDocsMenu() === 'Insert'"
-              (click)="toggleDocsMenu('Insert', $event)"
-            >
-              Insert
-            </button>
-
-            @if (openDocsMenu() === 'Insert') {
-              <div class="docsMenuDropdown" role="menu" aria-label="Insert">
-                <button
-                  class="docsMenuItem"
-                  type="button"
-                  role="menuitem"
-                  (click)="pickPdfImageFromMenu($event)"
-                  [disabled]="pageCount() === 0 || isLoading()"
-                >
-                  Image
-                </button>
-                <button
-                  class="docsMenuItem"
-                  type="button"
-                  role="menuitem"
-                  (click)="onInsertFromMenu('table', $event)"
-                  [disabled]="pageCount() === 0 || isLoading()"
-                >
-                  Table
-                </button>
-                <button
-                  class="docsMenuItem"
-                  type="button"
-                  role="menuitem"
-                  (click)="onInsertFromMenu('video', $event)"
-                  [disabled]="pageCount() === 0 || isLoading()"
-                >
-                  Video
-                </button>
-              </div>
-            }
-          </div>
-        </div>
-      </div>
-      <div class="docsRight"></div>
-    </div>
+    <!-- Row 2 removed: Insert moved to right sidenav -->
 
     <div class="docsRow docsRow--tools" (pointerdown)="onToolbarPointerDown($event)">
       <div class="toolStrip">
@@ -559,6 +509,71 @@
           </div>
         }
       </section>
+
+      <aside class="rightbar" aria-label="Insert tools">
+        <div class="rightbar__row">
+          <button
+            type="button"
+            class="rightbar__icon"
+            title="Insert image"
+            (click)="onInsertWidgetClick('image', $event)"
+            [disabled]="pageCount() === 0 || isLoading()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="M8 14l2-2 4 4 2-2 2 2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M10 9a1.5 1.5 0 1 0 0 .01"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            class="rightbar__icon"
+            title="Insert table"
+            (click)="onInsertWidgetClick('table', $event)"
+            [disabled]="pageCount() === 0 || isLoading()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            class="rightbar__icon"
+            title="Insert video"
+            (click)="onInsertWidgetClick('video', $event)"
+            [disabled]="pageCount() === 0 || isLoading()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="M15 10l5-3v10l-5-3z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </aside>
     </main>
   }
 </div>
