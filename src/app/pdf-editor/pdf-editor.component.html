@@ -459,7 +459,12 @@
                                 autofocus
                               ></textarea>
                             } @else {
-                              <button type="button" class="widget__labelBtn" (click)="startEditingWidget(w.id, $event)">
+                              <button
+                                type="button"
+                                class="widget__labelBtn"
+                                [disabled]="!textFeatureEnabled()"
+                                (click)="startEditingWidget(w.id, $event)"
+                              >
                                 Add text
                               </button>
                             }
@@ -491,7 +496,7 @@
                   }
                 </div>
 
-                @if (isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
+                @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
                   <div class="textDraft" [ngStyle]="textDraftStyle()">
                     <textarea
                       [(ngModel)]="textDraft"
@@ -513,6 +518,21 @@
 
       <aside class="rightbar" aria-label="Insert tools">
         <div class="rightbar__row">
+          <div class="rightbarTextGate" role="group" aria-label="PDF text editing">
+            <span class="rightbarTextGate__label">Text</span>
+            <button
+              type="button"
+              class="rightbarTextGate__btn"
+              [class.rightbarTextGate__btn--on]="textFeatureEnabled()"
+              (click)="toggleTextFeatureEnabled()"
+              [attr.aria-pressed]="textFeatureEnabled()"
+              [disabled]="pageCount() === 0 || isLoading()"
+              title="Turn PDF text tools on or off"
+            >
+              {{ textFeatureEnabled() ? 'On' : 'Off' }}
+            </button>
+          </div>
+
           <button
             type="button"
             class="rightbar__icon"

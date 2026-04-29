@@ -1,6 +1,7 @@
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   DestroyRef,
   ElementRef,
@@ -311,6 +312,7 @@ function weightFromStyle(style: FontStyle): 400 | 700 {
 })
 export class PdfEditorComponent implements AfterViewInit {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(PdfApiService);
@@ -345,6 +347,8 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly textBgEnabled = signal(false);
   protected readonly textBgColor = signal('#ffffff');
   protected readonly editExistingText = signal(true);
+  /** When false, embedded-text detection is skipped and PDF text/editing widgets are inactive. */
+  protected readonly textFeatureEnabled = signal(true);
   // Default PDF display at 80%.
   protected readonly scale = signal(0.8);
   protected readonly sidebarCollapsed = signal(false);
@@ -515,6 +519,27 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected toggleTextBgEnabled() {
     this.textBgEnabled.set(!this.textBgEnabled());
+  }
+
+  protected toggleTextFeatureEnabled() {
+    const next = !this.textFeatureEnabled();
+    this.textFeatureEnabled.set(next);
+
+    if (!next) {
+      this.cancelTextDraft();
+      if (this.tool() === 'text') this.tool.set('pan');
+      const ew = this.editingWidgetId();
+      if (ew) {
+        const w = this.getWidget(this.activePageIndex(), ew);
+        if (w?.kind === 'text') this.stopEditingWidget(ew);
+      }
+      // Clear all pages so navigation cannot leave stale hit targets.
+      this.detectedTextByPage.set({});
+      this.detectedBlocksByPage.set({});
+    }
+
+    this.cdr.markForCheck();
+    void this.renderActivePage().finally(() => this.cdr.markForCheck());
   }
 
   protected toggleSidebar() {
@@ -849,6 +874,9 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected startEditingWidget(widgetId: string, ev?: Event) {
     ev?.stopPropagation?.();
+    const w = this.getWidget(this.activePageIndex(), widgetId);
+    if (w?.kind === 'text' && !this.textFeatureEnabled()) return;
+
     this.selectedWidgetId.set(widgetId);
     this.editingWidgetId.set(widgetId);
     queueMicrotask(() => this.focusWidgetEditor(widgetId));
@@ -859,6 +887,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected updateTextWidget(pageIndex: number, widgetId: string, value: string) {
+    if (!this.textFeatureEnabled()) return;
     this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, textValue: value }));
   }
 
@@ -1252,7 +1281,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Paragraph style',
       value: () => 'Normal text',
       setValue: () => {},
-      options: [{ label: 'Normal text', value: 'Normal text' }]
+      options: [{ label: 'Normal text', value: 'Normal text' }],
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'select',
@@ -1260,7 +1290,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Font family',
       value: () => this.textFamily(),
       setValue: (v) => this.setTextFamily(v as FontFamily),
-      options: this.fontFamilyOptions
+      options: this.fontFamilyOptions,
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'select',
@@ -1268,7 +1299,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Font size',
       value: () => this.textSize(),
       setValue: (v) => this.textSize.set(Number(v)),
-      options: this.fontSizeOptions.map((s) => ({ label: String(s), value: s }))
+      options: this.fontSizeOptions.map((s) => ({ label: String(s), value: s })),
+      disabled: () => !this.textFeatureEnabled()
     },
     { kind: 'sep', id: 'sep-4' },
     {
@@ -1277,7 +1309,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Bold',
       icon: 'bold',
       onClick: () => this.toggleBold(),
-      active: () => this.textWeight() === 700
+      active: () => this.textWeight() === 700,
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'button',
@@ -1285,7 +1318,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Italic',
       icon: 'italic',
       onClick: () => this.toggleItalic(),
-      active: () => this.textStyle() === 'italic' || this.textStyle() === 'boldItalic'
+      active: () => this.textStyle() === 'italic' || this.textStyle() === 'boldItalic',
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'button',
@@ -1293,7 +1327,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Background color',
       icon: 'bgColor',
       onClick: () => this.toggleTextBgEnabled(),
-      active: () => this.textBgEnabled()
+      active: () => this.textBgEnabled(),
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'color',
@@ -1301,21 +1336,23 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Background color picker',
       value: () => this.textBgColor(),
       setValue: (v) => this.textBgColor.set(v),
-      disabled: () => !this.textBgEnabled()
+      disabled: () => !this.textFeatureEnabled() || !this.textBgEnabled()
     },
     {
       kind: 'button',
       id: 'text-color-icon',
       title: 'Text color',
       icon: 'textColor',
-      onClick: () => {}
+      onClick: () => {},
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'color',
       id: 'text-color',
       title: 'Font color',
       value: () => this.textColor(),
-      setValue: (v) => this.textColor.set(v)
+      setValue: (v) => this.textColor.set(v),
+      disabled: () => !this.textFeatureEnabled()
     },
     { kind: 'sep', id: 'sep-5' },
     {
@@ -1341,7 +1378,8 @@ export class PdfEditorComponent implements AfterViewInit {
       title: 'Text tool',
       icon: 'text',
       onClick: () => this.tool.set('text'),
-      active: () => this.tool() === 'text'
+      active: () => this.tool() === 'text',
+      disabled: () => !this.textFeatureEnabled()
     },
     {
       kind: 'button',
@@ -2277,50 +2315,58 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     // Detect existing text runs for click-to-edit.
-    try {
-      const textContent = await page.getTextContent();
-      const styles = (textContent as any).styles ?? {};
-      const items: DetectedText[] = [];
+    if (this.textFeatureEnabled()) {
+      try {
+        const textContent = await page.getTextContent();
+        const styles = (textContent as any).styles ?? {};
+        const items: DetectedText[] = [];
 
-      for (const it of textContent.items as any[]) {
-        const str = String(it.str ?? '');
-        if (!str.trim()) continue;
+        for (const it of textContent.items as any[]) {
+          const str = String(it.str ?? '');
+          if (!str.trim()) continue;
 
-        const tx = Array.isArray(it.transform) ? it.transform : null;
-        if (!tx || tx.length < 6) continue;
+          const tx = Array.isArray(it.transform) ? it.transform : null;
+          if (!tx || tx.length < 6) continue;
 
-        const xPdf = Number(tx[4] ?? 0);
-        const yPdf = Number(tx[5] ?? 0);
+          const xPdf = Number(tx[4] ?? 0);
+          const yPdf = Number(tx[5] ?? 0);
 
-        const [x, yBottom] = cssViewport.convertToViewportPoint(xPdf, yPdf);
+          const [x, yBottom] = cssViewport.convertToViewportPoint(xPdf, yPdf);
 
-        // Better bbox approximation for hit-testing:
-        const w = Math.max(1, Number(it.width ?? 0) * cssViewport.scale);
-        const h = Math.max(1, Math.hypot(Number(tx[2] ?? 0), Number(tx[3] ?? 0)) * cssViewport.scale);
-        const y = yBottom - h;
-        const fontSize = Math.max(6, h);
-        const fontName = String(it.fontName ?? '');
-        const fontStyle = inferFontStyleFromPdfJsStyle(styles[fontName] ?? { fontName });
+          // Better bbox approximation for hit-testing:
+          const w = Math.max(1, Number(it.width ?? 0) * cssViewport.scale);
+          const h = Math.max(1, Math.hypot(Number(tx[2] ?? 0), Number(tx[3] ?? 0)) * cssViewport.scale);
+          const y = yBottom - h;
+          const fontSize = Math.max(6, h);
+          const fontName = String(it.fontName ?? '');
+          const fontStyle = inferFontStyleFromPdfJsStyle(styles[fontName] ?? { fontName });
 
-        // pdf.js gives bottom-left-ish; we want a top-left-ish box for hit testing.
-        items.push({
-          x,
-          y,
-          w,
-          h,
-          text: str,
-          fontSize,
-          fontStyle
-        });
+          // pdf.js gives bottom-left-ish; we want a top-left-ish box for hit testing.
+          items.push({
+            x,
+            y,
+            w,
+            h,
+            text: str,
+            fontSize,
+            fontStyle
+          });
+        }
+
+        this.detectedTextByPage.update((prev) => ({ ...prev, [pageIndex]: items }));
+        this.detectedBlocksByPage.update((prev) => ({
+          ...prev,
+          [pageIndex]: this.groupDetectedTextIntoBlocks(items)
+        }));
+      } catch {
+        // ignore text detection failures (still can annotate)
       }
-
-      this.detectedTextByPage.update((prev) => ({ ...prev, [pageIndex]: items }));
+    } else {
+      this.detectedTextByPage.update((prev) => ({ ...prev, [pageIndex]: [] }));
       this.detectedBlocksByPage.update((prev) => ({
         ...prev,
-        [pageIndex]: this.groupDetectedTextIntoBlocks(items)
+        [pageIndex]: []
       }));
-    } catch {
-      // ignore text detection failures (still can annotate)
     }
 
     // Ensure we have viewport metadata for export.
@@ -2861,7 +2907,7 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    if (this.tool() === 'text') {
+    if (this.tool() === 'text' && this.textFeatureEnabled()) {
       const { overlay } = this.getCanvasPair(pageIndex);
       if (!overlay) return;
       const p = this.eventToPoint(overlay, ev);
@@ -2998,6 +3044,10 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected commitTextDraft() {
+    if (!this.textFeatureEnabled()) {
+      this.cancelTextDraft();
+      return;
+    }
     const pageIndex = this.textDraftPageIndex();
     if (pageIndex === null) return;
 
