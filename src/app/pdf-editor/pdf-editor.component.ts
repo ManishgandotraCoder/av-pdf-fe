@@ -2702,6 +2702,23 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
+    if (!ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      if (ev.key === 'ArrowRight' || ev.key === 'PageDown') {
+        if (this.pageCount() > 0) {
+          ev.preventDefault();
+          this.setActivePage(this.activePageIndex() + 1);
+        }
+        return;
+      }
+      if (ev.key === 'ArrowLeft' || ev.key === 'PageUp') {
+        if (this.pageCount() > 0) {
+          ev.preventDefault();
+          this.setActivePage(this.activePageIndex() - 1);
+        }
+        return;
+      }
+    }
+
     const mod = ev.metaKey || ev.ctrlKey;
     if (!mod) return;
 
