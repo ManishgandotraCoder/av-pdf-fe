@@ -760,6 +760,17 @@ export class PdfEditorComponent implements AfterViewInit {
     });
 
     effect(() => {
+      const createFlow = this.isCreateFlow();
+      const currentTab = this.rightbarTab();
+      const allowed = createFlow
+        ? (['options', 'settings', 'typography'] as const)
+        : (['options', 'assets', 'versions'] as const);
+      if (!allowed.includes(currentTab as any)) {
+        this.rightbarTab.set('options');
+      }
+    });
+
+    effect(() => {
       const id = this.docId();
       const widgets = this.widgetsByPage();
       if (!id) return;
@@ -1007,6 +1018,15 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions') {
+    const createFlow = this.isCreateFlow();
+    if (createFlow && (tab === 'assets' || tab === 'versions')) {
+      this.rightbarTab.set('options');
+      return;
+    }
+    if (!createFlow && (tab === 'settings' || tab === 'typography')) {
+      this.rightbarTab.set('options');
+      return;
+    }
     this.rightbarTab.set(tab);
   }
 
@@ -2204,23 +2224,6 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly toolbarItems: ToolbarItem[] = [
     {
       kind: 'button',
-      id: 'undo',
-      title: 'Undo',
-      icon: 'undo',
-      onClick: () => this.undo(),
-      disabled: () => !this.canUndo()
-    },
-    {
-      kind: 'button',
-      id: 'redo',
-      title: 'Redo',
-      icon: 'redo',
-      onClick: () => this.redo(),
-      disabled: () => !this.canRedo()
-    },
-    { kind: 'sep', id: 'sep-1' },
-    {
-      kind: 'button',
       id: 'print',
       title: 'Print (Clear edits)',
       icon: 'print',
@@ -2463,7 +2466,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
       // Rendering will happen via QueryList changes.
     } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to load PDF.');
+      this.errorText.set(e instanceof Error ? e.message : 'Unsupported format - try PDF or DOCX.');
       this.pdfBytes = null;
       this.pdfDoc = null;
       this.pageCount.set(0);
@@ -2568,7 +2571,7 @@ export class PdfEditorComponent implements AfterViewInit {
       await this.waitForActiveCanvasReady(1600);
       await this.renderActivePage();
     } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to load PDF.');
+      this.errorText.set(e instanceof Error ? e.message : 'Upload failed - retry.');
       this.pdfBytes = null;
       this.pdfDoc = null;
       this.pageCount.set(0);
@@ -2599,7 +2602,7 @@ export class PdfEditorComponent implements AfterViewInit {
       await this.api.saveBytes(id, this.pdfBytes);
     } catch (e) {
       // Non-fatal: user can still export/download.
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to save PDF.');
+      this.errorText.set(e instanceof Error ? e.message : 'Save failed - reconnecting.');
     }
   }
 
@@ -3397,7 +3400,28 @@ export class PdfEditorComponent implements AfterViewInit {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to export PDF.');
+      this.errorText.set(e instanceof Error ? e.message : 'Export failed - network issue.');
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  protected async previewProposal() {
+    if (!this.pdfBytes) return;
+    this.errorText.set(null);
+    this.isLoading.set(true);
+    try {
+      const safeBytes = this.exportNeedsFlatten()
+        ? await this.buildFlattenedExportBytes()
+        : await this.buildSemanticExportBytes();
+      const blobBytes = new Uint8Array(safeBytes.byteLength);
+      blobBytes.set(safeBytes);
+      const blob = new Blob([blobBytes.buffer], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 20000);
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Preview failed. Please retry export.');
     } finally {
       this.isLoading.set(false);
     }
@@ -3519,7 +3543,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.showSlideToast('New version saved');
       await this.router.navigate(['/edit', created.id]);
     } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to save PDF.');
+      this.errorText.set(e instanceof Error ? e.message : 'Save failed - reconnecting.');
     } finally {
       this.isSaving.set(false);
     }

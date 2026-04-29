@@ -179,41 +179,6 @@
           }
         </section>
 
-        <section class="shareDrawer__section">
-          <h3 class="shareDrawer__sectionTitle">Export Options</h3>
-          <div class="shareDrawer__row">
-            <button type="button" class="shareDrawer__btn" [disabled]="isLoading()" (click)="exportPdf()">Download as PDF</button>
-            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="isLoading()" (click)="downloadAsPpt()">
-              Download as PPT
-            </button>
-          </div>
-        </section>
-
-        <section class="shareDrawer__section">
-          <h3 class="shareDrawer__sectionTitle">Rejection</h3>
-          <div class="shareDrawer__metaText">Status: {{ rejectionLabel() }}</div>
-          @if (rejection(); as r) {
-            <div class="shareDrawer__metaText">By: {{ r.rejectedBy }} on {{ formatTimestamp(r.rejectedAt) }}</div>
-            @if (r.reason) {
-              <div class="shareDrawer__metaText">Reason: {{ r.reason }}</div>
-            }
-          }
-          <input
-            class="shareDrawer__input"
-            [ngModel]="rejectionReasonInput()"
-            (ngModelChange)="rejectionReasonInput.set($event)"
-            placeholder="Optional rejection reason"
-          />
-          <div class="shareDrawer__row">
-            <button type="button" class="shareDrawer__btn" [disabled]="rejectionBusy()" (click)="openRejectConfirmation('internal')">
-              Internal reject
-            </button>
-            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="rejectionBusy()" (click)="openRejectConfirmation('client')">
-              Client reject
-            </button>
-          </div>
-        </section>
-
         @if (proposalDetails()?.derivedFrom) {
           <section class="shareDrawer__section">
             <h3 class="shareDrawer__sectionTitle">Metadata</h3>
@@ -288,14 +253,14 @@
           type="button"
           (click)="savePdfAsNewVersion()"
           [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null || readonlyMode()"
-          title="Save as a new proposal version"
+          title="Save"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
             <path d="M17 21v-8H7v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
             <path d="M7 3v5h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
           </svg>
-          @if (isSaving()) { Saving… } @else { Save (this name) }
+          @if (isSaving()) { Saving… } @else { Save }
         </button>
         @if (isAutoVersionSaving() && !isSaving()) {
           <span class="docsAutoSaving">Auto-saving versions...</span>
@@ -309,6 +274,43 @@
           title="Overwrite original proposal"
         >
           Overwrite
+        </button>
+
+        <button
+          class="docsToolbarBtn"
+          type="button"
+          (click)="previewProposal()"
+          [disabled]="pageCount() === 0 || isLoading()"
+          title="Preview proposal"
+        >
+          Preview
+        </button>
+
+        <button
+          class="docsToolbarBtn"
+          type="button"
+          (click)="exportPdf()"
+          [disabled]="pageCount() === 0 || isLoading()"
+          title="Export as PDF"
+        >
+          Export
+        </button>
+
+        <button
+          class="docsToolbarBtn docsToolbarBtn--danger"
+          type="button"
+          (click)="openRejectConfirmation('internal')"
+          [disabled]="rejectionBusy() || isLoading() || isSaving()"
+          title="Reject proposal"
+        >
+          Reject
+        </button>
+
+        <button class="docsIcon" type="button" title="Undo" (click)="undo()" [disabled]="!canUndo()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 20a8 8 0 0 0-8-8H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button class="docsIcon" type="button" title="Redo" (click)="redo()" [disabled]="!canRedo()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 20a8 8 0 0 1 8-8h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
 
         <button
@@ -1024,59 +1026,65 @@
               <path d="M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
-            [attr.aria-selected]="rightbarTab() === 'settings'"
-            aria-label="Settings"
-            title="Settings"
-            (click)="setRightbarTab('settings')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'assets'"
-            [attr.aria-selected]="rightbarTab() === 'assets'"
-            aria-label="Assets"
-            title="Assets"
-            (click)="setRightbarTab('assets')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
-              <path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'typography'"
-            [attr.aria-selected]="rightbarTab() === 'typography'"
-            aria-label="Typography"
-            title="Typography"
-            (click)="setRightbarTab('typography')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
+          @if (isCreateFlow()) {
+            <button
+              type="button"
+              role="tab"
+              class="rightbarTabs__btn"
+              [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
+              [attr.aria-selected]="rightbarTab() === 'settings'"
+              aria-label="Settings"
+              title="Settings"
+              (click)="setRightbarTab('settings')"
+            >
+              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          }
+          @if (!isCreateFlow()) {
+            <button
+              type="button"
+              role="tab"
+              class="rightbarTabs__btn"
+              [class.rightbarTabs__btnActive]="rightbarTab() === 'assets'"
+              [attr.aria-selected]="rightbarTab() === 'assets'"
+              aria-label="Assets"
+              title="Assets"
+              (click)="setRightbarTab('assets')"
+            >
+              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                <path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+          }
+          @if (isCreateFlow()) {
+            <button
+              type="button"
+              role="tab"
+              class="rightbarTabs__btn"
+              [class.rightbarTabs__btnActive]="rightbarTab() === 'typography'"
+              [attr.aria-selected]="rightbarTab() === 'typography'"
+              aria-label="Typography"
+              title="Typography"
+              (click)="setRightbarTab('typography')"
+            >
+              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+          }
           @if (!isCreateFlow()) {
             <button
               type="button"
@@ -1286,7 +1294,7 @@
           </div>
         }
 
-        @if (rightbarTab() === 'settings') {
+        @if (isCreateFlow() && rightbarTab() === 'settings') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Page settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Page Settings</div>
@@ -1320,7 +1328,7 @@
           </div>
         }
 
-        @if (rightbarTab() === 'assets') {
+        @if (!isCreateFlow() && rightbarTab() === 'assets') {
           <div class="rightbar__panel rightbar__panelAssets" role="tabpanel" aria-label="Assets">
             @if (reusableAssets().length === 0) {
               <p class="rightbarAssetsHint">No assets yet. Upload image/video once and it will appear here for reuse.</p>
@@ -1340,7 +1348,7 @@
           </div>
         }
 
-        @if (rightbarTab() === 'typography') {
+        @if (isCreateFlow() && rightbarTab() === 'typography') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Typography settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Typography</div>

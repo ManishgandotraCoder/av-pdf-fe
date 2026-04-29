@@ -51,7 +51,8 @@
 
 .docsSave,
 .docsOverwrite,
-.docsShare {
+.docsShare,
+.docsToolbarBtn {
   flex: 0 0 auto;
 }
 
@@ -252,6 +253,31 @@
 }
 
 .docsOverwrite:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.docsToolbarBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: rgba(248, 250, 252, 0.95);
+  color: rgba(15, 23, 42, 0.88);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.docsToolbarBtn--danger {
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(254, 226, 226, 0.78);
+  color: rgba(153, 27, 27, 0.95);
+}
+
+.docsToolbarBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
