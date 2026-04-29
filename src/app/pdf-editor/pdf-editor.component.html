@@ -519,13 +519,12 @@
       <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
-        <div class="sidebarHeader">
-          <div class="sidebar__title">Key Pages</div>
           <button
             type="button"
             class="sidebarToggle"
             [title]="sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
             (click)="toggleSidebar()"
+            style="padding: 10px; margin-bottom: 10px;"
           >
             @if (sidebarCollapsed()) {
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -551,7 +550,6 @@
               </svg>
             }
           </button>
-        </div>
 
         <div class="keySlots" aria-label="Key page slots">
           <div class="keySlots__group">
@@ -657,6 +655,8 @@
                 [class.isSectionStart]="isSidebarSectionStart(pageIndex)"
                 [class.isSlideDropHover]="slideDropHoverIndex() === pageIndex"
                 [class.isSlideDragging]="slideDragFromIndex() === pageIndex"
+                [attr.aria-current]="activePageIndex() === pageIndex ? 'page' : null"
+                [attr.aria-label]="'Slide ' + (pageIndex + 1) + ': ' + sidebarSectionLabelForPage(pageIndex)"
                 (click)="setActivePage(pageIndex)"
                 (keydown.enter)="setActivePage(pageIndex)"
                 (keydown.space)="$event.preventDefault(); setActivePage(pageIndex)"
@@ -665,40 +665,46 @@
                 (dragleave)="onSidebarSlideDragLeave(pageIndex, $event)"
                 (drop)="onSidebarSlideDrop(pageIndex, $event)"
               >
-                <button
-                  type="button"
-                  class="pageDragHandle"
-                  draggable="true"
-                  title="Drag to reorder slides"
-                  [disabled]="pageCount() <= 1 || isLoading() || isSaving() || isKeySlotPageIndex(pageIndex)"
-                  [attr.aria-label]="'Drag to reorder slide ' + (pageIndex + 1)"
-                  (dragstart)="onSlideReorderDragStart(pageIndex, $event)"
-                  (dragend)="onSlideReorderDragEnd()"
-                  (click)="$event.stopPropagation()"
-                  (pointerdown)="$event.stopPropagation()"
-                >
-                  <svg class="pageDragHandle__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="10" cy="8" r="1.65" fill="currentColor" />
-                    <circle cx="14" cy="8" r="1.65" fill="currentColor" />
-                    <circle cx="10" cy="12" r="1.65" fill="currentColor" />
-                    <circle cx="14" cy="12" r="1.65" fill="currentColor" />
-                    <circle cx="10" cy="16" r="1.65" fill="currentColor" />
-                    <circle cx="14" cy="16" r="1.65" fill="currentColor" />
-                  </svg>
-                </button>
                 <div class="pageItem__thumbWrap">
                   <div
                     class="pageItem__thumb"
                     aria-hidden="true"
+                    [class.isPlaceholder]="!pageThumbUrlByPage()[pageIndex]"
                     [ngStyle]="
                       pageThumbUrlByPage()[pageIndex]
                         ? { 'background-image': 'url(' + pageThumbUrlByPage()[pageIndex] + ')' }
                         : null
                     "
                   >
+                    <button
+                      type="button"
+                      class="pageDragHandle"
+                      draggable="true"
+                      title="Drag to reorder slides"
+                      [disabled]="pageCount() <= 1 || isLoading() || isSaving() || isKeySlotPageIndex(pageIndex)"
+                      [attr.aria-label]="'Drag to reorder slide ' + (pageIndex + 1)"
+                      (dragstart)="onSlideReorderDragStart(pageIndex, $event)"
+                      (dragend)="onSlideReorderDragEnd()"
+                      (click)="$event.stopPropagation()"
+                      (pointerdown)="$event.stopPropagation()"
+                    >
+                      <svg class="pageDragHandle__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="10" cy="8" r="1.65" fill="currentColor" />
+                        <circle cx="14" cy="8" r="1.65" fill="currentColor" />
+                        <circle cx="10" cy="12" r="1.65" fill="currentColor" />
+                        <circle cx="14" cy="12" r="1.65" fill="currentColor" />
+                        <circle cx="10" cy="16" r="1.65" fill="currentColor" />
+                        <circle cx="14" cy="16" r="1.65" fill="currentColor" />
+                      </svg>
+                    </button>
                     <div class="pageItem__badge">{{ pageIndex + 1 }}</div>
+                    @if (!pageThumbUrlByPage()[pageIndex]) {
+                      <div class="pageItem__thumbHint">No preview</div>
+                    }
+                    <div class="pageItem__nameOverlay">
+                      <span class="pageItem__nameText">{{ sidebarSectionLabelForPage(pageIndex) }}</span>
+                    </div>
                   </div>
-                  <div class="pageItem__sectionName">{{ sidebarSectionLabelForPage(pageIndex) }}</div>
                 </div>
               </div>
             }
@@ -1237,41 +1243,57 @@
               }
 
               <div class="rightbarMediaActions" role="group" aria-label="Slide actions">
-                <div class="rightbarMediaActions__title">Slide {{ activePageIndex() + 1 }} Actions</div>
+                <div class="rightbarMediaActions__title">Slide Actions</div>
                 <div class="rightbarMediaActions__row">
                   <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlide(activePageIndex(), $event)">
-                    Add slide
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
                   </button>
                   <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
-                    Duplicate slide
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="9" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                      <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                    </svg>
                   </button>
-                </div>
-                <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
-                    Add page in section
-                  </button>
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
-                    Add from template
-                  </button>
-                </div>
-                <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="updateSidebarSection(activePageIndex(), $event)">
-                    Update section
-                  </button>
-                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving()" (click)="removeSidebarSection(activePageIndex(), $event)">
-                    Remove section
-                  </button>
-                </div>
-                <div class="rightbarMediaActions__row">
                   <button
                     type="button"
                     class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
                     [disabled]="isLoading() || isSaving() || pageCount() <= 1"
                     (click)="onSidebarMenuRemoveSlide(activePageIndex(), $event)"
                   >
-                    Remove slide
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 7h16M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      <path d="M9 7V5h6v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                    </svg>
                   </button>
                 </div>
+                <div class="rightbarMediaActions__title" style="margin-top: 10px;">Sections Actions</div>
+
+                <div class="rightbarMediaActions__row">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 4h9l3 3v13H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                      <path d="M15 4v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                      <path d="M12 10v6M9 13h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="updateSidebarSection(activePageIndex(), $event)">
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 12a8 8 0 0 1 14-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      <path d="M18 3v4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                      <path d="M20 12a8 8 0 0 1-14 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      <path d="M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving()" (click)="removeSidebarSection(activePageIndex(), $event)">
+                    <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 7h16M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      <path d="M9 7V5h6v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+
               </div>
 
             </div>
