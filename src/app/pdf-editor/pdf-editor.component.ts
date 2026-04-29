@@ -438,6 +438,15 @@ export class PdfEditorComponent implements AfterViewInit {
   /** Short-lived UX messages (toast) for slide management */
   protected readonly slideToast = signal<string | null>(null);
   private slideToastClearTimer: ReturnType<typeof setTimeout> | null = null;
+  /** HTML5 sidebar slide reorder: drag source index (mirror of dataTransfer) */
+  protected readonly slideDragFromIndex = signal<number | null>(null);
+  /** Drop-zone highlight during slide drag */
+  protected readonly slideDropHoverIndex = signal<number | null>(null);
+  /** Which sidebar slide row has the actions menu open (remove / duplicate / add). */
+  protected readonly sidebarSlideMenuOpenIndex = signal<number | null>(null);
+
+  /** MIME type for native slide reorder (sidebar). */
+  private static readonly slideDragMime = 'application/x-avyro-slide-from';
   protected readonly pageThumbUrlByPage = signal<Record<number, string>>({});
   private thumbsEpoch = 0;
 
@@ -1449,6 +1458,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(doc.numPages);
       this.activePageIndex.set(0);
       this.openPageMenuIndex.set(null);
+      this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
       this.resetHistory();
@@ -1488,6 +1498,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(doc.numPages);
       this.activePageIndex.set(0);
       this.openPageMenuIndex.set(null);
+      this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
       this.resetHistory();
@@ -1588,6 +1599,10 @@ export class PdfEditorComponent implements AfterViewInit {
         this.closeDeleteSlideModal();
         return;
       }
+      if (this.sidebarSlideMenuOpenIndex() !== null) {
+        this.sidebarSlideMenuOpenIndex.set(null);
+        return;
+      }
       this.cancelInsertWidgetMode();
       return;
     }
@@ -1617,6 +1632,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const next = clamp(pageIndex, 0, Math.max(0, this.pageCount() - 1));
     this.activePageIndex.set(next);
     this.openPageMenuIndex.set(null);
+    this.sidebarSlideMenuOpenIndex.set(null);
   }
 
   protected togglePageMenu(pageIndex: number, ev?: Event) {
@@ -1627,6 +1643,40 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected closePageMenu() {
     this.openPageMenuIndex.set(null);
+  }
+
+  protected toggleSidebarSlideMenu(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (this.isLoading() || this.isSaving()) return;
+    const cur = this.sidebarSlideMenuOpenIndex();
+    this.sidebarSlideMenuOpenIndex.set(cur === pageIndex ? null : pageIndex);
+  }
+
+  /** Remove slide via the same confirmation flow as before (was ✕ button). */
+  protected onSidebarMenuRemoveSlide(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    this.sidebarSlideMenuOpenIndex.set(null);
+    this.requestDeleteSlide(pageIndex, ev);
+  }
+
+  protected async onSidebarDuplicateSlide(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (!this.pdfBytes || this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    await this.copyPageAfter(pageIndex);
+    if (!this.errorText()) {
+      this.showSlideToast('Slide duplicated');
+    }
+  }
+
+  protected async onSidebarAddSlide(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (!this.pdfBytes || this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    await this.addBlankPageAfter(pageIndex);
+    if (!this.errorText()) {
+      this.showSlideToast('Slide added');
+    }
   }
 
   protected scrollToPage(_pageIndex: number) {
@@ -2418,6 +2468,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected onDocPointerDown(ev: PointerEvent) {
     const target = ev.target as HTMLElement | null;
     if (!target) return;
+    if (target.closest('.sidebarSlideMenu')) return;
     if (target.closest('.pageMenu')) return;
     if (target.closest('.pageMenuBtn')) return;
     if (target.closest('.widget')) return;
@@ -2425,6 +2476,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (target.closest('.textDraft')) return;
     if (this.selectedWidgetId() !== null) this.selectedWidgetId.set(null);
     if (this.openPageMenuIndex() !== null) this.openPageMenuIndex.set(null);
+    if (this.sidebarSlideMenuOpenIndex() !== null) this.sidebarSlideMenuOpenIndex.set(null);
     if (this.selectedPlacedImageId() !== null) this.selectedPlacedImageId.set(null);
     if (this.imageCropSession() !== null) this.imageCropSession.set(null);
   }
@@ -2740,6 +2792,215 @@ export class PdfEditorComponent implements AfterViewInit {
     return next;
   }
 
+  /**
+   * reorder[newIndex] === old page index placed at UI index newIndex.
+   */
+  private remapKeyedBySlideReorder<T>(prev: Record<number, T>, reorder: number[]): Record<number, T> {
+    const next: Record<number, T> = {};
+    for (let newIdx = 0; newIdx < reorder.length; newIdx++) {
+      const oldIdx = reorder[newIdx]!;
+      const v = prev[oldIdx];
+      if (v !== undefined) (next as Record<number, unknown>)[newIdx] = v as unknown;
+    }
+    return next;
+  }
+
+  private slideReorderIndices(from: number, to: number, count: number): number[] | null {
+    if (count <= 0) return null;
+    const fi = clamp(from, 0, count - 1);
+    const ti = clamp(to, 0, count - 1);
+    if (fi === ti) return null;
+    const order = Array.from({ length: count }, (_, i) => i);
+    const [moved] = order.splice(fi, 1);
+    order.splice(ti, 0, moved);
+    return order;
+  }
+
+  private activePageIndexAfterSlideReorder(active: number, reorder: number[]): number {
+    for (let ni = 0; ni < reorder.length; ni++) {
+      if (reorder[ni] === active) return ni;
+    }
+    return clamp(active, 0, Math.max(0, reorder.length - 1));
+  }
+
+  protected onSlideReorderDragStart(pageIndex: number, ev: DragEvent) {
+    if (this.isLoading() || this.isSaving() || this.pageCount() <= 1) {
+      ev.preventDefault();
+      return;
+    }
+    try {
+      const dt = ev.dataTransfer;
+      if (!dt) return;
+      dt.setData(PdfEditorComponent.slideDragMime, String(pageIndex));
+      dt.setData('text/plain', `slide:${pageIndex}`);
+      dt.effectAllowed = 'move';
+      this.slideDragFromIndex.set(pageIndex);
+      this.slideDropHoverIndex.set(null);
+    } catch {
+      // ignore
+    }
+  }
+
+  protected onSlideReorderDragEnd() {
+    this.slideDragFromIndex.set(null);
+    this.slideDropHoverIndex.set(null);
+  }
+
+  protected onSidebarSlideDragOver(ev: DragEvent) {
+    try {
+      const types = [...(ev.dataTransfer?.types ?? [])];
+      const slideDrag =
+        this.slideDragFromIndex() !== null || types.includes(PdfEditorComponent.slideDragMime);
+      if (!slideDrag) return;
+      ev.preventDefault();
+      ev.dataTransfer!.dropEffect = 'move';
+    } catch {
+      // ignore
+    }
+  }
+
+  protected onSidebarSlideDragEnter(pageIndex: number, ev: DragEvent) {
+    try {
+      const types = [...(ev.dataTransfer?.types ?? [])];
+      const slideDrag =
+        this.slideDragFromIndex() !== null || types.includes(PdfEditorComponent.slideDragMime);
+      if (!slideDrag) return;
+      ev.preventDefault();
+      ev.dataTransfer!.dropEffect = 'move';
+    } catch {
+      return;
+    }
+    this.slideDropHoverIndex.set(pageIndex);
+  }
+
+  protected onSidebarSlideDragLeave(pageIndex: number, ev: DragEvent) {
+    const cur = ev.currentTarget as HTMLElement | null;
+    const rel = ev.relatedTarget as Node | null;
+    if (cur && rel && cur.contains(rel)) return;
+    if (this.slideDropHoverIndex() === pageIndex) {
+      this.slideDropHoverIndex.set(null);
+    }
+  }
+
+  protected async onSidebarSlideDrop(targetIndex: number, ev: DragEvent) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const mimeRaw = (ev.dataTransfer?.getData(PdfEditorComponent.slideDragMime) ?? '').trim();
+    let fromIx: number | null = null;
+    if (mimeRaw !== '') {
+      const n = Number(mimeRaw);
+      if (Number.isFinite(n)) fromIx = n;
+    }
+    if (fromIx === null) {
+      const t = (ev.dataTransfer?.getData('text/plain') ?? '').trim();
+      const m = /^slide:(\d+)$/.exec(t);
+      if (m) {
+        const n = Number(m[1]);
+        if (Number.isFinite(n)) fromIx = n;
+      }
+    }
+    if (fromIx === null) {
+      const s = this.slideDragFromIndex();
+      if (s !== null && Number.isFinite(s)) fromIx = s;
+    }
+    this.slideDropHoverIndex.set(null);
+    this.slideDragFromIndex.set(null);
+    if (fromIx === null) return;
+    await this.reorderSlidesInDocument(fromIx, targetIndex);
+  }
+
+  /**
+   * Reorder PDF pages and remap per-page edits/widgets/rotation maps.
+   */
+  private async reorderSlidesInDocument(fromIndex: number, toIndex: number) {
+    if (!this.pdfBytes) return;
+    if (this.isLoading() || this.isSaving()) return;
+    const count = this.pageCount();
+    const reorder = this.slideReorderIndices(fromIndex, toIndex, count);
+    if (!reorder) return;
+
+    const prevActive = this.activePageIndex();
+    this.errorText.set(null);
+    this.openPageMenuIndex.set(null);
+    this.sidebarSlideMenuOpenIndex.set(null);
+    this.isLoading.set(true);
+
+    try {
+      this.assertReadablePdfHeader(this.pdfBytes);
+      const srcPdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
+      const outPdf = await PDFDocument.create();
+      const copied = await outPdf.copyPages(srcPdf, reorder);
+      for (const p of copied) {
+        outPdf.addPage(p);
+      }
+      const out = await outPdf.save();
+      const nextBytes =
+        out instanceof Uint8Array ? new Uint8Array(out) : new Uint8Array(out as any);
+      const header =
+        nextBytes.byteLength >= 5
+          ? String.fromCharCode(
+              nextBytes[0]!,
+              nextBytes[1]!,
+              nextBytes[2]!,
+              nextBytes[3]!,
+              nextBytes[4]!
+            )
+          : '';
+      if (!header.startsWith('%PDF-')) {
+        throw new Error('Failed to reorder PDF (invalid PDF output).');
+      }
+      this.pdfBytes = nextBytes;
+      await this.persistPdfBytesToBackend();
+
+      this.editsByPage.set(this.remapKeyedBySlideReorder(this.editsByPage(), reorder));
+      this.widgetsByPage.set(this.remapKeyedBySlideReorder(this.widgetsByPage(), reorder));
+
+      const nextRot = new Map<number, number>();
+      for (let newIdx = 0; newIdx < reorder.length; newIdx++) {
+        const oldIdx = reorder[newIdx]!;
+        const rot = this.pageRotateByPage.get(oldIdx);
+        if (rot !== undefined) nextRot.set(newIdx, rot);
+      }
+      this.pageRotateByPage.clear();
+      for (const [k, v] of nextRot) {
+        this.pageRotateByPage.set(k, v);
+      }
+
+      this.pageThumbUrlByPage.set({});
+      this.detectedTextByPage.set({});
+      this.detectedBlocksByPage.set({});
+      this.baseSnapshotByPage.clear();
+      this.renderTaskByPage.clear();
+      this.resetHistory();
+
+      this.activePageIndex.set(this.activePageIndexAfterSlideReorder(prevActive, reorder));
+
+      try {
+        await this.pdfDoc?.destroy();
+      } catch {
+        // ignore
+      }
+
+      const buf = nextBytes.buffer.slice(nextBytes.byteOffset, nextBytes.byteOffset + nextBytes.byteLength);
+      const loadingTask = getDocument({
+        data: buf,
+        disableRange: true,
+        disableStream: true,
+        disableAutoFetch: true
+      });
+      const doc = await loadingTask.promise;
+      this.pdfDoc = doc;
+      this.pageCount.set(doc.numPages);
+      await this.renderActivePage();
+      void this.generateAllPageThumbnails();
+      this.showSlideToast('Slides reordered');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder slides.');
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
   private showSlideToast(message: string) {
     if (this.slideToastClearTimer !== null) {
       clearTimeout(this.slideToastClearTimer);
@@ -2791,6 +3052,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isLoading.set(true);
     this.openPageMenuIndex.set(null);
+    this.sidebarSlideMenuOpenIndex.set(null);
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);

@@ -323,10 +323,37 @@
                 role="button"
                 tabindex="0"
                 [class.isActive]="activePageIndex() === pageIndex"
+                [class.isSlideDropHover]="slideDropHoverIndex() === pageIndex"
+                [class.isSlideDragging]="slideDragFromIndex() === pageIndex"
                 (click)="setActivePage(pageIndex)"
                 (keydown.enter)="setActivePage(pageIndex)"
                 (keydown.space)="$event.preventDefault(); setActivePage(pageIndex)"
+                (dragover)="onSidebarSlideDragOver($event)"
+                (dragenter)="onSidebarSlideDragEnter(pageIndex, $event)"
+                (dragleave)="onSidebarSlideDragLeave(pageIndex, $event)"
+                (drop)="onSidebarSlideDrop(pageIndex, $event)"
               >
+                <button
+                  type="button"
+                  class="pageDragHandle"
+                  draggable="true"
+                  title="Drag to reorder slides"
+                  [disabled]="pageCount() <= 1 || isLoading() || isSaving()"
+                  [attr.aria-label]="'Drag to reorder slide ' + (pageIndex + 1)"
+                  (dragstart)="onSlideReorderDragStart(pageIndex, $event)"
+                  (dragend)="onSlideReorderDragEnd()"
+                  (click)="$event.stopPropagation()"
+                  (pointerdown)="$event.stopPropagation()"
+                >
+                  <svg class="pageDragHandle__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10" cy="8" r="1.65" fill="currentColor" />
+                    <circle cx="14" cy="8" r="1.65" fill="currentColor" />
+                    <circle cx="10" cy="12" r="1.65" fill="currentColor" />
+                    <circle cx="14" cy="12" r="1.65" fill="currentColor" />
+                    <circle cx="10" cy="16" r="1.65" fill="currentColor" />
+                    <circle cx="14" cy="16" r="1.65" fill="currentColor" />
+                  </svg>
+                </button>
                 <div class="pageItem__thumbWrap">
                   <div
                     class="pageItem__thumb"
@@ -340,28 +367,69 @@
                     <div class="pageItem__badge">{{ pageIndex + 1 }}</div>
                   </div>
 
-                  <button
-                    type="button"
-                    class="pageDeleteBtn"
-                    title="Delete slide"
-                    [disabled]="isLoading() || isSaving()"
-                    [attr.aria-label]="'Delete slide ' + (pageIndex + 1)"
-                    (click)="requestDeleteSlide(pageIndex, $event)"
+                  <div
+                    class="sidebarSlideMenu"
+                    (click)="$event.stopPropagation()"
+                    (pointerdown)="$event.stopPropagation()"
                   >
-                    ✕
-                  </button>
+                    <button
+                      type="button"
+                      class="sidebarSlideMenu__trigger"
+                      title="Slide options"
+                      [attr.aria-expanded]="sidebarSlideMenuOpenIndex() === pageIndex"
+                      [disabled]="isLoading() || isSaving()"
+                      [attr.aria-label]="'Slide options for slide ' + (pageIndex + 1)"
+                      (click)="toggleSidebarSlideMenu(pageIndex, $event)"
+                    >
+                      <svg class="sidebarSlideMenu__triggerIcon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="6.5" r="1.6" fill="currentColor" />
+                        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+                        <circle cx="12" cy="17.5" r="1.6" fill="currentColor" />
+                      </svg>
+                    </button>
+                    @if (sidebarSlideMenuOpenIndex() === pageIndex) {
+                      <div class="sidebarSlideMenu__panel" role="menu" (click)="$event.stopPropagation()">
+                        <button
+                          type="button"
+                          class="sidebarSlideMenu__item sidebarSlideMenu__item--danger"
+                          role="menuitem"
+                          [disabled]="isLoading() || isSaving()"
+                          (click)="onSidebarMenuRemoveSlide(pageIndex, $event)"
+                        >
+                          Remove slide
+                        </button>
+                        <button
+                          type="button"
+                          class="sidebarSlideMenu__item"
+                          role="menuitem"
+                          [disabled]="isLoading() || isSaving()"
+                          (click)="onSidebarDuplicateSlide(pageIndex, $event)"
+                        >
+                          Duplicate slide
+                        </button>
+                        <button
+                          type="button"
+                          class="sidebarSlideMenu__item"
+                          role="menuitem"
+                          [disabled]="isLoading() || isSaving()"
+                          (click)="onSidebarAddSlide(pageIndex, $event)"
+                        >
+                          <svg class="sidebarSlideMenu__itemIconAdd" viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M12 6v12M6 12h12"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                            />
+                          </svg>
+                          Add slide
+                        </button>
+                      </div>
+                    }
+                  </div>
                 </div>
               </div>
-
-              <!-- Insert new page after this page (no "before first" button). -->
-              <button
-                type="button"
-                class="pageInsertBtn"
-                title="Add new page here"
-                (click)="$event.stopPropagation(); addBlankPageAfter(pageIndex)"
-              >
-                +
-              </button>
             }
           </div>
         </div>
@@ -570,7 +638,9 @@
           <button
             type="button"
             class="rightbar__icon"
+            draggable="true"
             title="Insert image"
+            (dragstart)="onPdfImageDragStart($event)"
             (click)="onInsertWidgetClick('image', $event)"
             [disabled]="pageCount() === 0 || isLoading()"
           >
@@ -596,7 +666,9 @@
           <button
             type="button"
             class="rightbar__icon"
+            draggable="true"
             title="Insert table"
+            (dragstart)="onWidgetDragStart('table', $event)"
             (click)="onInsertWidgetClick('table', $event)"
             [disabled]="pageCount() === 0 || isLoading()"
           >
@@ -612,7 +684,9 @@
           <button
             type="button"
             class="rightbar__icon"
+            draggable="true"
             title="Insert video"
+            (dragstart)="onPdfVideoDragStart($event)"
             (click)="onInsertWidgetClick('video', $event)"
             [disabled]="pageCount() === 0 || isLoading()"
           >
