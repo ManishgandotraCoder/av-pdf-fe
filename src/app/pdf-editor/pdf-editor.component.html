@@ -518,6 +518,7 @@
                 role="button"
                 tabindex="0"
                 [class.isActive]="activePageIndex() === pageIndex"
+                [class.isSectionStart]="isSidebarSectionStart(pageIndex)"
                 [class.isSlideDropHover]="slideDropHoverIndex() === pageIndex"
                 [class.isSlideDragging]="slideDragFromIndex() === pageIndex"
                 (click)="setActivePage(pageIndex)"
@@ -561,77 +562,7 @@
                   >
                     <div class="pageItem__badge">{{ pageIndex + 1 }}</div>
                   </div>
-
-                  <div
-                    class="sidebarSlideMenu"
-                    (click)="$event.stopPropagation()"
-                    (pointerdown)="$event.stopPropagation()"
-                  >
-                    <button
-                      type="button"
-                      class="sidebarSlideMenu__trigger"
-                      title="Slide options"
-                      [attr.aria-expanded]="sidebarSlideMenuOpenIndex() === pageIndex"
-                      [disabled]="isLoading() || isSaving()"
-                      [attr.aria-label]="'Slide options for slide ' + (pageIndex + 1)"
-                      (click)="toggleSidebarSlideMenu(pageIndex, $event)"
-                    >
-                      <svg class="sidebarSlideMenu__triggerIcon" viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="12" cy="6.5" r="1.6" fill="currentColor" />
-                        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-                        <circle cx="12" cy="17.5" r="1.6" fill="currentColor" />
-                      </svg>
-                    </button>
-                    @if (sidebarSlideMenuOpenIndex() === pageIndex) {
-                      <div class="sidebarSlideMenu__panel" role="menu" (click)="$event.stopPropagation()">
-                        <button
-                          type="button"
-                          class="sidebarSlideMenu__item sidebarSlideMenu__item--danger"
-                          role="menuitem"
-                          [disabled]="isLoading() || isSaving()"
-                          (click)="onSidebarMenuRemoveSlide(pageIndex, $event)"
-                        >
-                          Remove slide
-                        </button>
-                        <button
-                          type="button"
-                          class="sidebarSlideMenu__item"
-                          role="menuitem"
-                          [disabled]="isLoading() || isSaving()"
-                          (click)="onSidebarDuplicateSlide(pageIndex, $event)"
-                        >
-                          Duplicate slide
-                        </button>
-                        <button
-                          type="button"
-                          class="sidebarSlideMenu__item"
-                          role="menuitem"
-                          [disabled]="isLoading() || isSaving()"
-                          (click)="onSidebarAddSlide(pageIndex, $event)"
-                        >
-                          <svg class="sidebarSlideMenu__itemIconAdd" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M12 6v12M6 12h12"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                            />
-                          </svg>
-                          Add slide
-                        </button>
-                        <button
-                          type="button"
-                          class="sidebarSlideMenu__item"
-                          role="menuitem"
-                          [disabled]="isLoading() || isSaving()"
-                          (click)="onSidebarAddSlideFromTemplate(pageIndex, $event)"
-                        >
-                          Add slide from template
-                        </button>
-                      </div>
-                    }
-                  </div>
+                  <div class="pageItem__sectionName">{{ sidebarSectionLabelForPage(pageIndex) }}</div>
                 </div>
               </div>
             }
@@ -951,6 +882,27 @@
             type="button"
             role="tab"
             class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
+            [attr.aria-selected]="rightbarTab() === 'settings'"
+            aria-label="Settings"
+            title="Settings"
+            (click)="setRightbarTab('settings')"
+          >
+            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
             [class.rightbarTabs__btnActive]="rightbarTab() === 'assets'"
             [attr.aria-selected]="rightbarTab() === 'assets'"
             aria-label="Assets"
@@ -1144,34 +1096,77 @@
                 </div>
               }
 
-              <div class="pageSettings">
-                <div class="pageSettings__title">Page Settings</div>
-                <p
-                  class="pageSettings__hint"
-                  [textContent]="'Dynamic fields: {{proposalTitle}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
-                ></p>
-
-                <div class="pageSettings__section">
-                  <div class="pageSettings__sectionTitle">Page Number Settings</div>
-                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().pageNumber.visible" (change)="updatePageNumberFurniture({ visible: $any($event.target).checked })" /> Show page number</label>
-                  <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.format" (ngModelChange)="updatePageNumberFurniture({ format: $event })">
-                    @for (fmt of pageNumberFormatOptions; track fmt) {
-                      <option [value]="fmt">{{ fmt }}</option>
-                    }
-                  </select>
-                  <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.position" (ngModelChange)="updatePageNumberFurniture({ position: $event })">
-                    @for (pos of pageNumberPositionOptions; track pos) {
-                      <option [value]="pos">{{ pos }}</option>
-                    }
-                  </select>
-                  <input class="pageSettings__input" type="number" min="1" [ngModel]="pageFurniture().pageNumber.startFrom" (ngModelChange)="updatePageNumberFurniture({ startFrom: +$event || 1 })" placeholder="Start from" />
+              <div class="rightbarMediaActions" role="group" aria-label="Slide actions">
+                <div class="rightbarMediaActions__title">Slide {{ activePageIndex() + 1 }} Actions</div>
+                <div class="rightbarMediaActions__row">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlide(activePageIndex(), $event)">
+                    Add slide
+                  </button>
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
+                    Duplicate slide
+                  </button>
                 </div>
-
-                <div class="pageSettings__section">
-                  <div class="pageSettings__sectionTitle">Dynamic Fields</div>
-                  <input class="pageSettings__input" [ngModel]="pageFurniture().proposalTitle" (ngModelChange)="updateFurniture('proposalTitle', $event)" placeholder="Proposal title" />
-                  <input class="pageSettings__input" [ngModel]="pageFurniture().clientName" (ngModelChange)="updateFurniture('clientName', $event)" placeholder="Client name" />
+                <div class="rightbarMediaActions__row">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
+                    Add page in section
+                  </button>
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
+                    Add from template
+                  </button>
                 </div>
+                <div class="rightbarMediaActions__row">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="updateSidebarSection(activePageIndex(), $event)">
+                    Update section
+                  </button>
+                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving()" (click)="removeSidebarSection(activePageIndex(), $event)">
+                    Remove section
+                  </button>
+                </div>
+                <div class="rightbarMediaActions__row">
+                  <button
+                    type="button"
+                    class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                    [disabled]="isLoading() || isSaving() || pageCount() <= 1"
+                    (click)="onSidebarMenuRemoveSlide(activePageIndex(), $event)"
+                  >
+                    Remove slide
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        }
+
+        @if (rightbarTab() === 'settings') {
+          <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Page settings">
+            <div class="pageSettings">
+              <div class="pageSettings__title">Page Settings</div>
+              <p
+                class="pageSettings__hint"
+                [textContent]="'Dynamic fields: {{proposalTitle}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
+              ></p>
+
+              <div class="pageSettings__section">
+                <div class="pageSettings__sectionTitle">Page Number Settings</div>
+                <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().pageNumber.visible" (change)="updatePageNumberFurniture({ visible: $any($event.target).checked })" /> Show page number</label>
+                <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.format" (ngModelChange)="updatePageNumberFurniture({ format: $event })">
+                  @for (fmt of pageNumberFormatOptions; track fmt) {
+                    <option [value]="fmt">{{ fmt }}</option>
+                  }
+                </select>
+                <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.position" (ngModelChange)="updatePageNumberFurniture({ position: $event })">
+                  @for (pos of pageNumberPositionOptions; track pos) {
+                    <option [value]="pos">{{ pos }}</option>
+                  }
+                </select>
+                <input class="pageSettings__input" type="number" min="1" [ngModel]="pageFurniture().pageNumber.startFrom" (ngModelChange)="updatePageNumberFurniture({ startFrom: +$event || 1 })" placeholder="Start from" />
+              </div>
+
+              <div class="pageSettings__section">
+                <div class="pageSettings__sectionTitle">Dynamic Fields</div>
+                <input class="pageSettings__input" [ngModel]="pageFurniture().proposalTitle" (ngModelChange)="updateFurniture('proposalTitle', $event)" placeholder="Proposal title" />
+                <input class="pageSettings__input" [ngModel]="pageFurniture().clientName" (ngModelChange)="updateFurniture('clientName', $event)" placeholder="Client name" />
               </div>
             </div>
           </div>

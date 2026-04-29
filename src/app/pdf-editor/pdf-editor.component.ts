@@ -319,6 +319,8 @@ type DetectedBlock = {
   kind: DetectedBlockKind;
 };
 
+type SidebarSectionType = 'section' | 'imageHeader';
+
 type GlobalTypographySection = {
   fontFamily: FontFamily;
   size: number;
@@ -506,7 +508,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   /** Right inspector: tooling vs library (250px rail). */
 
-  protected readonly rightbarTab = signal<'options' | 'typography' | 'assets' | 'versions'>('options');
+  protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions'>('options');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
   protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
@@ -622,6 +624,30 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly pageCount = signal(0);
   protected readonly pages = computed(() => Array.from({ length: this.pageCount() }, (_, i) => i));
+  protected readonly sectionOverridesByPage = signal<Record<number, { title: string; type: SidebarSectionType }>>({});
+  protected readonly removedSectionsByPage = signal<Record<number, true>>({});
+  protected readonly sidebarSectionByPage = computed<Record<number, { title: string; type: SidebarSectionType } | null>>(
+    () => {
+      const count = this.pageCount();
+      const byPage = this.detectedBlocksByPage();
+      const overrides = this.sectionOverridesByPage();
+      const removed = this.removedSectionsByPage();
+      const out: Record<number, { title: string; type: SidebarSectionType } | null> = {};
+      for (let pageIndex = 0; pageIndex < count; pageIndex++) {
+        if (removed[pageIndex]) {
+          out[pageIndex] = null;
+          continue;
+        }
+        const override = overrides[pageIndex];
+        if (override) {
+          out[pageIndex] = override;
+          continue;
+        }
+        out[pageIndex] = this.resolveSidebarSectionMeta(byPage[pageIndex] ?? []);
+      }
+      return out;
+    }
+  );
   protected readonly activePageIndex = signal(0);
   protected readonly openPageMenuIndex = signal<number | null>(null);
   protected readonly deleteSlideModalOpen = signal(false);
@@ -675,6 +701,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly isImagePlacing = signal(false);
   private pendingImageDataUrl: string | null = null;
+  private sidebarSectionDetectEpoch = 0;
 
   constructor() {
     // Emit via angular.json assets (see pdfjs-dist/build) so prod deploy serves a real file;
@@ -796,7 +823,26 @@ export class PdfEditorComponent implements AfterViewInit {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
   }
 
-  protected setRightbarTab(tab: 'options' | 'typography' | 'assets' | 'versions') {
+  protected sidebarSectionLabelForPage(pageIndex: number): string {
+    const meta = this.sidebarSectionByPage()[pageIndex];
+    return meta ? meta.title : `Page ${pageIndex + 1}`;
+  }
+
+  protected sidebarSectionTypeForPage(pageIndex: number): SidebarSectionType | null {
+    return this.sidebarSectionByPage()[pageIndex]?.type ?? null;
+  }
+
+  protected isSidebarSectionStart(pageIndex: number): boolean {
+    const byPage = this.sidebarSectionByPage();
+    const current = byPage[pageIndex];
+    if (!current) return false;
+    if (pageIndex <= 0) return true;
+    const previous = byPage[pageIndex - 1];
+    if (!previous) return true;
+    return previous.title !== current.title || previous.type !== current.type;
+  }
+
+  protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions') {
     this.rightbarTab.set(tab);
   }
 
@@ -2242,9 +2288,14 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.detectedTextByPage.set({});
+      this.detectedBlocksByPage.set({});
+      this.sectionOverridesByPage.set({});
+      this.removedSectionsByPage.set({});
       this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
       this.resetHistory();
       void this.generateAllPageThumbnails();
+      void this.primeSidebarSectionDetection();
 
       // Rendering will happen via QueryList changes.
     } catch (e) {
@@ -2287,6 +2338,10 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.detectedTextByPage.set({});
+      this.detectedBlocksByPage.set({});
+      this.sectionOverridesByPage.set({});
+      this.removedSectionsByPage.set({});
       this.widgetsByPage.set(this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
       const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
       this.pageFurniture.set(
@@ -2294,6 +2349,7 @@ export class PdfEditorComponent implements AfterViewInit {
       );
       this.resetHistory();
       void this.generateAllPageThumbnails();
+      void this.primeSidebarSectionDetection();
 
       // Ensure the first page is fully rendered before we drop the loading banner.
       await this.waitForActiveCanvasReady(1600);
@@ -2468,6 +2524,62 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!this.errorText()) {
       this.showSlideToast('Slide added');
     }
+  }
+
+  protected async onSidebarAddPageInSection(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (!this.pdfBytes || this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    const source = this.sidebarSectionByPage()[pageIndex];
+    await this.addBlankPageAfter(pageIndex);
+    if (this.errorText()) return;
+    const insertedAt = pageIndex + 1;
+    if (source?.title) {
+      this.sectionOverridesByPage.update((prev) => ({
+        ...prev,
+        [insertedAt]: { title: source.title, type: source.type }
+      }));
+      this.removedSectionsByPage.update((prev) => {
+        const next = { ...prev };
+        delete next[insertedAt];
+        return next;
+      });
+    }
+    this.showSlideToast('Page added in section');
+  }
+
+  protected updateSidebarSection(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    const current = this.sidebarSectionByPage()[pageIndex];
+    const titleInput = (prompt('Section title', current?.title ?? '') ?? '').trim();
+    if (!titleInput) return;
+    const rawType = (prompt('Section type: section or imageHeader', current?.type ?? 'section') ?? '').trim().toLowerCase();
+    const nextType: SidebarSectionType = rawType === 'imageheader' ? 'imageHeader' : 'section';
+    this.sectionOverridesByPage.update((prev) => ({
+      ...prev,
+      [pageIndex]: { title: this.sanitizeSidebarTitle(titleInput), type: nextType }
+    }));
+    this.removedSectionsByPage.update((prev) => {
+      const next = { ...prev };
+      delete next[pageIndex];
+      return next;
+    });
+    this.showSlideToast('Section updated');
+  }
+
+  protected removeSidebarSection(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    this.sectionOverridesByPage.update((prev) => {
+      const next = { ...prev };
+      delete next[pageIndex];
+      return next;
+    });
+    this.removedSectionsByPage.update((prev) => ({ ...prev, [pageIndex]: true }));
+    this.showSlideToast('Section removed');
   }
 
   protected async onSidebarAddSlideFromTemplate(pageIndex: number, ev: Event) {
@@ -4138,6 +4250,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
       this.editsByPage.set(this.remapKeyedBySlideReorder(this.editsByPage(), reorder));
       this.widgetsByPage.set(this.remapKeyedBySlideReorder(this.widgetsByPage(), reorder));
+      this.sectionOverridesByPage.set(this.remapKeyedBySlideReorder(this.sectionOverridesByPage(), reorder));
+      this.removedSectionsByPage.set(this.remapKeyedBySlideReorder(this.removedSectionsByPage(), reorder));
 
       const nextRot = new Map<number, number>();
       for (let newIdx = 0; newIdx < reorder.length; newIdx++) {
@@ -4177,6 +4291,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(doc.numPages);
       await this.renderActivePage();
       void this.generateAllPageThumbnails();
+      void this.primeSidebarSectionDetection();
       this.showSlideToast('Slides reordered');
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder slides.');
@@ -4208,6 +4323,16 @@ export class PdfEditorComponent implements AfterViewInit {
     this.editsByPage.set(next);
   }
 
+  private reindexKeyedByInsertedPage<T>(prev: Record<number, T>, insertedAt: number): Record<number, T> {
+    const next: Record<number, T> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      next[idx >= insertedAt ? idx + 1 : idx] = v as T;
+    }
+    return next;
+  }
+
   private remapEditsAfterDelete(atIndex: number) {
     this.editsByPage.set(this.reindexKeyedByDeletedPage(this.editsByPage(), atIndex));
   }
@@ -4223,6 +4348,29 @@ export class PdfEditorComponent implements AfterViewInit {
     const copied = prev[fromIndex];
     if (copied) next[toIndex] = this.cloneEdits({ 0: copied })[0]!;
     this.editsByPage.set(next);
+  }
+
+  private remapSectionMetaAfterInsert(atIndex: number) {
+    this.sectionOverridesByPage.set(this.reindexKeyedByInsertedPage(this.sectionOverridesByPage(), atIndex));
+    this.removedSectionsByPage.set(this.reindexKeyedByInsertedPage(this.removedSectionsByPage(), atIndex));
+  }
+
+  private remapSectionMetaAfterDelete(atIndex: number) {
+    this.sectionOverridesByPage.set(this.reindexKeyedByDeletedPage(this.sectionOverridesByPage(), atIndex));
+    this.removedSectionsByPage.set(this.reindexKeyedByDeletedPage(this.removedSectionsByPage(), atIndex));
+  }
+
+  private remapSectionMetaAfterCopy(fromIndex: number, toIndex: number) {
+    const prevOverrides = this.sectionOverridesByPage();
+    this.sectionOverridesByPage.set(this.reindexKeyedByInsertedPage(prevOverrides, toIndex));
+    this.removedSectionsByPage.set(this.reindexKeyedByInsertedPage(this.removedSectionsByPage(), toIndex));
+    const copied = prevOverrides[fromIndex];
+    if (copied) {
+      this.sectionOverridesByPage.update((prev) => ({
+        ...prev,
+        [toIndex]: copied
+      }));
+    }
   }
 
   private async mutatePdfPages(
@@ -4255,12 +4403,19 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pdfBytes = nextBytes;
       await this.persistPdfBytesToBackend();
 
-      if (remap.kind === 'insert') this.remapEditsAfterInsert(remap.at);
+      if (remap.kind === 'insert') {
+        this.remapEditsAfterInsert(remap.at);
+        this.remapSectionMetaAfterInsert(remap.at);
+      }
       if (remap.kind === 'delete') {
         this.remapEditsAfterDelete(remap.at);
         this.widgetsByPage.set(this.reindexKeyedByDeletedPage(this.widgetsByPage(), remap.at));
+        this.remapSectionMetaAfterDelete(remap.at);
       }
-      if (remap.kind === 'copy') this.remapEditsAfterCopy(remap.from, remap.to);
+      if (remap.kind === 'copy') {
+        this.remapEditsAfterCopy(remap.from, remap.to);
+        this.remapSectionMetaAfterCopy(remap.from, remap.to);
+      }
 
       this.pageThumbUrlByPage.set({});
       this.detectedTextByPage.set({});
@@ -4290,6 +4445,7 @@ export class PdfEditorComponent implements AfterViewInit {
       // Re-render immediately so editing continues to work without needing a full refresh.
       await this.renderActivePage();
       void this.generateAllPageThumbnails();
+      void this.primeSidebarSectionDetection();
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to update PDF pages.');
     } finally {
@@ -4325,6 +4481,49 @@ export class PdfEditorComponent implements AfterViewInit {
         this.pageThumbUrlByPage.update((prev) => ({ ...prev, [pageIndex]: url }));
       } catch {
         // ignore thumbnail failures (page still usable)
+      }
+    }
+  }
+
+  private sanitizeSidebarTitle(text: string): string {
+    const compact = text.replace(/\s+/g, ' ').trim();
+    if (!compact) return '';
+    return compact.length <= 72 ? compact : `${compact.slice(0, 69).trimEnd()}...`;
+  }
+
+  private resolveSidebarSectionMeta(blocks: DetectedBlock[]): { title: string; type: SidebarSectionType } | null {
+    if (blocks.length === 0) return null;
+
+    const headingLike = blocks
+      .filter((b) => !!this.sanitizeSidebarTitle(b.text))
+      .sort((a, b) => (a.y - b.y) || (b.fontSize - a.fontSize));
+
+    const heading = headingLike.find((b) => b.kind === 'heading') ?? headingLike[0] ?? null;
+    if (!heading) return null;
+
+    const title = this.sanitizeSidebarTitle(heading.text);
+    if (!title) return null;
+
+    const nearTop = heading.y < 180;
+    const hasOnlyFewTextBlocks = headingLike.length <= 2;
+    const shortHeadline = title.length <= 60;
+    const type: SidebarSectionType =
+      nearTop && hasOnlyFewTextBlocks && shortHeadline ? 'imageHeader' : 'section';
+
+    return { title, type };
+  }
+
+  private async primeSidebarSectionDetection() {
+    if (!this.pdfDoc) return;
+    const epoch = ++this.sidebarSectionDetectEpoch;
+    const count = this.pageCount();
+    for (let pageIndex = 0; pageIndex < count; pageIndex++) {
+      if (epoch !== this.sidebarSectionDetectEpoch) return;
+      if ((this.detectedBlocksByPage()[pageIndex] ?? []).length > 0) continue;
+      try {
+        await this.detectBlocksForPage(pageIndex);
+      } catch {
+        // keep sidebar usable even if detection fails for some pages
       }
     }
   }

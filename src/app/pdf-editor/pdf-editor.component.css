@@ -1452,8 +1452,8 @@
   border-radius: 14px;
   padding: 10px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: auto 78px;
+  gap: 8px;
   align-items: start;
   cursor: pointer;
   text-align: left;
@@ -1467,10 +1467,10 @@
 
 .pageDragHandle {
   width: 22px;
-  min-height: 44px;
+  min-height: 74px;
   padding: 0;
   margin: 0;
-  margin-top: 2px;
+  margin-top: 0;
   border: none;
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.04);
@@ -1530,9 +1530,23 @@
     0 0 0 3px rgba(139, 92, 246, 0.18);
 }
 
+.pageItem.isSectionStart {
+  border-color: rgba(0, 0, 0, 0.75);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+.pageItem.isSectionStart:hover {
+  border-color: rgba(0, 0, 0, 0.85);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.1),
+    0 0 0 2px rgba(0, 0, 0, 0.65);
+}
+
 .pageItem__thumb {
   width: 100%;
-  height: 110px;
+  height: 54px;
   border-radius: 10px;
   overflow: hidden;
   background:
@@ -1549,9 +1563,25 @@
 }
 
 .pageItem__thumbWrap {
+  width: 78px;
   position: relative;
   overflow: visible;
   min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pageItem__sectionName {
+  color: rgba(15, 23, 42, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  display: block;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: unset;
+  word-break: break-word;
+  text-align: left;
 }
 
 .sidebarSlideMenu {
