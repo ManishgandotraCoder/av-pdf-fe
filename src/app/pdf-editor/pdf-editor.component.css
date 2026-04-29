@@ -831,6 +831,12 @@
   justify-content: flex-start;
 }
 
+.rightbar__iconTextLite {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .insertSourceMenu {
   position: relative;
 }
@@ -1872,6 +1878,74 @@
 
 .widget__mediaIframe {
   border: 0;
+}
+
+.widget__layered {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.widget__layeredMedia {
+  border-radius: 0;
+}
+
+.widget__layeredPickBtn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(15, 23, 42, 0.9);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.widget__layeredText {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  min-height: 64px;
+  max-height: calc(100% - 20px);
+  resize: none;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  outline: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(15, 23, 42, 0.95);
+  font: 600 13px/1.35 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI";
+}
+
+.widget__layered--textOverImage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.18) 10%, rgba(0, 0, 0, 0.54) 100%);
+}
+
+.widget__layered--textOverImage .widget__layeredText {
+  text-align: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.widget__layered--imageBackgroundText::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .pageSettings {

@@ -44,7 +44,14 @@ type FontFamily =
   | 'montserrat'
   | 'abcdee_helvetica_bold';
 
-type WidgetKind = 'table' | 'image' | 'text' | 'video' | 'signature';
+type WidgetKind =
+  | 'table'
+  | 'image'
+  | 'text'
+  | 'video'
+  | 'signature'
+  | 'textOverImage'
+  | 'imageBackgroundText';
 type Widget = {
   id: string;
   kind: WidgetKind;
@@ -60,6 +67,8 @@ type Widget = {
   textValue?: string;
   /** Signature image data URL */
   signatureSrc?: string;
+  /** Shared text payload for layered text/image widgets. */
+  layeredTextValue?: string;
   /** Basic editable table model */
   table?: { rows: number; cols: number; cells: string[][] };
 };
@@ -520,6 +529,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly insertWidgetPending = signal<InsertWidgetPending | null>(null);
   protected readonly editingWidgetId = signal<string | null>(null);
   private signaturePickTargetWidgetId: string | null = null;
+  private layeredImagePickTargetWidgetId: string | null = null;
 
   private readonly videoObjectUrlByWidgetId = new Map<string, string>();
 
@@ -1313,6 +1323,8 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!file) return;
 
     const replaceTarget = this.replaceMediaTarget();
+    const layeredTargetWidgetId = this.layeredImagePickTargetWidgetId;
+    this.layeredImagePickTargetWidgetId = null;
     if (replaceTarget?.kind === 'image') {
       this.errorText.set(null);
       this.isInserting.set(true);
@@ -1332,6 +1344,31 @@ export class PdfEditorComponent implements AfterViewInit {
           w.kind === 'image' ? { ...w, imageSrc: dataUrl } : w
         );
         this.replaceMediaTarget.set(null);
+        this.isInserting.set(false);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+    if (layeredTargetWidgetId) {
+      this.errorText.set(null);
+      this.isInserting.set(true);
+      const reader = new FileReader();
+      reader.onerror = () => {
+        this.errorText.set('Failed to read image.');
+        this.isInserting.set(false);
+      };
+      reader.onload = () => {
+        const dataUrl = String(reader.result ?? '');
+        if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
+          this.errorText.set('Unsupported image (use PNG or JPEG).');
+          this.isInserting.set(false);
+          return;
+        }
+        this.updateWidget(this.activePageIndex(), layeredTargetWidgetId, (w) =>
+          w.kind === 'textOverImage' || w.kind === 'imageBackgroundText'
+            ? { ...w, imageSrc: dataUrl }
+            : w
+        );
         this.isInserting.set(false);
       };
       reader.readAsDataURL(file);
@@ -1462,6 +1499,17 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  protected beginLayeredImagePickForWidget(widgetId: string, ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    this.layeredImagePickTargetWidgetId = widgetId;
+    const el = this.widgetImageFile?.nativeElement;
+    if (el) {
+      el.value = '';
+      el.click();
+    }
+  }
+
   protected insertWidgetModeHint(): string {
     const p = this.insertWidgetPending();
     if (!p) return '';
@@ -1498,7 +1546,9 @@ export class PdfEditorComponent implements AfterViewInit {
       image: { w: 220, h: 160 },
       text: { w: 300, h: 160 },
       video: { w: 280, h: 180 },
-      signature: { w: 240, h: 110 }
+      signature: { w: 240, h: 110 },
+      textOverImage: { w: 340, h: 200 },
+      imageBackgroundText: { w: 360, h: 220 }
     };
     const d = defaults[kind];
     const rect = overlay.getBoundingClientRect();
@@ -1528,6 +1578,9 @@ export class PdfEditorComponent implements AfterViewInit {
     if (kind === 'text') {
       widget.textValue = '';
     }
+    if (kind === 'textOverImage' || kind === 'imageBackgroundText') {
+      widget.layeredTextValue = '';
+    }
     if (kind === 'table') {
       const rows = 3;
       const cols = 3;
@@ -1547,7 +1600,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.editingWidgetId.set(id);
       queueMicrotask(() => this.focusWidgetEditor(id));
     }
-    if (kind === 'text') {
+    if (kind === 'text' || kind === 'textOverImage' || kind === 'imageBackgroundText') {
       queueMicrotask(() => {
         const el = document.querySelector<HTMLElement>(`[data-widget-id="${id}"] .widget__editor`);
         el?.focus?.();
@@ -1609,6 +1662,12 @@ export class PdfEditorComponent implements AfterViewInit {
   protected updateTextWidget(pageIndex: number, widgetId: string, value: string) {
     if (!this.textFeatureEnabled()) return;
     this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, textValue: value }));
+  }
+
+  protected updateLayeredTextWidget(pageIndex: number, widgetId: string, value: string) {
+    this.updateWidget(pageIndex, widgetId, (w) =>
+      w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, layeredTextValue: value } : w
+    );
   }
 
   protected tableCellValue(w: Widget, r: number, c: number) {
@@ -1929,6 +1988,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.selectedWidgetId() === widgetId) this.selectedWidgetId.set(null);
     const target = this.replaceMediaTarget();
     if (target?.widgetId === widgetId) this.replaceMediaTarget.set(null);
+    if (this.layeredImagePickTargetWidgetId === widgetId) this.layeredImagePickTargetWidgetId = null;
   }
 
   protected readonly toolbarItems: ToolbarItem[] = [
@@ -2824,6 +2884,47 @@ export class PdfEditorComponent implements AfterViewInit {
         ctx.restore();
         continue;
       }
+      if ((w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') && w.imageSrc) {
+        try {
+          const img = await this.loadHtmlImage(w.imageSrc);
+          ctx.drawImage(img, x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
+        } catch {
+          // ignore
+        }
+      }
+      if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
+        const text = String(w.layeredTextValue ?? '');
+        ctx.save();
+        if (w.kind === 'textOverImage') {
+          const grad = ctx.createLinearGradient(x, y, x, y + hh);
+          grad.addColorStop(0, 'rgba(0,0,0,0.18)');
+          grad.addColorStop(1, 'rgba(0,0,0,0.58)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
+          ctx.fillStyle = 'rgba(255,255,255,0.96)';
+          ctx.textAlign = 'center';
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.72)';
+          ctx.fillRect(x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
+          ctx.fillStyle = 'rgba(15,23,42,0.95)';
+          ctx.textAlign = 'left';
+        }
+        const fontSize = Math.max(10, Math.round(13 * Math.min(fx, fy)));
+        const lh = Math.max(1, Math.round(fontSize * 1.3));
+        const pad = 10 * Math.min(fx, fy);
+        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`;
+        ctx.textBaseline = 'top';
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (w.kind === 'textOverImage') {
+            ctx.fillText(lines[i] ?? '', x + ww / 2, y + pad + i * lh);
+          } else {
+            ctx.fillText(lines[i] ?? '', x + pad, y + pad + i * lh);
+          }
+        }
+        ctx.restore();
+        continue;
+      }
 
       if (w.kind === 'table' && w.table) {
         const rows = w.table.rows;
@@ -3055,6 +3156,9 @@ export class PdfEditorComponent implements AfterViewInit {
           };
         }
         if (w.kind === 'image') return { ...w, imageSrc: undefined };
+        if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
+          return { ...w, imageSrc: undefined, layeredTextValue: '' };
+        }
         if (w.kind === 'signature') return { ...w, signatureSrc: undefined };
         if (w.kind === 'video') return { ...w, videoSrc: undefined };
         return { ...w };
