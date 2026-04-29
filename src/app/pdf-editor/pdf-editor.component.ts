@@ -506,7 +506,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   /** Right inspector: tooling vs library (250px rail). */
 
-  protected readonly rightbarTab = signal<'options' | 'assets' | 'versions'>('options');
+  protected readonly rightbarTab = signal<'options' | 'typography' | 'assets' | 'versions'>('options');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
   protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
@@ -796,7 +796,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
   }
 
-  protected setRightbarTab(tab: 'options' | 'assets' | 'versions') {
+  protected setRightbarTab(tab: 'options' | 'typography' | 'assets' | 'versions') {
     this.rightbarTab.set(tab);
   }
 
@@ -3523,25 +3523,61 @@ export class PdfEditorComponent implements AfterViewInit {
     return parseVideoEmbedInput(raw);
   }
 
-  protected selectedMediaWidget(): { pageIndex: number; widget: Widget } | null {
+  protected selectedItemWidget(): { pageIndex: number; widget: Widget } | null {
     const id = this.selectedWidgetId();
     if (!id) return null;
     const pageIndex = this.activePageIndex();
     const widget = this.getWidget(pageIndex, id);
     if (!widget) return null;
-    if (widget.kind !== 'image' && widget.kind !== 'video') return null;
     return { pageIndex, widget };
   }
 
-  protected replaceSelectedMedia(ev: Event) {
+  protected selectedMediaWidget(): { pageIndex: number; widget: Widget } | null {
+    const selected = this.selectedItemWidget();
+    if (!selected) return null;
+    if (selected.widget.kind !== 'image' && selected.widget.kind !== 'video') return null;
+    return selected;
+  }
+
+  protected selectedWidgetTitle(): string {
+    const selected = this.selectedItemWidget();
+    if (!selected) return '';
+    switch (selected.widget.kind) {
+      case 'image':
+        return 'Selected image';
+      case 'video':
+        return 'Selected video';
+      case 'text':
+        return 'Selected text';
+      case 'table':
+        return 'Selected table';
+      case 'signature':
+        return 'Selected signature';
+      case 'textOverImage':
+        return 'Selected text over image';
+      case 'imageBackgroundText':
+        return 'Selected image background text';
+      default:
+        return 'Selected item';
+    }
+  }
+
+  protected canReplaceSelectedWidget(): boolean {
+    const selected = this.selectedItemWidget();
+    if (!selected) return false;
+    if (selected.widget.kind === 'image' || selected.widget.kind === 'video') return true;
+    if (selected.widget.kind === 'text') return this.textFeatureEnabled();
+    return false;
+  }
+
+  protected replaceSelectedWidget(ev: Event) {
     ev.preventDefault();
     ev.stopPropagation();
-    const selected = this.selectedMediaWidget();
+    const selected = this.selectedItemWidget();
     if (!selected) return;
     const { pageIndex, widget } = selected;
-    const kind: 'image' | 'video' = widget.kind === 'image' ? 'image' : 'video';
-    this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind });
     if (widget.kind === 'image') {
+      this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind: 'image' });
       const el = this.widgetImageFile?.nativeElement;
       if (el) {
         el.value = '';
@@ -3549,17 +3585,22 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       return;
     }
-    const el = this.widgetVideoFile?.nativeElement;
-    if (el) {
-      el.value = '';
-      el.click();
+    if (widget.kind === 'video') {
+      this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind: 'video' });
+      const el = this.widgetVideoFile?.nativeElement;
+      if (el) {
+        el.value = '';
+        el.click();
+      }
+      return;
     }
+    if (widget.kind === 'text' && this.textFeatureEnabled()) this.startEditingWidget(widget.id);
   }
 
-  protected removeSelectedMedia(ev: Event) {
+  protected removeSelectedWidget(ev: Event) {
     ev.preventDefault();
     ev.stopPropagation();
-    const selected = this.selectedMediaWidget();
+    const selected = this.selectedItemWidget();
     if (!selected) return;
     this.removeWidget(selected.pageIndex, selected.widget.id);
   }

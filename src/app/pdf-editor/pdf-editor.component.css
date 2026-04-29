@@ -632,6 +632,7 @@
 
 .workspaceWrap {
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-columns: 220px 1fr 250px;
   /* Allow sidebar dropdowns to extend into the workspace area. */
@@ -645,16 +646,22 @@
 
 .workspaceWrap > .sidebar {
   grid-column: 1;
+  height: 100%;
+  min-height: 0;
 }
 
 .workspaceWrap > .workspace {
   grid-column: 2;
   min-width: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 .workspaceWrap > .rightbar {
   grid-column: 3;
   min-width: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 .rightbar {
@@ -667,7 +674,9 @@
   align-items: stretch;
   gap: 10px;
   min-width: 0;
+  min-height: 0;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .rightbarTabs {
@@ -690,6 +699,9 @@
   background: transparent;
   color: rgba(15, 23, 42, 0.66);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .rightbarTabs__btn:hover {
@@ -702,8 +714,16 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
+.rightbarTabs__icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .rightbar__panel {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .rightbar__panelOptions {
