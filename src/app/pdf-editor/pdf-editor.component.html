@@ -219,7 +219,15 @@
         </button>
 
         <div class="docsTitle">
-          <div class="docsTitle__name">{{ fileName() ?? 'Resume' }}</div>
+          <input
+            class="docsTitle__name docsTitle__nameInput"
+            type="text"
+            [ngModel]="fileName() ?? 'Resume'"
+            (ngModelChange)="onMainTitleChange($event)"
+            (blur)="onMainTitleBlur()"
+            [readOnly]="readonlyMode()"
+            aria-label="Proposal title"
+          />
         </div>
 
         <div class="docsTitleActions" aria-label="Document actions">

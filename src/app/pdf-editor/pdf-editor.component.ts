@@ -795,8 +795,9 @@ export class PdfEditorComponent implements AfterViewInit {
       const widgets = this.widgetsByPage();
       const furniture = this.pageFurniture();
       const pageCount = this.pageCount();
+      const fileName = this.fileName();
       if (!id || pageCount === 0) return;
-      const snapshot = JSON.stringify({ edits, widgets, furniture, pageCount });
+      const snapshot = JSON.stringify({ edits, widgets, furniture, pageCount, fileName });
       if (!this.autoVersionSnapshotReady) {
         this.autoVersionSnapshotReady = true;
         this.lastAutoVersionSnapshot = snapshot;
@@ -805,6 +806,13 @@ export class PdfEditorComponent implements AfterViewInit {
       if (snapshot === this.lastAutoVersionSnapshot) return;
       this.lastAutoVersionSnapshot = snapshot;
       this.scheduleAutoVersionSave();
+    });
+
+    effect(() => {
+      const id = this.docId();
+      const name = this.fileName();
+      if (!id || !name) return;
+      this.persistTitleForDoc(id, name);
     });
 
     // Auto-dismiss error banners toasts.
@@ -2544,7 +2552,8 @@ export class PdfEditorComponent implements AfterViewInit {
         this.api.getFurniture(id).catch(() => null)
       ]);
 
-      this.fileName.set(meta.name);
+      const persistedTitle = this.loadPersistedTitleForDoc(id);
+      this.fileName.set(persistedTitle || meta.name);
       this.assertReadablePdfHeader(bytes);
       this.pdfBytes = this.clonePdfBytes(bytes);
 
@@ -2630,6 +2639,21 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected canUndo() {
     return this.undoStack.length > 0;
+  }
+
+  protected onMainTitleChange(value: string) {
+    if (this.readonlyMode()) return;
+    this.fileName.set(value);
+  }
+
+  protected onMainTitleBlur() {
+    if (this.readonlyMode()) return;
+    const current = (this.fileName() ?? '').trim();
+    if (!current) {
+      this.fileName.set('Proposal.pdf');
+      return;
+    }
+    if (current !== this.fileName()) this.fileName.set(current);
   }
 
   protected canRedo() {
@@ -5195,8 +5219,8 @@ export class PdfEditorComponent implements AfterViewInit {
     // Clicking toolbar controls blurs the textarea; we want to keep the current
     // text selection active while the user tweaks styling.
     const target = ev.target as HTMLElement | null;
-    // Do not prevent default on native selects; it blocks the dropdown popup.
-    if (target?.closest('button, input, label') && !target.closest('select')) ev.preventDefault();
+    // Keep focus for click-only controls, but let native form fields receive focus/typing.
+    if (target?.closest('button, label')) ev.preventDefault();
     this.captureTextDraftSelection();
     this.suppressCommitOnBlurOnce = true;
     queueMicrotask(() => {
@@ -6335,6 +6359,28 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private pageFurnitureStorageKey(id: string): string {
     return `avyro:pdf-page-furniture:v1:${id}`;
+  }
+
+  private titleStorageKey(id: string): string {
+    return `avyro:pdf-title:v1:${id}`;
+  }
+
+  private persistTitleForDoc(id: string, title: string) {
+    try {
+      localStorage.setItem(this.titleStorageKey(id), title);
+    } catch {
+      // ignore storage issues
+    }
+  }
+
+  private loadPersistedTitleForDoc(id: string): string | null {
+    try {
+      const raw = localStorage.getItem(this.titleStorageKey(id));
+      const title = typeof raw === 'string' ? raw.trim() : '';
+      return title.length > 0 ? title : null;
+    } catch {
+      return null;
+    }
   }
 
   private persistPageFurnitureForDoc(id: string, furniture: PageFurniture) {

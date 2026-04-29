@@ -103,6 +103,26 @@
   text-overflow: ellipsis;
 }
 
+.docsTitle__nameInput {
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.docsTitle__nameInput:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.docsTitle__nameInput:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.docsTitle__nameInput[readonly] {
+  cursor: default;
+  background: transparent;
+}
+
 .docsMenus {
   display: flex;
   align-items: center;
