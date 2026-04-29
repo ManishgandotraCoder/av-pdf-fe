@@ -1251,26 +1251,26 @@
               <div class="rightbarMediaActions" role="group" aria-label="Slide actions">
                 <div class="rightbarMediaActions__title">Slide {{ activePageIndex() + 1 }} Actions</div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddSlide(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlide(activePageIndex(), $event)">
                     Add slide
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
                     Duplicate slide
                   </button>
                 </div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
                     Add page in section
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
                     Add from template
                   </button>
                 </div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="updateSidebarSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="updateSidebarSection(activePageIndex(), $event)">
                     Update section
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="removeSidebarSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving()" (click)="removeSidebarSection(activePageIndex(), $event)">
                     Remove section
                   </button>
                 </div>
@@ -1278,7 +1278,7 @@
                   <button
                     type="button"
                     class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
-                    [disabled]="isLoading() || isSaving() || pageCount() <= 1 || isKeySlotPageIndex(activePageIndex())"
+                    [disabled]="isLoading() || isSaving() || pageCount() <= 1"
                     (click)="onSidebarMenuRemoveSlide(activePageIndex(), $event)"
                   >
                     Remove slide
