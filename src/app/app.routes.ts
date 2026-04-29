@@ -7,6 +7,11 @@ export const routes: Routes = [
       import('./pdf-library/pdf-library.component').then((m) => m.PdfLibraryComponent)
   },
   {
+    path: 'create',
+    loadComponent: () =>
+      import('./pdf-editor/pdf-editor.component').then((m) => m.PdfEditorComponent)
+  },
+  {
     path: 'edit/:id',
     loadComponent: () =>
       import('./pdf-editor/pdf-editor.component').then((m) => m.PdfEditorComponent)

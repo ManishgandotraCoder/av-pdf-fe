@@ -2229,3 +2229,241 @@
     transform: translate(-50%, 0);
   }
 }
+
+/* Error toast (auto-dismiss via signal effect) */
+@keyframes errorToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.errorToast {
+  position: sticky;
+  top: 10px;
+  z-index: 80;
+  margin: 10px 18px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: rgba(185, 28, 28, 0.95);
+  background: rgba(255, 45, 85, 0.12);
+  border: 1px solid rgba(255, 45, 85, 0.22);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.10);
+  animation: errorToastIn 220ms ease-out forwards;
+}
+
+/* Welcome screen CTA */
+.welcome {
+  display: grid;
+  place-items: start center;
+  text-align: center;
+}
+
+.welcome__actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.welcomeBtn {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 100ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.welcomeBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.welcomeBtn--primary {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: rgba(67, 56, 202, 0.95);
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.12);
+}
+
+.welcomeBtn--primary:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.20);
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.welcomeBtn--primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.welcomeBtn--ghost {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.welcomeBtn--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.20);
+}
+
+/* Key page slot navigation */
+.keySlots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 6px 10px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.sidebar.isCollapsed .keySlots {
+  display: none;
+}
+
+.keySlots__group {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.keySlots__divider {
+  height: 1px;
+  width: 100%;
+  background: rgba(15, 23, 42, 0.10);
+  border-radius: 999px;
+}
+
+.keySlots__custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keySlotRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.keySlotRow__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.keySlotRow__btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(15, 23, 42, 0.70);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.keySlotRow__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(139, 92, 246, 0.28);
+}
+
+.keySlotRow__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.keySlotRow__btn--drag {
+  cursor: grab;
+}
+
+.keySlot {
+  width: 100%;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(15, 23, 42, 0.70);
+  font-weight: 900;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 100ms ease;
+}
+
+.keySlot:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.keySlot:hover:not(:disabled) {
+  border-color: rgba(139, 92, 246, 0.26);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.keySlot:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.keySlot.isActive {
+  border-color: rgba(139, 92, 246, 0.60);
+  background: rgba(139, 92, 246, 0.12);
+  color: rgba(67, 56, 202, 0.95);
+  box-shadow: 0 12px 30px rgba(139, 92, 246, 0.12);
+}
+
+.keySlot--custom {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 0 8px;
+}
+
+.keySlots__add {
+  align-self: stretch;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.08);
+  color: rgba(67, 56, 202, 0.90);
+  cursor: pointer;
+  font-weight: 900;
+  font-size: 12.5px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 100ms ease;
+}
+
+.keySlots__add:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.50);
+}
+
+.keySlots__add:active:not(:disabled) {
+  transform: translateY(1px);
+}
+

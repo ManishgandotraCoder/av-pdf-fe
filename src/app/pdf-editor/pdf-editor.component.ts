@@ -321,6 +321,9 @@ type DetectedBlock = {
 
 type SidebarSectionType = 'section' | 'imageHeader';
 
+type KeySlotKind = 'fixed' | 'custom';
+type KeySlot = { id: string; title: string; kind: KeySlotKind };
+
 type GlobalTypographySection = {
   fontFamily: FontFamily;
   size: number;
@@ -506,6 +509,17 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly scale = signal(0.8);
   protected readonly sidebarCollapsed = signal(false);
 
+  /** Fixed key-page slots always present in the left navigation. */
+  private static readonly fixedKeySlots = [
+    { id: 'with', title: 'W/', kind: 'fixed' as const },
+    { id: 'project', title: 'Project', kind: 'fixed' as const },
+    { id: 'gut', title: 'Gut', kind: 'fixed' as const }
+  ];
+
+  protected readonly customKeySlots = signal<KeySlot[]>([]);
+  protected readonly keySlotDragFromCustomIndex = signal<number | null>(null);
+  protected readonly keySlotPageCount = computed(() => PdfEditorComponent.fixedKeySlots.length + this.customKeySlots().length);
+
   /** Right inspector: tooling vs library (250px rail). */
 
   protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions'>('options');
@@ -572,7 +586,10 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly isPageRendering = signal(false);
 
   protected readonly docId = signal<string | null>(null);
+  protected readonly isCreateFlow = signal(false);
   protected readonly overwriteConfirmOpen = signal(false);
+  protected readonly rejectConfirmOpen = signal(false);
+  protected readonly rejectConfirmLevel = signal<RejectionLevel>('internal');
   protected readonly sharePanelOpen = signal(false);
   protected readonly shareAccessType = signal<ShareAccessType>('restricted');
   protected readonly shareUrl = signal('');
@@ -655,6 +672,8 @@ export class PdfEditorComponent implements AfterViewInit {
   /** Short-lived UX messages (toast) for slide management */
   protected readonly slideToast = signal<string | null>(null);
   private slideToastClearTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Short-lived error toast UX */
+  private errorToastClearTimer: ReturnType<typeof setTimeout> | null = null;
   /** HTML5 sidebar slide reorder: drag source index (mirror of dataTransfer) */
   protected readonly slideDragFromIndex = signal<number | null>(null);
   /** Drop-zone highlight during slide drag */
@@ -723,6 +742,7 @@ export class PdfEditorComponent implements AfterViewInit {
     // Load the selected PDF from the library (route param).
     effect(() => {
       const id = this.route.snapshot.paramMap.get('id');
+      this.isCreateFlow.set(!id);
       this.readonlyMode.set(this.route.snapshot.queryParamMap.get('readonly') === '1');
       this.docId.set(id);
       this.autoVersionSnapshotReady = false;
@@ -770,6 +790,17 @@ export class PdfEditorComponent implements AfterViewInit {
       if (snapshot === this.lastAutoVersionSnapshot) return;
       this.lastAutoVersionSnapshot = snapshot;
       this.scheduleAutoVersionSave();
+    });
+
+    // Auto-dismiss error banners toasts.
+    effect(() => {
+      const msg = this.errorText();
+      if (!msg) return;
+      if (this.errorToastClearTimer !== null) clearTimeout(this.errorToastClearTimer);
+      this.errorToastClearTimer = setTimeout(() => {
+        this.errorToastClearTimer = null;
+        this.errorText.set(null);
+      }, 4200);
     });
   }
 
@@ -821,6 +852,139 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected toggleSidebar() {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
+  }
+
+  protected isKeySlotPageIndex(pageIndex: number): boolean {
+    return pageIndex >= 0 && pageIndex < this.keySlotPageCount();
+  }
+
+  protected isKeySlotPageAvailable(pageIndex: number): boolean {
+    return pageIndex >= 0 && pageIndex < this.pageCount();
+  }
+
+  private ensureKeySlotSectionOverrides() {
+    // Prime fixed + custom titles into the sidebar section resolver.
+    // This makes the left nav deterministic even when PDF heading detection is inconsistent.
+    const fixedTitles = PdfEditorComponent.fixedKeySlots.map((s) => s.title);
+    const customSlots = this.customKeySlots();
+
+    const overrides: Record<number, { title: string; type: SidebarSectionType }> = {};
+    for (let i = 0; i < fixedTitles.length; i++) {
+      if (i >= this.pageCount()) break;
+      overrides[i] = { title: fixedTitles[i]!, type: 'section' };
+    }
+    for (let i = 0; i < customSlots.length; i++) {
+      const pageIndex = fixedTitles.length + i;
+      if (pageIndex >= this.pageCount()) break;
+      const title = this.sanitizeSidebarTitle(customSlots[i]?.title ?? '');
+      if (!title) continue;
+      overrides[pageIndex] = { title, type: 'section' };
+    }
+
+    this.removedSectionsByPage.update((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const next = { ...prev };
+      const max = Math.min(this.pageCount(), PdfEditorComponent.fixedKeySlots.length + customSlots.length);
+      for (let i = 0; i < max; i++) delete next[i];
+      return next;
+    });
+
+    this.sectionOverridesByPage.update((prev) => ({ ...prev, ...overrides }));
+  }
+
+  protected async addCustomKeySlot() {
+    if (this.readonlyMode()) return;
+    if (this.isLoading() || this.isSaving()) return;
+
+    const titleInput = (prompt('Custom slot title', `Custom ${this.customKeySlots().length + 1}`) ?? '').trim();
+    if (!titleInput) return;
+
+    const insertAfterIndex = this.keySlotPageCount() - 1; // Insert at the end of current key slots
+    await this.addBlankPageAfter(Math.max(0, insertAfterIndex));
+    this.customKeySlots.update((prev) => [
+      ...prev,
+      { id: `custom_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`, title: titleInput, kind: 'custom' }
+    ]);
+    this.ensureKeySlotSectionOverrides();
+  }
+
+  protected renameCustomKeySlot(customIndex: number) {
+    if (this.readonlyMode()) return;
+    if (this.isLoading() || this.isSaving()) return;
+    const slots = this.customKeySlots();
+    const slot = slots[customIndex];
+    if (!slot) return;
+
+    const titleInput = (prompt('Rename custom slot', slot.title) ?? '').trim();
+    if (!titleInput) return;
+
+    this.customKeySlots.update((prev) => {
+      const next = prev.slice();
+      const it = next[customIndex];
+      if (!it) return prev;
+      next[customIndex] = { ...it, title: titleInput };
+      return next;
+    });
+    this.ensureKeySlotSectionOverrides();
+  }
+
+  protected onCustomKeySlotDragStart(customIndex: number, ev: DragEvent) {
+    if (this.isLoading() || this.isSaving()) {
+      ev.preventDefault();
+      return;
+    }
+    const dt = ev.dataTransfer;
+    if (!dt) return;
+    dt.effectAllowed = 'move';
+    dt.setData('text/plain', String(customIndex));
+    this.keySlotDragFromCustomIndex.set(customIndex);
+  }
+
+  protected onCustomKeySlotDragOver(ev: DragEvent) {
+    ev.preventDefault();
+    try {
+      ev.dataTransfer!.dropEffect = 'move';
+    } catch {
+      // ignore
+    }
+  }
+
+  protected async onCustomKeySlotDrop(targetCustomIndex: number, ev: DragEvent) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const from = this.keySlotDragFromCustomIndex();
+    this.keySlotDragFromCustomIndex.set(null);
+    if (from === null) return;
+    if (from === targetCustomIndex) return;
+
+    const customCount = this.customKeySlots().length;
+    if (customCount <= 1) return;
+
+    const prevCustomSlots = this.customKeySlots();
+    // Compute moved permutation within the custom slots array.
+    const perm = (() => {
+      const order = Array.from({ length: customCount }, (_, i) => i);
+      const fi = clamp(from, 0, customCount - 1);
+      const ti = clamp(targetCustomIndex, 0, customCount - 1);
+      if (fi === ti) return null;
+      const [moved] = order.splice(fi, 1);
+      order.splice(ti, 0, moved);
+      return order; // newCustomPos -> oldCustomPos
+    })();
+    if (!perm) return;
+
+    const nextCustomSlots = perm.map((oldIdx) => prevCustomSlots[oldIdx]!).filter(Boolean);
+    const fixedCount = PdfEditorComponent.fixedKeySlots.length;
+    const reorder = Array.from({ length: this.pageCount() }, (_, i) => i);
+    for (let newCustomPos = 0; newCustomPos < customCount; newCustomPos++) {
+      const oldCustomPos = perm[newCustomPos]!;
+      reorder[fixedCount + newCustomPos] = fixedCount + oldCustomPos;
+    }
+
+    // Update UI state immediately; the actual page reorder happens on the PDF.
+    this.customKeySlots.set(nextCustomSlots as KeySlot[]);
+    await this.reorderPagesInDocumentByOrder(reorder);
+    this.ensureKeySlotSectionOverrides();
   }
 
   protected sidebarSectionLabelForPage(pageIndex: number): string {
@@ -2313,6 +2477,52 @@ export class PdfEditorComponent implements AfterViewInit {
     void this.router.navigate(['/']);
   }
 
+  private async buildBlankProposalPdfBytes(pageCount: number): Promise<Uint8Array> {
+    const pdf = await PDFDocument.create();
+    // Match the default dimensions we already use when inserting pages.
+    const size = { width: 595.28, height: 841.89 }; // A4-ish points
+    for (let i = 0; i < Math.max(1, pageCount); i++) {
+      pdf.addPage([size.width, size.height]);
+    }
+    const out = await pdf.save();
+    const safe = out instanceof Uint8Array ? out : new Uint8Array(out as any);
+    return safe;
+  }
+
+  /**
+   * Flow 1: Start Fresh (create route).
+   * Uploads a blank multi-page PDF and loads it into the editor.
+   */
+  protected async startFreshProposal() {
+    if (this.isLoading() || this.isSaving() || this.readonlyMode()) return;
+
+    this.errorText.set(null);
+    this.isLoading.set(true);
+    try {
+      this.customKeySlots.set([]);
+
+      const bytes = await this.buildBlankProposalPdfBytes(PdfEditorComponent.fixedKeySlots.length);
+      const blobBytes = new Uint8Array(bytes.byteLength);
+      blobBytes.set(bytes);
+      const blob = new Blob([blobBytes.buffer], { type: 'application/pdf' });
+      const file = new File([blob], 'Start Fresh Proposal.pdf', { type: 'application/pdf' });
+
+      const meta = await this.api.upload(file);
+
+      this.docId.set(meta.id);
+      this.fileName.set(meta.name);
+
+      await this.loadFromApi(meta.id);
+      await this.loadProposalVersions(meta.id);
+      await this.loadProposalDetails(meta.id);
+      await this.loadProposalRejection(meta.id);
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to start fresh proposal.');
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
   private async loadFromApi(id: string) {
     this.errorText.set(null);
     this.isLoading.set(true);
@@ -2342,6 +2552,9 @@ export class PdfEditorComponent implements AfterViewInit {
       this.detectedBlocksByPage.set({});
       this.sectionOverridesByPage.set({});
       this.removedSectionsByPage.set({});
+      // Key slots are session-scoped (re-created on load).
+      this.customKeySlots.set([]);
+      this.ensureKeySlotSectionOverrides();
       this.widgetsByPage.set(this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
       const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
       this.pageFurniture.set(
@@ -3321,6 +3534,22 @@ export class PdfEditorComponent implements AfterViewInit {
     this.overwriteConfirmOpen.set(false);
   }
 
+  protected openRejectConfirmation(level: RejectionLevel) {
+    if (this.readonlyMode()) return;
+    this.rejectConfirmLevel.set(level);
+    this.rejectConfirmOpen.set(true);
+  }
+
+  protected closeRejectConfirmation() {
+    this.rejectConfirmOpen.set(false);
+  }
+
+  protected async confirmRejectProposal() {
+    const level = this.rejectConfirmLevel();
+    this.closeRejectConfirmation();
+    await this.rejectProposal(level);
+  }
+
   protected async confirmOverwriteProposal() {
     const id = this.docId();
     if (!id || !this.pdfBytes || this.pageCount() === 0) return;
@@ -4295,6 +4524,109 @@ export class PdfEditorComponent implements AfterViewInit {
       this.showSlideToast('Slides reordered');
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder slides.');
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  /**
+   * Reorder PDF pages using an explicit permutation.
+   * `reorder[newIndex] === oldIndex`.
+   */
+  private async reorderPagesInDocumentByOrder(reorder: number[]) {
+    if (!this.pdfBytes) return;
+    if (this.isLoading() || this.isSaving()) return;
+
+    const count = this.pageCount();
+    if (!Array.isArray(reorder) || reorder.length !== count) return;
+
+    const seen = new Set<number>();
+    for (const idx of reorder) {
+      if (!Number.isFinite(idx) || idx < 0 || idx >= count) return;
+      seen.add(idx);
+    }
+    if (seen.size !== count) return;
+
+    const prevActive = this.activePageIndex();
+    this.errorText.set(null);
+    this.openPageMenuIndex.set(null);
+    this.sidebarSlideMenuOpenIndex.set(null);
+    this.slideDragFromIndex.set(null);
+    this.slideDropHoverIndex.set(null);
+    this.isLoading.set(true);
+
+    try {
+      this.assertReadablePdfHeader(this.pdfBytes);
+      const srcPdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
+      const outPdf = await PDFDocument.create();
+      const copied = await outPdf.copyPages(srcPdf, reorder);
+      for (const p of copied) outPdf.addPage(p);
+      const out = await outPdf.save();
+      const nextBytes =
+        out instanceof Uint8Array ? new Uint8Array(out) : new Uint8Array(out as any);
+
+      const header =
+        nextBytes.byteLength >= 5
+          ? String.fromCharCode(
+              nextBytes[0]!,
+              nextBytes[1]!,
+              nextBytes[2]!,
+              nextBytes[3]!,
+              nextBytes[4]!
+            )
+          : '';
+      if (!header.startsWith('%PDF-')) {
+        throw new Error('Failed to reorder PDF (invalid PDF output).');
+      }
+
+      this.pdfBytes = nextBytes;
+      await this.persistPdfBytesToBackend();
+
+      this.editsByPage.set(this.remapKeyedBySlideReorder(this.editsByPage(), reorder));
+      this.widgetsByPage.set(this.remapKeyedBySlideReorder(this.widgetsByPage(), reorder));
+      this.sectionOverridesByPage.set(this.remapKeyedBySlideReorder(this.sectionOverridesByPage(), reorder));
+      this.removedSectionsByPage.set(this.remapKeyedBySlideReorder(this.removedSectionsByPage(), reorder));
+
+      const nextRot = new Map<number, number>();
+      for (let newIdx = 0; newIdx < reorder.length; newIdx++) {
+        const oldIdx = reorder[newIdx]!;
+        const rot = this.pageRotateByPage.get(oldIdx);
+        if (rot !== undefined) nextRot.set(newIdx, rot);
+      }
+      this.pageRotateByPage.clear();
+      for (const [k, v] of nextRot) this.pageRotateByPage.set(k, v);
+
+      this.pageThumbUrlByPage.set({});
+      this.detectedTextByPage.set({});
+      this.detectedBlocksByPage.set({});
+      this.baseSnapshotByPage.clear();
+      this.renderTaskByPage.clear();
+      this.resetHistory();
+
+      this.activePageIndex.set(this.activePageIndexAfterSlideReorder(prevActive, reorder));
+
+      try {
+        await this.pdfDoc?.destroy();
+      } catch {
+        // ignore
+      }
+
+      const buf = nextBytes.buffer.slice(nextBytes.byteOffset, nextBytes.byteOffset + nextBytes.byteLength);
+      const loadingTask = getDocument({
+        data: buf,
+        disableRange: true,
+        disableStream: true,
+        disableAutoFetch: true
+      });
+      const doc = await loadingTask.promise;
+      this.pdfDoc = doc;
+      this.pageCount.set(doc.numPages);
+      await this.renderActivePage();
+      void this.generateAllPageThumbnails();
+      void this.primeSidebarSectionDetection();
+      this.showSlideToast('Key slots reordered');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder key slots.');
     } finally {
       this.isLoading.set(false);
     }

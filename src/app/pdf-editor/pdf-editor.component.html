@@ -57,6 +57,35 @@
     </div>
   }
 
+  @if (rejectConfirmOpen()) {
+    <div class="deleteSlideModal" (click)="closeRejectConfirmation()">
+      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
+      <div
+        class="deleteSlideModal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rejectProposalTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <h2 id="rejectProposalTitle" class="deleteSlideModal__title">Reject proposal?</h2>
+        <p class="deleteSlideModal__message">This action cannot be undone.</p>
+        <div class="deleteSlideModal__actions">
+          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="closeRejectConfirmation()">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="deleteSlideModal__btn deleteSlideModal__btn--danger"
+            [disabled]="rejectionBusy() || isLoading() || isSaving()"
+            (click)="confirmRejectProposal()"
+          >
+            Confirm Reject
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   @if (sharePanelOpen()) {
     <div class="shareDrawer" (click)="closeSharePanel()">
       <div class="shareDrawer__backdrop" aria-hidden="true"></div>
@@ -176,10 +205,10 @@
             placeholder="Optional rejection reason"
           />
           <div class="shareDrawer__row">
-            <button type="button" class="shareDrawer__btn" [disabled]="rejectionBusy()" (click)="rejectProposal('internal')">
+            <button type="button" class="shareDrawer__btn" [disabled]="rejectionBusy()" (click)="openRejectConfirmation('internal')">
               Internal reject
             </button>
-            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="rejectionBusy()" (click)="rejectProposal('client')">
+            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="rejectionBusy()" (click)="openRejectConfirmation('client')">
               Client reject
             </button>
           </div>
@@ -242,9 +271,11 @@
       </div>
 
       <div class="docsRight">
-        <button class="docsIcon" type="button" title="History" (click)="setRightbarTab('versions')">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        @if (!isCreateFlow()) {
+          <button class="docsIcon" type="button" title="History" (click)="setRightbarTab('versions')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        }
         <button class="docsIcon" type="button" title="Comments">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         </button>
@@ -419,7 +450,7 @@
   </header>
 
   @if (errorText()) {
-    <div class="banner banner--error">{{ errorText() }}</div>
+    <div class="errorToast" role="alert" aria-live="polite">{{ errorText() }}</div>
   }
 
   @if (isLoading() || isInserting() || isImagePlacing()) {
@@ -427,15 +458,37 @@
   }
 
   @if (pageCount() === 0) {
-    <main class="empty">
-      <div class="empty__card">
-        <div class="empty__title">Upload a PDF to start editing</div>
-        <div class="empty__sub">
-          This keeps your original PDF layout. Your edits are added on top (pen + text) and then baked into an exported
-          PDF.
+    @if (docId() === null) {
+      <main class="empty">
+        <div class="empty__card welcome">
+          <div class="empty__title">Proposal Editor</div>
+          <div class="empty__sub">Create a new proposal or improve an existing one.</div>
+          <div class="welcome__actions">
+            <button
+              type="button"
+              class="welcomeBtn welcomeBtn--primary"
+              [disabled]="isLoading() || isSaving()"
+              (click)="startFreshProposal()"
+            >
+              Start Fresh Proposal
+            </button>
+            <button type="button" class="welcomeBtn welcomeBtn--ghost" (click)="backToLibrary()" [disabled]="isLoading() || isSaving()">
+              Edit Existing Proposal
+            </button>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    } @else {
+      <main class="empty">
+        <div class="empty__card">
+          <div class="empty__title">Upload a PDF to start editing</div>
+          <div class="empty__sub">
+            This keeps your original PDF layout. Your edits are added on top (pen + text) and then baked into an exported
+            PDF.
+          </div>
+        </div>
+      </main>
+    }
   } @else {
     <main
       class="workspaceWrap"
@@ -477,7 +530,7 @@
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
         <div class="sidebarHeader">
-          <div class="sidebar__title">Pages</div>
+          <div class="sidebar__title">Key Pages</div>
           <button
             type="button"
             class="sidebarToggle"
@@ -510,6 +563,99 @@
           </button>
         </div>
 
+        <div class="keySlots" aria-label="Key page slots">
+          <div class="keySlots__group">
+            <button
+              type="button"
+              class="keySlot"
+              [class.isActive]="activePageIndex() === 0"
+              [disabled]="!isKeySlotPageAvailable(0)"
+              (click)="setActivePage(0)"
+            >
+              W/
+            </button>
+            <button
+              type="button"
+              class="keySlot"
+              [class.isActive]="activePageIndex() === 1"
+              [disabled]="!isKeySlotPageAvailable(1)"
+              (click)="setActivePage(1)"
+            >
+              Project
+            </button>
+            <button
+              type="button"
+              class="keySlot"
+              [class.isActive]="activePageIndex() === 2"
+              [disabled]="!isKeySlotPageAvailable(2)"
+              (click)="setActivePage(2)"
+            >
+              Gut
+            </button>
+          </div>
+
+          @if (customKeySlots().length > 0) {
+            <div class="keySlots__divider" aria-hidden="true"></div>
+          }
+
+          <div class="keySlots__custom">
+            @for (slot of customKeySlots(); track slot.id; let i = $index) {
+              <div
+                class="keySlotRow"
+                [class.isActive]="activePageIndex() === 3 + i"
+                (click)="setActivePage(3 + i)"
+                (keydown.enter)="setActivePage(3 + i)"
+                role="button"
+                tabindex="0"
+                (dragover)="onCustomKeySlotDragOver($event)"
+                (drop)="onCustomKeySlotDrop(i, $event)"
+              >
+                <button
+                  type="button"
+                  class="keySlot keySlot--custom"
+                  [disabled]="!isKeySlotPageAvailable(3 + i)"
+                  [class.isActive]="activePageIndex() === 3 + i"
+                  (click)="setActivePage(3 + i); $event.stopPropagation()"
+                >
+                  {{ slot.title }}
+                </button>
+                <div class="keySlotRow__actions">
+                  <button
+                    type="button"
+                    class="keySlotRow__btn keySlotRow__btn--rename"
+                    title="Rename"
+                    [disabled]="readonlyMode() || isLoading() || isSaving()"
+                    (click)="renameCustomKeySlot(i); $event.stopPropagation()"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    class="keySlotRow__btn keySlotRow__btn--drag"
+                    title="Drag to reorder"
+                    [disabled]="readonlyMode() || isLoading() || isSaving() || customKeySlots().length <= 1"
+                    draggable="true"
+                    (dragstart)="onCustomKeySlotDragStart(i, $event)"
+                    (click)="$event.stopPropagation()"
+                  >
+                    ↕
+                  </button>
+                </div>
+              </div>
+            }
+          </div>
+
+          <button
+            type="button"
+            class="keySlots__add"
+            (click)="addCustomKeySlot()"
+            [disabled]="readonlyMode() || isLoading() || isSaving()"
+            title="Add a new custom section"
+          >
+            + Add section
+          </button>
+        </div>
+
         <div class="sidebar__scroll">
           <div class="sidebar__list">
             @for (pageIndex of pages(); track pageIndex) {
@@ -534,7 +680,7 @@
                   class="pageDragHandle"
                   draggable="true"
                   title="Drag to reorder slides"
-                  [disabled]="pageCount() <= 1 || isLoading() || isSaving()"
+                  [disabled]="pageCount() <= 1 || isLoading() || isSaving() || isKeySlotPageIndex(pageIndex)"
                   [attr.aria-label]="'Drag to reorder slide ' + (pageIndex + 1)"
                   (dragstart)="onSlideReorderDragStart(pageIndex, $event)"
                   (dragend)="onSlideReorderDragEnd()"
@@ -931,22 +1077,24 @@
               <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'versions'"
-            [attr.aria-selected]="rightbarTab() === 'versions'"
-            aria-label="Versions"
-            title="Versions"
-            (click)="setRightbarTab('versions')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
+          @if (!isCreateFlow()) {
+            <button
+              type="button"
+              role="tab"
+              class="rightbarTabs__btn"
+              [class.rightbarTabs__btnActive]="rightbarTab() === 'versions'"
+              [attr.aria-selected]="rightbarTab() === 'versions'"
+              aria-label="Versions"
+              title="Versions"
+              (click)="setRightbarTab('versions')"
+            >
+              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          }
         </nav>
 
         @if (rightbarTab() === 'options') {
@@ -1099,26 +1247,26 @@
               <div class="rightbarMediaActions" role="group" aria-label="Slide actions">
                 <div class="rightbarMediaActions__title">Slide {{ activePageIndex() + 1 }} Actions</div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlide(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddSlide(activePageIndex(), $event)">
                     Add slide
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarDuplicateSlide(activePageIndex(), $event)">
                     Duplicate slide
                   </button>
                 </div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddPageInSection(activePageIndex(), $event)">
                     Add page in section
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="onSidebarAddSlideFromTemplate(activePageIndex(), $event)">
                     Add from template
                   </button>
                 </div>
                 <div class="rightbarMediaActions__row">
-                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving()" (click)="updateSidebarSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="updateSidebarSection(activePageIndex(), $event)">
                     Update section
                   </button>
-                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving()" (click)="removeSidebarSection(activePageIndex(), $event)">
+                  <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" [disabled]="isLoading() || isSaving() || isKeySlotPageIndex(activePageIndex())" (click)="removeSidebarSection(activePageIndex(), $event)">
                     Remove section
                   </button>
                 </div>
@@ -1126,7 +1274,7 @@
                   <button
                     type="button"
                     class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
-                    [disabled]="isLoading() || isSaving() || pageCount() <= 1"
+                    [disabled]="isLoading() || isSaving() || pageCount() <= 1 || isKeySlotPageIndex(activePageIndex())"
                     (click)="onSidebarMenuRemoveSlide(activePageIndex(), $event)"
                   >
                     Remove slide
@@ -1264,7 +1412,7 @@
           </div>
         }
 
-        @if (rightbarTab() === 'versions') {
+        @if (!isCreateFlow() && rightbarTab() === 'versions') {
           <div class="rightbar__panel rightbar__panelVersions" role="tabpanel" aria-label="Version history">
             @if (isVersionHistoryLoading()) {
               <p class="rightbarAssetsHint">Loading version history...</p>
