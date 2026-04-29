@@ -985,13 +985,16 @@
                 @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
                   <div class="textDraft" [ngStyle]="textDraftStyle()">
                     <textarea
+                      #textDraftEditor
                       [(ngModel)]="textDraft"
                       placeholder="Type…"
-                      (keydown.enter)="$event.stopPropagation()"
-                      (keydown.control.enter)="$event.preventDefault(); commitTextDraft()"
-                      (keydown.meta.enter)="$event.preventDefault(); commitTextDraft()"
+                      (keydown)="onTextDraftKeydown($event)"
                       (keydown.escape)="cancelTextDraft()"
                       (blur)="onTextDraftBlur($event)"
+                      (select)="onTextDraftSelectionChange()"
+                      (keyup)="onTextDraftSelectionChange()"
+                      (pointerup)="onTextDraftSelectionChange()"
+                      (focus)="onTextDraftSelectionChange()"
                       autofocus
                     ></textarea>
                   </div>

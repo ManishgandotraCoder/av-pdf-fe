@@ -540,6 +540,7 @@ export class PdfEditorComponent implements AfterViewInit {
   @ViewChild('widgetVideoFile') private readonly widgetVideoFile?: ElementRef<HTMLInputElement>;
   @ViewChild('widgetSignatureFile') private readonly widgetSignatureFile?: ElementRef<HTMLInputElement>;
   @ViewChild('furnitureLogoFile') private readonly furnitureLogoFile?: ElementRef<HTMLInputElement>;
+  @ViewChild('textDraftEditor') private readonly textDraftEditor?: ElementRef<HTMLTextAreaElement>;
 
   /** Click insert flow: pick type (and file for image/video), then click the page to place. */
   protected readonly insertWidgetPending = signal<InsertWidgetPending | null>(null);
@@ -698,6 +699,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private editingReplace: { pageIndex: number; idx: number } | null = null;
   private suppressCommitOnBlurOnce = false;
+  private textDraftSelection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null = null;
 
   protected readonly isTextPlacing = signal(false);
   protected readonly textDraft = signal('');
@@ -826,15 +828,28 @@ export class PdfEditorComponent implements AfterViewInit {
   ];
 
   protected toggleItalic() {
-    this.textStyle.set(this.textStyle() === 'italic' ? 'regular' : 'italic');
+    this.applyTextToolbarChange(() => {
+      const current = this.textStyle();
+      const isItalic = current === 'italic' || current === 'boldItalic';
+      const weight = this.textWeight();
+      if (isItalic) {
+        this.textStyle.set(weight === 700 ? 'bold' : 'regular');
+      } else {
+        this.textStyle.set(weight === 700 ? 'boldItalic' : 'italic');
+      }
+    });
   }
 
   protected toggleBold() {
-    this.setTextWeight(this.textWeight() === 700 ? 400 : 700);
+    this.applyTextToolbarChange(() => {
+      this.setTextWeight(this.textWeight() === 700 ? 400 : 700);
+    });
   }
 
   protected toggleTextBgEnabled() {
-    this.textBgEnabled.set(!this.textBgEnabled());
+    this.applyTextToolbarChange(() => {
+      this.textBgEnabled.set(!this.textBgEnabled());
+    });
   }
 
   protected toggleTextFeatureEnabled() {
@@ -2286,7 +2301,7 @@ export class PdfEditorComponent implements AfterViewInit {
       id: 'font-size',
       title: 'Font size',
       value: () => this.textSize(),
-      setValue: (v) => this.textSize.set(Number(v)),
+      setValue: (v) => this.setTextSize(Number(v)),
       options: this.fontSizeOptions.map((s) => ({ label: String(s), value: s })),
       disabled: () => !this.textFeatureEnabled()
     },
@@ -2323,7 +2338,7 @@ export class PdfEditorComponent implements AfterViewInit {
       id: 'bg-color',
       title: 'Background color picker',
       value: () => this.textBgColor(),
-      setValue: (v) => this.textBgColor.set(v),
+      setValue: (v) => this.setTextBgColor(v),
       disabled: () => !this.textFeatureEnabled() || !this.textBgEnabled()
     },
     {
@@ -2339,7 +2354,7 @@ export class PdfEditorComponent implements AfterViewInit {
       id: 'text-color',
       title: 'Font color',
       value: () => this.textColor(),
-      setValue: (v) => this.textColor.set(v),
+      setValue: (v) => this.setTextColor(v),
       disabled: () => !this.textFeatureEnabled()
     },
     { kind: 'sep', id: 'sep-5' },
@@ -5109,8 +5124,14 @@ export class PdfEditorComponent implements AfterViewInit {
     // If we are editing existing text, allow empty newText (acts like delete):
     // we still create the replacement rectangle to cover the original glyphs.
     if (this.textDraftBox) {
+      const styleChanged =
+        this.textBgColor() !== this.textDraftBox.bgColor ||
+        this.textColor() !== this.textDraftBox.color ||
+        this.textSize() !== this.textDraftBox.fontSize ||
+        this.textStyle() !== this.textDraftBox.fontStyle ||
+        this.textFamily() !== this.textDraftBox.fontFamily;
       // If user didn't change anything, don't create a replacement (avoids flashing/white patches).
-      if (text === this.textDraftBox.oldText) {
+      if (text === this.textDraftBox.oldText && !styleChanged) {
         this.isTextPlacing.set(false);
         this.textDraft.set('');
         this.textDraftPageIndex.set(null);
@@ -5165,9 +5186,13 @@ export class PdfEditorComponent implements AfterViewInit {
     this.redrawOverlay(pageIndex);
   }
 
-  protected onToolbarPointerDown(_ev: PointerEvent) {
+  protected onToolbarPointerDown(ev: PointerEvent) {
     // Clicking toolbar controls blurs the textarea; we want to keep the current
     // text selection active while the user tweaks styling.
+    const target = ev.target as HTMLElement | null;
+    // Do not prevent default on native selects; it blocks the dropdown popup.
+    if (target?.closest('button, input, label') && !target.closest('select')) ev.preventDefault();
+    this.captureTextDraftSelection();
     this.suppressCommitOnBlurOnce = true;
     queueMicrotask(() => {
       this.suppressCommitOnBlurOnce = false;
@@ -5177,7 +5202,19 @@ export class PdfEditorComponent implements AfterViewInit {
   protected onTextDraftBlur(ev: FocusEvent) {
     if (this.suppressCommitOnBlurOnce) return;
     const next = (ev.relatedTarget ?? null) as HTMLElement | null;
-    if (next?.closest?.('.toolbar')) return;
+    if (next?.closest?.('.docsRow--tools, .toolStrip, .rightbar')) return;
+    this.commitTextDraft();
+  }
+
+  protected onTextDraftSelectionChange() {
+    this.captureTextDraftSelection();
+  }
+
+  protected onTextDraftKeydown(ev: KeyboardEvent) {
+    if (ev.key !== 'Enter') return;
+    if (ev.shiftKey) return;
+    ev.preventDefault();
+    ev.stopPropagation();
     this.commitTextDraft();
   }
 
@@ -5265,12 +5302,56 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected setTextFamily(family: FontFamily) {
-    this.textFamily.set(family);
-    // Some PDFs expose subset font names like "ABCDEE+Helvetica-Bold".
-    // Treat it as Helvetica with bold weight.
-    if (family === 'abcdee_helvetica_bold') {
-      this.textStyle.set(styleWithWeight(this.textStyle(), 700));
-    }
+    this.applyTextToolbarChange(() => {
+      this.textFamily.set(family);
+      // Some PDFs expose subset font names like "ABCDEE+Helvetica-Bold".
+      // Treat it as Helvetica with bold weight.
+      if (family === 'abcdee_helvetica_bold') {
+        this.textStyle.set(styleWithWeight(this.textStyle(), 700));
+      }
+    });
+  }
+
+  protected setTextSize(size: number) {
+    this.applyTextToolbarChange(() => {
+      this.textSize.set(size);
+    });
+  }
+
+  protected setTextColor(color: string) {
+    this.applyTextToolbarChange(() => {
+      this.textColor.set(color);
+    });
+  }
+
+  protected setTextBgColor(color: string) {
+    this.applyTextToolbarChange(() => {
+      this.textBgColor.set(color);
+    });
+  }
+
+  private applyTextToolbarChange(mutator: () => void) {
+    this.captureTextDraftSelection();
+    mutator();
+    queueMicrotask(() => this.restoreTextDraftSelection());
+  }
+
+  private captureTextDraftSelection() {
+    const ta = this.textDraftEditor?.nativeElement;
+    if (!ta || this.textDraftPageIndex() === null) return;
+    this.textDraftSelection = {
+      start: ta.selectionStart ?? 0,
+      end: ta.selectionEnd ?? 0,
+      direction: ta.selectionDirection ?? 'none'
+    };
+  }
+
+  private restoreTextDraftSelection() {
+    const ta = this.textDraftEditor?.nativeElement;
+    const sel = this.textDraftSelection;
+    if (!ta || !sel || this.textDraftPageIndex() === null) return;
+    ta.focus({ preventScroll: true });
+    ta.setSelectionRange(sel.start, sel.end, sel.direction);
   }
 
   private pushTextReplace(pageIndex: number, rep: TextReplace) {
