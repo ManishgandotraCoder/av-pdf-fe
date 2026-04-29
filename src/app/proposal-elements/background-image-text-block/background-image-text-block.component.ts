@@ -43,6 +43,7 @@ export class BackgroundImageTextBlockComponent {
 
   protected readonly paddedBlockStyle = computed(() => ({
     padding: `${this.presentation().innerPaddingPx ?? 24}px`,
+    textAlign: this.presentation().contentAlign ?? 'left',
     ...(this.maxWidthStyle() ?? {})
   }));
 
@@ -53,6 +54,12 @@ export class BackgroundImageTextBlockComponent {
       textShadow: '0 1px 22px rgba(0,0,0,0.55)'
     })
   );
+
+  protected readonly blurStyle = computed(() => {
+    const px = Number(this.presentation().overlayBlurPx ?? 0);
+    const safe = Number.isFinite(px) ? Math.max(0, Math.min(24, px)) : 0;
+    return safe > 0 ? { backdropFilter: `blur(${safe}px)` } : {};
+  });
 
   private maxWidthStyle(): Record<string, string> | null {
     const m = this.presentation().textMaxWidthPx;

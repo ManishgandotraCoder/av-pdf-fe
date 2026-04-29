@@ -94,7 +94,9 @@ export function typographyCssFromStyle(style: ProposalTextStyle): Record<string,
   const out: Record<string, string> = {};
   if (style.fontFamily) out['font-family'] = style.fontFamily;
   if (style.fontSizePx) out['font-size'] = `${style.fontSizePx}px`;
+  if (style.fontWeight) out['font-weight'] = style.fontWeight;
   if (style.color) out['color'] = style.color;
+  if (style.align) out['text-align'] = style.align;
   if (style.letterSpacingPx !== undefined) out['letter-spacing'] = `${style.letterSpacingPx}px`;
   if (style.lineHeight !== undefined) out['line-height'] = String(style.lineHeight);
   const pad = style.paddingPx;

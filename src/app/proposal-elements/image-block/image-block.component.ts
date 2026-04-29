@@ -13,7 +13,9 @@ import {
 import type { ProposalImageContent, ProposalImageStyle } from '../models/proposal-element.model';
 import { ProposalImageCropDialogComponent } from '../proposal-image-crop-dialog.component';
 
-export type ProposalImagePatch = Partial<ProposalImageContent>;
+export type ProposalImagePatch = Partial<ProposalImageContent> & {
+  style?: Partial<ProposalImageStyle>;
+};
 
 @Component({
   selector: 'proposal-image-block',
@@ -158,6 +160,14 @@ export class ImageBlockComponent {
       uploadedFileName: undefined,
       uploadMimeType: undefined
     });
+  }
+
+  protected setObjectFit(value: 'cover' | 'contain') {
+    this.imagePatch.emit({ style: { objectFit: value } });
+  }
+
+  protected setRotationDeg(value: number) {
+    this.imagePatch.emit({ style: { rotationDeg: Number.isFinite(value) ? value : 0 } });
   }
 
   /** Revoke staged blob + clear names (not persisted model). */

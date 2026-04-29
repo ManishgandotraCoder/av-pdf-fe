@@ -16,10 +16,12 @@ import type { ProposalElementPosition } from '../models/proposal-element.model';
     '[style.width.px]': 'position().width',
     '[style.height.px]': 'position().height',
     '[style.zIndex]': 'position().zIndex',
+    '[style.transform]': '"rotate(" + (position().rotation ?? 0) + "deg)"',
     class: 'proposalShellHost'
   }
 })
 export class ProposalElementShellComponent {
+  private readonly grid = 8;
   readonly frameWidthPx = input(920);
   readonly frameHeightPx = input(520);
 
@@ -97,16 +99,16 @@ export class ProposalElementShellComponent {
     const min = 56;
 
     if (d.kind === 'move') {
-      const nx = clamp(d.x0 + ev.clientX - d.ptr0, 0, Math.max(0, fw - d.w0));
-      const ny = clamp(d.y0 + ev.clientY - d.ptr1, 0, Math.max(0, fh - d.h0));
+      const nx = snap(clamp(d.x0 + ev.clientX - d.ptr0, 0, Math.max(0, fw - d.w0)), this.grid);
+      const ny = snap(clamp(d.y0 + ev.clientY - d.ptr1, 0, Math.max(0, fh - d.h0)), this.grid);
       this.patchPosition.emit({ ...this.position(), x: nx, y: ny });
       return;
     }
 
     let nw = d.bw + (ev.clientX - d.ptr0);
     let nh = d.bh + (ev.clientY - d.ptr1);
-    nw = Math.max(min, Math.min(fw - d.bx, nw));
-    nh = Math.max(min, Math.min(fh - d.by, nh));
+    nw = snap(Math.max(min, Math.min(fw - d.bx, nw)), this.grid);
+    nh = snap(Math.max(min, Math.min(fh - d.by, nh)), this.grid);
     this.patchPosition.emit({
       ...this.position(),
       x: d.bx,
@@ -128,4 +130,9 @@ export class ProposalElementShellComponent {
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function snap(n: number, unit: number) {
+  if (unit <= 1) return n;
+  return Math.round(n / unit) * unit;
 }

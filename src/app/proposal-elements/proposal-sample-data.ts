@@ -48,7 +48,7 @@ export function createSampleProposalSlide(): ProposalSlide {
       },
       {
         id: newProposalLocalId('toi'),
-        type: 'textOverlayImage',
+        type: 'textOverImage',
         content: {
           imageSrc: 'https://picsum.photos/seed/overlay/800/500',
           overlayHtml: '<h2>Text over image</h2><p>Mask + alignment</p>',
@@ -64,7 +64,7 @@ export function createSampleProposalSlide(): ProposalSlide {
       },
       {
         id: newProposalLocalId('bit'),
-        type: 'backgroundImageText',
+        type: 'imageBackgroundText',
         content: {
           imageSrc: 'https://picsum.photos/seed/fullbleed/1200/800',
           overlayHtml: '<h2>Background + text</h2><p>Cover / contain, tint, max width.</p>'

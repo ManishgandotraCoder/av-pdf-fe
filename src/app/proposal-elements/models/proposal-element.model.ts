@@ -9,6 +9,8 @@ export type ProposalElementType =
   | 'text'
   | 'video'
   | 'image'
+  | 'textOverImage'
+  | 'imageBackgroundText'
   | 'textOverlayImage'
   | 'backgroundImageText';
 
@@ -18,6 +20,7 @@ export interface ProposalElementPosition {
   width: number;
   height: number;
   zIndex: number;
+  rotation?: number;
 }
 
 /** Canonical HTML subset for proposal text blocks (sanitized upstream in production APIs). */
@@ -28,7 +31,9 @@ export interface ProposalTextRichContent {
 export interface ProposalTextStyle {
   fontFamily?: string;
   fontSizePx?: number;
+  fontWeight?: string;
   color?: string;
+  align?: 'left' | 'center' | 'right' | 'justify';
   letterSpacingPx?: number;
   lineHeight?: number | string;
   paddingPx?: number;
@@ -47,6 +52,10 @@ export interface ProposalVideoContent {
   uploadedFileName?: string;
   /** MIME type reported by the browser for the picked file (optional, for uploads). */
   uploadMimeType?: string;
+  autoplay?: boolean;
+  muted?: boolean;
+  loop?: boolean;
+  posterImage?: string;
 }
 
 export interface ProposalVideoStyle {
@@ -66,8 +75,10 @@ export interface ProposalImageContent {
 }
 
 export interface ProposalImageStyle {
+  objectFit?: 'cover' | 'contain';
   borderRadiusPx?: number;
   boxShadow?: string;
+  rotationDeg?: number;
 }
 
 export interface ProposalTextOverlayPosition {
@@ -104,7 +115,9 @@ export interface ProposalBackgroundImageTextStyle {
   backgroundSize?: 'cover' | 'contain';
   overlayOpacity?: number;
   overlayColor?: string;
+  overlayBlurPx?: number;
   innerPaddingPx?: number;
+  contentAlign?: 'left' | 'center' | 'right';
   textMaxWidthPx?: number | string;
 }
 
@@ -134,7 +147,7 @@ export interface ProposalImageElementModel {
 
 export interface ProposalTextOverlayImageElementModel {
   id: string;
-  type: 'textOverlayImage';
+  type: 'textOverlayImage' | 'textOverImage';
   content: ProposalTextOverlayImageContent;
   style: ProposalTextOverlayImageStyle;
   position: ProposalElementPosition;
@@ -142,7 +155,7 @@ export interface ProposalTextOverlayImageElementModel {
 
 export interface ProposalBackgroundImageTextElementModel {
   id: string;
-  type: 'backgroundImageText';
+  type: 'backgroundImageText' | 'imageBackgroundText';
   content: ProposalBackgroundImageTextContent;
   style: ProposalBackgroundImageTextStyle;
   position: ProposalElementPosition;

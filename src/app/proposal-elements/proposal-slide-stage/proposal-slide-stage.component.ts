@@ -51,8 +51,10 @@ export class ProposalSlideStageComponent {
       case 'image':
         return 'Image';
       case 'textOverlayImage':
+      case 'textOverImage':
         return 'Text · Image overlay';
       case 'backgroundImageText':
+      case 'imageBackgroundText':
         return 'Bg image + text';
       default:
         return 'Element';

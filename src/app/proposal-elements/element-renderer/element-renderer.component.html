@@ -31,7 +31,23 @@
       (overlayPatch)="overlayHtml($event)"
     ></proposal-text-overlay-image-block>
   }
+  @case ('textOverImage') {
+    <proposal-text-overlay-image-block
+      [content]="eTextOverlayImg().content"
+      [presentation]="eTextOverlayImg().style"
+      [textEditable]="editable()"
+      (overlayPatch)="overlayHtml($event)"
+    ></proposal-text-overlay-image-block>
+  }
   @case ('backgroundImageText') {
+    <proposal-background-image-text-block
+      [content]="eBgImgTxt().content"
+      [presentation]="eBgImgTxt().style"
+      [textEditable]="editable()"
+      (htmlPatch)="overlayHtml($event)"
+    ></proposal-background-image-text-block>
+  }
+  @case ('imageBackgroundText') {
     <proposal-background-image-text-block
       [content]="eBgImgTxt().content"
       [presentation]="eBgImgTxt().style"

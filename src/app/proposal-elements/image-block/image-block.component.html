@@ -66,6 +66,21 @@
       </div>
     }
   </div>
+
+  <div class="imageUploadRow">
+    <label class="imageLbl">Object fit</label>
+    <select class="imageUrlFld" [value]="presentation().objectFit ?? 'cover'" (change)="setObjectFit($any($event.target).value)">
+      <option value="cover">cover</option>
+      <option value="contain">contain</option>
+    </select>
+    <label class="imageLbl">Rotate</label>
+    <input
+      class="imageUrlFld"
+      type="number"
+      [value]="presentation().rotationDeg ?? 0"
+      (input)="setRotationDeg(+$any($event.target).value)"
+    />
+  </div>
 }
 
 <div
@@ -74,7 +89,14 @@
   [style.boxShadow]="presentation().boxShadow ?? null"
 >
   @if (content().src && !cropBlobUrl()) {
-    <img class="imageMedia" [src]="content().src!" [attr.alt]="content().alt || ''" draggable="false" />
+    <img
+      class="imageMedia"
+      [src]="content().src!"
+      [attr.alt]="content().alt || ''"
+      draggable="false"
+      [style.object-fit]="presentation().objectFit ?? 'cover'"
+      [style.transform]="'rotate(' + (presentation().rotationDeg ?? 0) + 'deg)'"
+    />
   } @else {
     @if (!cropBlobUrl()) {
       <div class="imageEmpty">

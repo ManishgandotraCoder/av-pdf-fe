@@ -105,6 +105,11 @@
   background: #eef2ff;
 }
 
+.pedAddGrid {
+  display: grid;
+  gap: 8px;
+}
+
 .pedHint {
   margin: 0;
   font-size: 13px;

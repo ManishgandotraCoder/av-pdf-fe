@@ -26,6 +26,20 @@
 
     <aside class="pedInspector" aria-label="Inspector">
       <div class="pedInspectorBlock">
+        <div class="pedInspectorTitle">Add element</div>
+        <div class="pedAddGrid">
+          <button type="button" class="pedBtn" (click)="addElement('text')">Text</button>
+          <button type="button" class="pedBtn" (click)="addElement('image')">Image</button>
+          <button type="button" class="pedBtn" (click)="addElement('video')">Video</button>
+          <button type="button" class="pedBtn" (click)="addElement('textOverImage')">Text over image</button>
+          <button type="button" class="pedBtn" (click)="addElement('imageBackgroundText')">Image background text</button>
+        </div>
+        @if (status()) {
+          <p class="pedHint">{{ status() }}</p>
+        }
+      </div>
+
+      <div class="pedInspectorBlock">
         <div class="pedInspectorTitle">Selection</div>
         @if (selected(); as sel) {
           <div class="pedMeta">
@@ -36,6 +50,7 @@
           <div class="pedZ">
             <button type="button" class="pedBtn" (click)="bumpZ(1)">Bring forward</button>
             <button type="button" class="pedBtn" (click)="bumpZ(-1)">Send back</button>
+            <button type="button" class="pedBtn" (click)="removeSelected()">Delete</button>
           </div>
         } @else {
           <p class="pedHint">Select an element on the slide.</p>

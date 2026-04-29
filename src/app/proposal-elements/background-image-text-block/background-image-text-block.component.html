@@ -12,7 +12,7 @@
     <div class="bagFall" aria-hidden="true"></div>
   }
 
-  <div class="bagTint" [ngStyle]="tintStyle()" aria-hidden="true"></div>
+  <div class="bagTint" [ngStyle]="{ ...tintStyle(), ...blurStyle() }" aria-hidden="true"></div>
 
   <article class="bagOuter">
     <div class="bagCopy" [ngStyle]="paddedBlockStyle()">

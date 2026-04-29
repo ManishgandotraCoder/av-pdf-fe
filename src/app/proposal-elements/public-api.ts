@@ -13,6 +13,7 @@ export { ElementRendererComponent } from './element-renderer/element-renderer.co
 export { ProposalElementShellComponent } from './proposal-element-shell/proposal-element-shell.component';
 export { ProposalSlideStageComponent } from './proposal-slide-stage/proposal-slide-stage.component';
 export { ProposalElementsDemoComponent } from './proposal-elements-demo.component';
+export { ProposalElementsApiService } from './proposal-elements-api.service';
 
 export { TextBlockComponent } from './text-block/text-block.component';
 export { VideoBlockComponent } from './video-block/video-block.component';

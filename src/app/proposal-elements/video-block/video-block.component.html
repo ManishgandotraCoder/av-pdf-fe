@@ -67,6 +67,22 @@
         }
       </div>
     }
+    <div class="videoUploadRow">
+      <label><input type="checkbox" [checked]="content().autoplay ?? false" (change)="toggleFlag('autoplay', $any($event.target).checked)" /> autoplay</label>
+      <label><input type="checkbox" [checked]="content().muted ?? false" (change)="toggleFlag('muted', $any($event.target).checked)" /> mute</label>
+      <label><input type="checkbox" [checked]="content().loop ?? false" (change)="toggleFlag('loop', $any($event.target).checked)" /> loop</label>
+    </div>
+    <label class="videoBlockLbl" for="proposalVideoPoster">Poster image URL</label>
+    <input
+      id="proposalVideoPoster"
+      type="url"
+      class="videoBlockUrl"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="https://.../poster.jpg"
+      [value]="content().posterImage ?? ''"
+      (input)="onPosterInput($event)"
+    />
   </div>
 }
 
@@ -82,7 +98,15 @@
       allowfullscreen
     ></iframe>
   } @else if (parsedNow?.kind === 'fileVideo') {
-    <video class="videoTag" controls [poster]="content().thumbnailUrl || null" preload="metadata">
+    <video
+      class="videoTag"
+      controls
+      [autoplay]="content().autoplay ?? false"
+      [muted]="content().muted ?? false"
+      [loop]="content().loop ?? false"
+      [poster]="content().posterImage || content().thumbnailUrl || null"
+      preload="metadata"
+    >
       <source [src]="parsedNow!.embedSrc" [attr.type]="content().uploadMimeType || null" />
     </video>
   } @else {

@@ -147,6 +147,14 @@ export class VideoBlockComponent {
     });
   }
 
+  protected toggleFlag(key: 'autoplay' | 'muted' | 'loop', checked: boolean) {
+    this.playerChange.emit({ [key]: checked });
+  }
+
+  protected onPosterInput(ev: Event) {
+    this.playerChange.emit({ posterImage: (ev.target as HTMLInputElement).value.trim() });
+  }
+
   /** Link field skips blob URLs (shown in upload panel instead). */
   protected linkInputValue(): string {
     const u = this.playableUrlRaw();

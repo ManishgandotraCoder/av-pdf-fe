@@ -66,3 +66,13 @@ export interface UploadMediaSuccess {
   mimeType?: string;
   thumbUrl?: string;
 }
+
+/** `POST /api/slides/:id/elements` */
+export interface AddSlideElementBody {
+  element: ProposalSlideElement;
+}
+
+/** `PUT /api/elements/:id` */
+export interface UpdateElementBody {
+  patch: Partial<ProposalSlideElement>;
+}
