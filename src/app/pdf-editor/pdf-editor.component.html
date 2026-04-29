@@ -28,6 +28,158 @@
     </div>
   }
 
+  @if (overwriteConfirmOpen()) {
+    <div class="deleteSlideModal" (click)="closeOverwriteConfirmation()">
+      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
+      <div
+        class="deleteSlideModal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="overwriteProposalTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <h2 id="overwriteProposalTitle" class="deleteSlideModal__title">Overwrite original proposal?</h2>
+        <p class="deleteSlideModal__message">This will replace the original file. This action cannot be undone.</p>
+        <div class="deleteSlideModal__actions">
+          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="closeOverwriteConfirmation()">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="deleteSlideModal__btn deleteSlideModal__btn--danger"
+            [disabled]="isSaving()"
+            (click)="confirmOverwriteProposal()"
+          >
+            Confirm Overwrite
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (sharePanelOpen()) {
+    <div class="shareDrawer" (click)="closeSharePanel()">
+      <div class="shareDrawer__backdrop" aria-hidden="true"></div>
+      <aside
+        class="shareDrawer__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shareDrawerTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <div class="shareDrawer__head">
+          <h2 id="shareDrawerTitle" class="shareDrawer__title">Share proposal</h2>
+          <button type="button" class="shareDrawer__close" (click)="closeSharePanel()" aria-label="Close share panel">
+            X
+          </button>
+        </div>
+
+        <section class="shareDrawer__section">
+          <h3 class="shareDrawer__sectionTitle">Share Link</h3>
+          <div class="shareDrawer__row">
+            <label class="shareDrawer__radio">
+              <input
+                type="radio"
+                name="shareAccessType"
+                value="public"
+                [ngModel]="shareAccessType()"
+                (ngModelChange)="shareAccessType.set($event)"
+              />
+              Public
+            </label>
+            <label class="shareDrawer__radio">
+              <input
+                type="radio"
+                name="shareAccessType"
+                value="restricted"
+                [ngModel]="shareAccessType()"
+                (ngModelChange)="shareAccessType.set($event)"
+              />
+              Restricted
+            </label>
+          </div>
+          <div class="shareDrawer__row">
+            <button type="button" class="shareDrawer__btn" [disabled]="shareBusy()" (click)="generateShareLink()">
+              Generate link
+            </button>
+            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="!shareUrl()" (click)="copyShareLink()">
+              Copy link
+            </button>
+          </div>
+          @if (shareUrl()) {
+            <input class="shareDrawer__input" [value]="shareUrl()" readonly />
+          }
+        </section>
+
+        <section class="shareDrawer__section">
+          <h3 class="shareDrawer__sectionTitle">Access Control</h3>
+          <div class="shareDrawer__row">
+            <input
+              class="shareDrawer__input"
+              type="email"
+              placeholder="Add user via email"
+              [ngModel]="shareEmailInput()"
+              (ngModelChange)="shareEmailInput.set($event)"
+            />
+            <select
+              class="shareDrawer__select"
+              [ngModel]="shareRoleInput()"
+              (ngModelChange)="shareRoleInput.set($event)"
+            >
+              <option value="viewer">Viewer</option>
+              <option value="commenter">Commenter</option>
+              <option value="editor">Editor</option>
+            </select>
+            <button type="button" class="shareDrawer__btn" [disabled]="shareBusy() || !shareEmailInput().trim()" (click)="addShareUser()">
+              Add
+            </button>
+          </div>
+          @if (shareUsers().length > 0) {
+            <div class="shareDrawer__userList">
+              @for (user of shareUsers(); track user.email) {
+                <div class="shareDrawer__userItem">
+                  <span>{{ user.email }}</span>
+                  <span class="shareDrawer__pill">{{ user.role }}</span>
+                </div>
+              }
+            </div>
+          }
+        </section>
+
+        <section class="shareDrawer__section">
+          <h3 class="shareDrawer__sectionTitle">Export Options</h3>
+          <div class="shareDrawer__row">
+            <button type="button" class="shareDrawer__btn" [disabled]="isLoading()" (click)="exportPdf()">Download as PDF</button>
+            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="isLoading()" (click)="downloadAsPpt()">
+              Download as PPT
+            </button>
+          </div>
+        </section>
+
+        @if (proposalDetails()?.derivedFrom) {
+          <section class="shareDrawer__section">
+            <h3 class="shareDrawer__sectionTitle">Metadata</h3>
+            <p class="shareDrawer__hint">
+              This proposal is based on another proposal
+              <span class="shareDrawer__tooltip" [title]="traceabilityHint">ⓘ</span>
+            </p>
+            @if (proposalDetails()?.derivedFromDetails?.isDeleted) {
+              <div class="shareDrawer__metaText">Original proposal not available</div>
+            } @else if (canOpenDerivedProposal()) {
+              <a href="#" class="shareDrawer__metaLink" (click)="openDerivedProposalReadOnly($event)">
+                Derived from: {{ derivedFromLabel() }}
+              </a>
+            } @else {
+              <div class="shareDrawer__metaText">
+                Derived from: {{ derivedFromLabel() }} (access restricted)
+              </div>
+            }
+          </section>
+        }
+      </aside>
+    </div>
+  }
+
   @if (slideToast()) {
     <div class="slideToast" role="status" aria-live="polite">{{ slideToast() }}</div>
   }
@@ -61,7 +213,7 @@
       </div>
 
       <div class="docsRight">
-        <button class="docsIcon" type="button" title="History">
+        <button class="docsIcon" type="button" title="History" (click)="setRightbarTab('versions')">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <button class="docsIcon" type="button" title="Comments">
@@ -74,24 +226,37 @@
         <button
           class="docsSave"
           type="button"
-          (click)="savePdfToDb()"
-          [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null"
-          title="Save PDF to server"
+          (click)="savePdfAsNewVersion()"
+          [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null || readonlyMode()"
+          title="Save as a new proposal version"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
             <path d="M17 21v-8H7v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
             <path d="M7 3v5h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
           </svg>
-          @if (isSaving()) { Saving… } @else { Save }
+          @if (isSaving()) { Saving… } @else { Save (this name) }
+        </button>
+        @if (isAutoVersionSaving() && !isSaving()) {
+          <span class="docsAutoSaving">Auto-saving versions...</span>
+        }
+
+        <button
+          class="docsOverwrite"
+          type="button"
+          (click)="openOverwriteConfirmation()"
+          [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null || readonlyMode()"
+          title="Overwrite original proposal"
+        >
+          Overwrite
         </button>
 
         <button
           class="docsShare"
           type="button"
-          (click)="exportPdf()"
+          (click)="openSharePanel()"
           [disabled]="pageCount() === 0 || isLoading()"
-          title="Share (Export PDF)"
+          title="Share"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 6l-4-4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2v14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           Share
@@ -279,6 +444,7 @@
         (change)="onSignatureFilePicked($event)"
         hidden
       />
+      <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
         <div class="sidebarHeader">
@@ -460,6 +626,44 @@
                   (pointercancel)="onOverlayPointerUp(activePageIndex(), $event)"
                 ></canvas>
 
+                <div class="pageFurnitureLayer">
+                  @if (pageFurniture().header.visible) {
+                    <div class="pageFurnitureHeader" [class.isCenter]="pageFurniture().header.alignment === 'center'" [class.isRight]="pageFurniture().header.alignment === 'right'">
+                      {{ furnitureText(pageFurniture().header.content, activePageIndex()) }}
+                    </div>
+                  }
+                  @if (pageFurniture().logo.visible && pageFurniture().logo.url) {
+                    <div class="pageFurnitureLogo" [class.isRight]="pageFurniture().logo.position === 'header-right'" [style.width.px]="pageFurniture().logo.width" [style.height.px]="pageFurniture().logo.height">
+                      @if (pageFurniture().logo.linkUrl) {
+                        <a [href]="pageFurniture().logo.linkUrl" target="_blank" rel="noopener noreferrer">
+                          <img [src]="pageFurniture().logo.url" alt="Logo" draggable="false" />
+                        </a>
+                      } @else {
+                        <img [src]="pageFurniture().logo.url" alt="Logo" draggable="false" />
+                      }
+                    </div>
+                  }
+                  @if (pageNumberLabel(activePageIndex())) {
+                    <div
+                      class="pageFurnitureNumber"
+                      [class.headerLeft]="pageFurniture().pageNumber.position === 'header-left'"
+                      [class.headerRight]="pageFurniture().pageNumber.position === 'header-right'"
+                      [class.footerLeft]="pageFurniture().pageNumber.position === 'footer-left'"
+                      [class.footerCenter]="pageFurniture().pageNumber.position === 'footer-center'"
+                      [class.footerRight]="pageFurniture().pageNumber.position === 'footer-right'"
+                    >
+                      {{ pageNumberLabel(activePageIndex()) }}
+                    </div>
+                  }
+                  @if (pageFurniture().footer.visible) {
+                    <div class="pageFurnitureFooter" [class.withDivider]="pageFurniture().footer.divider">
+                      <div class="pageFurnitureFooter__cell">{{ furnitureText(pageFurniture().footer.leftContent, activePageIndex()) }}</div>
+                      <div class="pageFurnitureFooter__cell pageFurnitureFooter__cellCenter">{{ furnitureText(pageFurniture().footer.centerContent, activePageIndex()) }}</div>
+                      <div class="pageFurnitureFooter__cell pageFurnitureFooter__cellRight">{{ furnitureText(pageFurniture().footer.rightContent, activePageIndex()) }}</div>
+                    </div>
+                  }
+                </div>
+
                 <div class="widgetLayer">
                   @for (w of widgetsByPage()[activePageIndex()]; track w.id) {
                     <div
@@ -573,7 +777,22 @@
                           }
                           @case ('video') {
                             @if (w.videoSrc) {
-                              <video class="widget__media" [src]="w.videoSrc" controls draggable="false"></video>
+                              @if (parseWidgetVideo(w.videoSrc); as parsedVideo) {
+                                @if (parsedVideo.kind === 'youtube' || parsedVideo.kind === 'vimeo') {
+                                  <iframe
+                                    class="widget__media widget__mediaIframe"
+                                    [src]="parsedVideo.embedSrc | safeVideoUrl"
+                                    title="Embedded video"
+                                    loading="lazy"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                    allowfullscreen
+                                  ></iframe>
+                                } @else {
+                                  <video class="widget__media" [src]="parsedVideo.embedSrc" controls draggable="false"></video>
+                                }
+                              } @else {
+                                <video class="widget__media" [src]="w.videoSrc" controls draggable="false"></video>
+                              }
                             } @else {
                               <div class="widget__label">Video</div>
                             }
@@ -618,90 +837,274 @@
         }
       </section>
 
-      <aside class="rightbar" aria-label="Insert tools">
-        <div class="rightbar__row">
-          <div class="rightbarTextGate" role="group" aria-label="PDF text editing">
-            <span class="rightbarTextGate__label">Text</span>
-            <button
-              type="button"
-              class="rightbarTextGate__btn"
-              [class.rightbarTextGate__btn--on]="textFeatureEnabled()"
-              (click)="toggleTextFeatureEnabled()"
-              [attr.aria-pressed]="textFeatureEnabled()"
-              [disabled]="pageCount() === 0 || isLoading()"
-              title="Turn PDF text tools on or off"
-            >
-              {{ textFeatureEnabled() ? 'On' : 'Off' }}
-            </button>
+      <aside class="rightbar" aria-label="Editor tools">
+        <nav class="rightbarTabs" role="tablist" aria-label="Right panel sections">
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'options'"
+            [attr.aria-selected]="rightbarTab() === 'options'"
+            (click)="setRightbarTab('options')"
+          >
+            Options
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'assets'"
+            [attr.aria-selected]="rightbarTab() === 'assets'"
+            (click)="setRightbarTab('assets')"
+          >
+            Assets
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'versions'"
+            [attr.aria-selected]="rightbarTab() === 'versions'"
+            (click)="setRightbarTab('versions')"
+          >
+            Versions
+          </button>
+        </nav>
+
+        @if (rightbarTab() === 'options') {
+          <div class="rightbar__panel rightbar__panelOptions" role="tabpanel">
+            <div class="rightbar__row">
+              <div class="rightbarTextGate" role="group" aria-label="PDF text editing">
+                <span class="rightbarTextGate__label">Text</span>
+                <button
+                  type="button"
+                  class="rightbarTextGate__btn"
+                  [class.rightbarTextGate__btn--on]="textFeatureEnabled()"
+                  (click)="toggleTextFeatureEnabled()"
+                  [attr.aria-pressed]="textFeatureEnabled()"
+                  [disabled]="pageCount() === 0 || isLoading()"
+                  title="Turn PDF text tools on or off"
+                >
+                  {{ textFeatureEnabled() ? 'On' : 'Off' }}
+                </button>
+              </div>
+
+              <div class="rightbar__iconRow" aria-label="Insert widgets">
+                <button
+                  type="button"
+                  class="rightbar__icon"
+                  draggable="true"
+                  title="Insert image"
+                  (dragstart)="onPdfImageDragStart($event)"
+                  (click)="onInsertWidgetClick('image', $event)"
+                  [disabled]="pageCount() === 0 || isLoading()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                    <path
+                      d="M8 14l2-2 4 4 2-2 2 2"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      d="M10 9a1.5 1.5 0 1 0 0 .01"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+
+              <button
+                type="button"
+                class="rightbar__icon"
+                draggable="true"
+                title="Insert table"
+                (dragstart)="onWidgetDragStart('table', $event)"
+                (click)="onInsertWidgetClick('table', $event)"
+                [disabled]="pageCount() === 0 || isLoading()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+
+              <div class="insertSourceMenu">
+                <button
+                  type="button"
+                  class="rightbar__icon"
+                  draggable="true"
+                  title="Insert video"
+                  (dragstart)="onPdfVideoDragStart($event)"
+                  (click)="toggleInsertSourceMenu('video', $event)"
+                  [disabled]="pageCount() === 0 || isLoading()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                    <path
+                      d="M15 10l5-3v10l-5-3z"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                @if (insertSourceMenu() === 'video') {
+                  <div class="insertSourceMenu__panel" role="menu">
+                    <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
+                      URL
+                    </button>
+                    <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
+                      Upload
+                    </button>
+                  </div>
+                }
+              </div>
+              </div>
+
+              @if (selectedMediaWidget(); as mediaSel) {
+                <div class="rightbarMediaActions" role="group" aria-label="Selected media actions">
+                  <div class="rightbarMediaActions__title">
+                    {{ mediaSel.widget.kind === 'image' ? 'Selected image' : 'Selected video' }}
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button type="button" class="rightbarMediaActions__btn" (click)="replaceSelectedMedia($event)">
+                      Replace
+                    </button>
+                    <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedMedia($event)">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              }
+
+              <div class="pageSettings">
+                <div class="pageSettings__title">Page Settings</div>
+                <p
+                  class="pageSettings__hint"
+                  [textContent]="'Dynamic fields: {{proposalTitle}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
+                ></p>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Header Settings</div>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().header.visible" (change)="updateHeaderFurniture({ visible: $any($event.target).checked })" /> Show header</label>
+                  <textarea class="pageSettings__textarea" [ngModel]="pageFurniture().header.content" (ngModelChange)="updateHeaderFurniture({ content: $event })" placeholder="Header content"></textarea>
+                  <select class="pageSettings__select" [ngModel]="pageFurniture().header.alignment" (ngModelChange)="updateHeaderFurniture({ alignment: $event })">
+                    @for (opt of furnitureAlignOptions; track opt) {
+                      <option [value]="opt">{{ opt }}</option>
+                    }
+                  </select>
+                </div>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Footer Settings</div>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().footer.visible" (change)="updateFooterFurniture({ visible: $any($event.target).checked })" /> Show footer</label>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().footer.divider" (change)="updateFooterFurniture({ divider: $any($event.target).checked })" /> Show divider line</label>
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().footer.leftContent" (ngModelChange)="updateFooterFurniture({ leftContent: $event })" placeholder="Footer left" />
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().footer.centerContent" (ngModelChange)="updateFooterFurniture({ centerContent: $event })" placeholder="Footer center" />
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().footer.rightContent" (ngModelChange)="updateFooterFurniture({ rightContent: $event })" placeholder="Footer right" />
+                </div>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Page Number Settings</div>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().pageNumber.visible" (change)="updatePageNumberFurniture({ visible: $any($event.target).checked })" /> Show page number</label>
+                  <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.format" (ngModelChange)="updatePageNumberFurniture({ format: $event })">
+                    @for (fmt of pageNumberFormatOptions; track fmt) {
+                      <option [value]="fmt">{{ fmt }}</option>
+                    }
+                  </select>
+                  <select class="pageSettings__select" [ngModel]="pageFurniture().pageNumber.position" (ngModelChange)="updatePageNumberFurniture({ position: $event })">
+                    @for (pos of pageNumberPositionOptions; track pos) {
+                      <option [value]="pos">{{ pos }}</option>
+                    }
+                  </select>
+                  <input class="pageSettings__input" type="number" min="1" [ngModel]="pageFurniture().pageNumber.startFrom" (ngModelChange)="updatePageNumberFurniture({ startFrom: +$event || 1 })" placeholder="Start from" />
+                </div>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Logo Settings</div>
+                  <div class="pageSettings__row">
+                    <button type="button" class="pageSettings__btn" (click)="openLogoPicker($event)">Upload / Replace</button>
+                    <button type="button" class="pageSettings__btn pageSettings__btnDanger" (click)="removeLogo()">Remove</button>
+                  </div>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().logo.visible" (change)="updateLogoFurniture({ visible: $any($event.target).checked })" /> Show logo</label>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="pageFurniture().logo.keepAspectRatio" (change)="updateLogoFurniture({ keepAspectRatio: $any($event.target).checked })" /> Maintain aspect ratio</label>
+                  <select class="pageSettings__select" [ngModel]="pageFurniture().logo.position" (ngModelChange)="updateLogoFurniture({ position: $event })">
+                    <option value="header-left">header-left</option>
+                    <option value="header-right">header-right</option>
+                  </select>
+                  <div class="pageSettings__row">
+                    <input class="pageSettings__input" type="number" min="24" [ngModel]="pageFurniture().logo.width" (ngModelChange)="onLogoWidthInput($event)" placeholder="Width" />
+                    <input class="pageSettings__input" type="number" min="16" [ngModel]="pageFurniture().logo.height" (ngModelChange)="onLogoHeightInput($event)" placeholder="Height" />
+                  </div>
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().logo.linkUrl" (ngModelChange)="updateLogoFurniture({ linkUrl: $event })" placeholder="Logo click-through link (optional)" />
+                </div>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Dynamic Fields</div>
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().proposalTitle" (ngModelChange)="updateFurniture('proposalTitle', $event)" placeholder="Proposal title" />
+                  <input class="pageSettings__input" [ngModel]="pageFurniture().clientName" (ngModelChange)="updateFurniture('clientName', $event)" placeholder="Client name" />
+                </div>
+              </div>
+            </div>
           </div>
+        }
 
-          <button
-            type="button"
-            class="rightbar__icon"
-            draggable="true"
-            title="Insert image"
-            (dragstart)="onPdfImageDragStart($event)"
-            (click)="onInsertWidgetClick('image', $event)"
-            [disabled]="pageCount() === 0 || isLoading()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-              <path
-                d="M8 14l2-2 4 4 2-2 2 2"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linejoin="round"
-              />
-              <path
-                d="M10 9a1.5 1.5 0 1 0 0 .01"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
+        @if (rightbarTab() === 'assets') {
+          <div class="rightbar__panel rightbar__panelAssets" role="tabpanel" aria-label="Assets">
+            @if (reusableAssets().length === 0) {
+              <p class="rightbarAssetsHint">No assets yet. Upload image/video once and it will appear here for reuse.</p>
+            } @else {
+              <div class="rightbarAssetsList">
+                @for (asset of reusableAssets(); track asset.id) {
+                  <button type="button" class="rightbarAssetCard" (click)="placeReusableAsset(asset.id, $event)">
+                    <div class="rightbarAssetCard__meta">
+                      <span class="rightbarAssetCard__kind">{{ asset.kind === 'image' ? 'Image' : 'Video' }}</span>
+                      <span class="rightbarAssetCard__src">{{ asset.source === 'upload' ? 'Upload' : 'URL' }}</span>
+                    </div>
+                    <div class="rightbarAssetCard__name">{{ asset.label }}</div>
+                  </button>
+                }
+              </div>
+            }
+          </div>
+        }
 
-          <button
-            type="button"
-            class="rightbar__icon"
-            draggable="true"
-            title="Insert table"
-            (dragstart)="onWidgetDragStart('table', $event)"
-            (click)="onInsertWidgetClick('table', $event)"
-            [disabled]="pageCount() === 0 || isLoading()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            class="rightbar__icon"
-            draggable="true"
-            title="Insert video"
-            (dragstart)="onPdfVideoDragStart($event)"
-            (click)="onInsertWidgetClick('video', $event)"
-            [disabled]="pageCount() === 0 || isLoading()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
-              <path
-                d="M15 10l5-3v10l-5-3z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
+        @if (rightbarTab() === 'versions') {
+          <div class="rightbar__panel rightbar__panelVersions" role="tabpanel" aria-label="Version history">
+            @if (isVersionHistoryLoading()) {
+              <p class="rightbarAssetsHint">Loading version history...</p>
+            } @else if (versionHistory().length === 0) {
+              <p class="rightbarAssetsHint">No versions found for this proposal yet.</p>
+            } @else {
+              <div class="versionHistoryList">
+                @for (version of versionHistory(); track version.id) {
+                  <div class="versionHistoryCard">
+                    <div class="versionHistoryCard__name">{{ version.versionName }}</div>
+                    <div class="versionHistoryCard__meta">
+                      <span>{{ formatVersionTimestamp(version.createdAt) }}</span>
+                      <span>{{ version.createdBy }}</span>
+                    </div>
+                    <div class="versionHistoryCard__actions">
+                      <button type="button" class="versionHistoryCard__btn" (click)="viewProposalVersion(version)">View</button>
+                      <button type="button" class="versionHistoryCard__btn" disabled title="Temporarily disabled">
+                        Restore (disabled)
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
       </aside>
     </main>
   }

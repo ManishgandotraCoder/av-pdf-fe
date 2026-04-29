@@ -6,6 +6,93 @@ export type PdfMeta = {
   size: number;
   createdAt: number;
   updatedAt: number;
+  parentId?: string;
+  isOriginal?: boolean;
+};
+
+export type ProposalVersion = {
+  id: string;
+  proposalId: string;
+  versionName: string;
+  createdAt: number;
+  createdBy: string;
+};
+
+export type ProposalDetails = {
+  id: string;
+  name: string;
+  derivedFrom: string | null;
+  derivedFromDetails?: {
+    id: string;
+    name: string;
+    isDeleted?: boolean;
+    hasAccess?: boolean;
+  } | null;
+};
+
+export type ShareAccessType = 'public' | 'restricted';
+export type ShareRole = 'viewer' | 'commenter' | 'editor';
+
+export type ShareUser = {
+  email: string;
+  role: ShareRole;
+};
+
+export type ShareRecord = {
+  id: string;
+  proposalId: string;
+  accessType: ShareAccessType;
+  users: ShareUser[];
+  linkToken: string;
+  createdAt: number;
+  updatedAt: number;
+  derivedFrom?: {
+    id: string;
+    name: string;
+  } | null;
+};
+
+export type GenerateShareLinkBody = {
+  proposalId: string;
+  accessType: ShareAccessType;
+  derivedFrom?: {
+    id: string;
+    name: string;
+  } | null;
+};
+
+export type AddShareUserBody = {
+  proposalId: string;
+  email: string;
+  role: ShareRole;
+};
+
+export type PageFurniture = {
+  proposalTitle: string;
+  clientName: string;
+  header: { content: string; alignment: 'left' | 'center' | 'right'; visible: boolean };
+  footer: {
+    leftContent: string;
+    centerContent: string;
+    rightContent: string;
+    visible: boolean;
+    divider: boolean;
+  };
+  pageNumber: {
+    visible: boolean;
+    format: '1' | '1 / N' | 'Page 1 of N';
+    position: 'header-left' | 'header-right' | 'footer-left' | 'footer-center' | 'footer-right';
+    startFrom: number;
+  };
+  logo: {
+    url: string;
+    position: 'header-left' | 'header-right';
+    width: number;
+    height: number;
+    keepAspectRatio: boolean;
+    linkUrl: string;
+    visible: boolean;
+  };
 };
 
 const PROD_BACKEND_ORIGIN = 'https://av-pdf-be.vercel.app';
@@ -119,9 +206,139 @@ export class PdfApiService {
     return (await res.json()) as PdfMeta;
   }
 
+  async saveAsNewProposal(
+    sourceProposalId: string,
+    bytes: Uint8Array,
+    options?: { name?: string; editedBy?: string }
+  ): Promise<PdfMeta & { versionId: string; timestamp: number; editedBy: string; parentProposalId: string }> {
+    const safe = new Uint8Array(bytes.byteLength);
+    safe.set(bytes);
+    const blob = new Blob([safe.buffer], { type: 'application/pdf' });
+    const fd = new FormData();
+    fd.set('file', new File([blob], options?.name ?? 'proposal.pdf', { type: 'application/pdf' }));
+    fd.set('sourceProposalId', sourceProposalId);
+    if (options?.name) fd.set('name', options.name);
+    if (options?.editedBy) fd.set('editedBy', options.editedBy);
+
+    const res = await fetch(this.apiUrl('/api/proposals/save-as-new'), {
+      method: 'POST',
+      body: fd
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to save new proposal version.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as PdfMeta & {
+      versionId: string;
+      timestamp: number;
+      editedBy: string;
+      parentProposalId: string;
+    };
+  }
+
+  async overwriteProposal(id: string, bytes: Uint8Array, editedBy?: string): Promise<PdfMeta> {
+    const safe = new Uint8Array(bytes.byteLength);
+    safe.set(bytes);
+    const body = new Blob([safe.buffer], { type: 'application/pdf' });
+    const res = await fetch(this.apiUrl(`/api/proposals/overwrite/${encodeURIComponent(id)}`), {
+      method: 'POST',
+      headers: editedBy ? { 'X-Edited-By': editedBy } : undefined,
+      body
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to overwrite proposal.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as PdfMeta;
+  }
+
+  async getProposalVersions(id: string): Promise<ProposalVersion[]> {
+    const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/versions`));
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load proposal versions.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ProposalVersion[];
+  }
+
+  async getProposal(id: string): Promise<ProposalDetails> {
+    const res = await fetch(this.apiUrl(`/api/proposal/${encodeURIComponent(id)}`));
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load proposal.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ProposalDetails;
+  }
+
+  async generateShareLink(body: GenerateShareLinkBody): Promise<ShareRecord & { url: string }> {
+    const res = await fetch(this.apiUrl('/api/share/generate-link'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to generate share link.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ShareRecord & { url: string };
+  }
+
+  async addShareUser(body: AddShareUserBody): Promise<ShareRecord> {
+    const res = await fetch(this.apiUrl('/api/share/add-user'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to add share user.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ShareRecord;
+  }
+
+  async restoreProposalVersion(
+    id: string,
+    versionId: string,
+    editedBy?: string
+  ): Promise<PdfMeta & { restoredFromVersionId: string }> {
+    const res = await fetch(
+      this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/restore-version/${encodeURIComponent(versionId)}`),
+      {
+        method: 'POST',
+        headers: editedBy ? { 'Content-Type': 'application/json' } : undefined,
+        body: editedBy ? JSON.stringify({ editedBy }) : undefined
+      }
+    );
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to restore proposal version.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as PdfMeta & { restoredFromVersionId: string };
+  }
+
   async delete(id: string): Promise<void> {
     const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}`), { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete PDF.');
+  }
+
+  async getFurniture(id: string): Promise<PageFurniture | null> {
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/furniture`));
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('Failed to load page furniture.');
+    const payload = (await res.json()) as { pageFurniture?: PageFurniture | null };
+    return payload?.pageFurniture ?? null;
+  }
+
+  async putFurniture(id: string, furniture: PageFurniture): Promise<void> {
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/furniture`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pageFurniture: furniture })
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to save page furniture.';
+      throw new Error(msg);
+    }
   }
 }
 

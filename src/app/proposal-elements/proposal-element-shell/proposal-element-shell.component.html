@@ -1,0 +1,24 @@
+<div
+  class="propShellChrome"
+  [class.propShellChrome--sel]="selected()"
+  (pointerdown)="chromeDown($event)"
+  (pointermove)="move($event)"
+  (pointerup)="end($event)"
+  (pointercancel)="end($event)"
+>
+  <span class="propShellIcon" aria-hidden="true"></span>
+  <span class="propShellTitle">{{ shellLabel() }}</span>
+</div>
+
+<div class="propShellBody">
+  <ng-content />
+</div>
+
+<div
+  class="propShellResize"
+  [class.propShellResize--hid]="!interactive()"
+  (pointerdown)="resizeDown($event)"
+  (pointermove)="move($event)"
+  (pointerup)="end($event)"
+  (pointercancel)="end($event)"
+></div>

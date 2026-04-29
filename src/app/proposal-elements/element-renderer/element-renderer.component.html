@@ -1,0 +1,42 @@
+@switch (element().type) {
+  @case ('text') {
+    <proposal-text-block
+      [content]="eText().content"
+      [editable]="editable()"
+      (htmlChange)="textHtml($event)"
+      [typographyCssVars]="textTypographyCss()"
+    ></proposal-text-block>
+  }
+  @case ('video') {
+    <proposal-video-block
+      [content]="eVideo().content"
+      [presentation]="eVideo().style"
+      [editable]="editable()"
+      (playerChange)="mergeVideo($event)"
+    ></proposal-video-block>
+  }
+  @case ('image') {
+    <proposal-image-block
+      [content]="eImage().content"
+      [presentation]="eImage().style"
+      [editable]="editable()"
+      (imagePatch)="mergeImage($event)"
+    ></proposal-image-block>
+  }
+  @case ('textOverlayImage') {
+    <proposal-text-overlay-image-block
+      [content]="eTextOverlayImg().content"
+      [presentation]="eTextOverlayImg().style"
+      [textEditable]="editable()"
+      (overlayPatch)="overlayHtml($event)"
+    ></proposal-text-overlay-image-block>
+  }
+  @case ('backgroundImageText') {
+    <proposal-background-image-text-block
+      [content]="eBgImgTxt().content"
+      [presentation]="eBgImgTxt().style"
+      [textEditable]="editable()"
+      (htmlPatch)="overlayHtml($event)"
+    ></proposal-background-image-text-block>
+  }
+}

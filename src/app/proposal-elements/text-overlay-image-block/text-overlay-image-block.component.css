@@ -1,0 +1,59 @@
+.togRoot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.togBaseImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.togBaseEmpty {
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(#e5e7eb 0% 25%, transparent 0% 50%) 50%/20px 20px;
+}
+
+.togMaskLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.togStage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  pointer-events: auto;
+}
+
+.togStage.preset--top {
+  justify-content: flex-start;
+}
+
+.togStage.preset--center {
+  justify-content: center;
+}
+
+.togStage.preset--bottom {
+  justify-content: flex-end;
+}
+
+.togStage.preset--custom {
+  justify-content: center;
+  align-items: center;
+}
+
+.togCopy {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}

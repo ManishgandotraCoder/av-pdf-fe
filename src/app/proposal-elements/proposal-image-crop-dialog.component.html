@@ -1,0 +1,51 @@
+<div class="cropBackdrop" (click)="backdropClick($event)">
+  <div class="cropSheet" role="dialog" aria-modal="true" aria-labelledby="cropDialogTitle" (click)="$event.stopPropagation()">
+    <h2 id="cropDialogTitle" class="cropTitle">Crop image</h2>
+    <p class="cropHelp">Drag on the photo to choose the crop area.</p>
+
+    <div class="cropStageOuter">
+      <div
+        class="cropImgWrap"
+        (pointermove)="onPointerMove($event)"
+        (pointerup)="onPointerEnd($event)"
+        (pointercancel)="onPointerEnd($event)"
+      >
+        <img
+          #cropImg
+          class="cropImgEl"
+          [src]="sourceUrl()"
+          alt=""
+          draggable="false"
+          (load)="onImgLoad()"
+        />
+
+        @if (
+          sel && (dragActive || (sel!.nw >= 0.02 && sel!.nh >= 0.02 && sel!.nw > 0 && sel!.nh > 0))
+        ) {
+          @let b = sel;
+          <div
+            class="cropMarquee"
+            [style.left.%]="100 * b!.nx"
+            [style.top.%]="100 * b!.ny"
+            [style.width.%]="100 * b!.nw"
+            [style.height.%]="100 * b!.nh"
+          ></div>
+        }
+
+        <div class="cropPointerLayer" (pointerdown)="onPointerDown($event)"></div>
+      </div>
+    </div>
+
+    <div class="cropFooter">
+      <button type="button" class="cropBtn cropBtnMuted" (click)="dismissed.emit()">Cancel</button>
+      <button
+        type="button"
+        class="cropBtn cropBtnPrimary"
+        (click)="applyCrop()"
+        [disabled]="!sel || !sel!.nw || sel!.nw < 0.02"
+      >
+        Apply crop
+      </button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,22 @@
+<section class="ssFrame" [style.width.px]="frameWidthPx()" [style.height.px]="frameHeightPx()">
+  @for (el of layered(); track el.id) {
+    <proposal-element-shell
+      [position]="el.position"
+      [shellLabel]="label(el.type)"
+      [selected]="selectedElementId() === el.id"
+      [frameWidthPx]="frameWidthPx()"
+      [frameHeightPx]="frameHeightPx()"
+      (activate)="selectElementId.emit(el.id)"
+      (patchPosition)="onPatchPos(el.id, $event)"
+    >
+      <proposal-element-renderer
+        [element]="el"
+        [editable]="inspectorEditable()"
+        (textHtmlPatch)="textHtmlPatch.emit($event)"
+        (videoPatch)="videoPatch.emit($event)"
+        (imagePatch)="imagePatch.emit($event)"
+        (overlayHtmlPatch)="overlayHtmlPatch.emit($event)"
+      ></proposal-element-renderer>
+    </proposal-element-shell>
+  }
+</section>

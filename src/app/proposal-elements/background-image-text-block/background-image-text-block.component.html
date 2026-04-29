@@ -1,0 +1,27 @@
+<section class="bagRoot">
+  @if (content().imageSrc) {
+    <img
+      class="bagImg"
+      [class.bagContain]="imgFit() === 'contain'"
+      [class.bagCover]="imgFit() === 'cover'"
+      [src]="content().imageSrc!"
+      alt=""
+      draggable="false"
+    />
+  } @else {
+    <div class="bagFall" aria-hidden="true"></div>
+  }
+
+  <div class="bagTint" [ngStyle]="tintStyle()" aria-hidden="true"></div>
+
+  <article class="bagOuter">
+    <div class="bagCopy" [ngStyle]="paddedBlockStyle()">
+      <proposal-text-block
+        [content]="body()"
+        [editable]="textEditable()"
+        (htmlChange)="htmlPatch.emit($event)"
+        [typographyCssVars]="typographyVars()"
+      ></proposal-text-block>
+    </div>
+  </article>
+</section>

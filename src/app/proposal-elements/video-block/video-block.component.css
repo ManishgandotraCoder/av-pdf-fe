@@ -1,0 +1,185 @@
+.videoBlockInspect {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.videoSourceTabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--proposal-field-bg-muted, #f4f4f5) 90%, transparent);
+  border: 1px solid var(--proposal-border, #e4e4e7);
+}
+
+.videoTab {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.82;
+}
+
+.videoTab:hover {
+  opacity: 1;
+}
+
+.videoTab:focus-visible {
+  outline: 2px solid var(--proposal-accent, #2563eb);
+  outline-offset: 1px;
+}
+
+.videoTabActive {
+  background: var(--proposal-field-bg, #fff);
+  opacity: 1;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+}
+
+.videoSourceHint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+.videoBlockLbl {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.videoBlockUrl {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--proposal-border, #e4e4e7);
+  font: inherit;
+  box-sizing: border-box;
+  background: var(--proposal-field-bg, #fff);
+  color: inherit;
+}
+
+.videoBlockHint {
+  font-size: 11px;
+  opacity: 0.55;
+  text-transform: capitalize;
+}
+
+.videoFileHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.videoUploadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+
+.videoUploadBtn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--proposal-accent, #2563eb) 42%, transparent);
+  background: color-mix(in srgb, var(--proposal-accent-soft, #eff6ff) 90%, transparent);
+  color: #1e3a8a;
+  cursor: pointer;
+}
+
+.videoUploadBtn:hover {
+  filter: brightness(0.97);
+}
+
+.videoFileName {
+  font-size: 12px;
+  opacity: 0.82;
+  max-width: min(260px, 60vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.videoClearBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.videoClearBtn:hover {
+  color: #991b1b;
+}
+
+.videoFrame {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: #0a0a0a;
+  border-radius: inherit;
+}
+
+.videoIframe,
+.videoTag {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.videoTag {
+  object-fit: var(--proposal-video-fit, contain);
+}
+
+.videoPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.videoPoster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.06);
+}
+
+.videoPlaceholderLabel {
+  position: relative;
+  z-index: 1;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.96);
+  color: #18181b;
+  font-size: 12px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.videoPlaceholder:not(:has(.videoPoster)) .videoPlaceholderLabel {
+  margin: auto;
+}

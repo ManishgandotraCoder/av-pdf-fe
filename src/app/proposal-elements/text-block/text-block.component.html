@@ -1,0 +1,34 @@
+@if (editable()) {
+  <div class="proposalText" [ngStyle]="typographyCssVars()">
+    <div class="proposalTextToolbar" (pointerdown)="$event.stopPropagation()">
+      <button type="button" class="proposalTextToolbarBtn" (click)="cmd('bold')" title="Bold"><b>B</b></button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="cmd('italic')" title="Italic"><i>I</i></button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="blockTag('h2')" title="Heading">H2</button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="cmd('insertUnorderedList')" title="Bullets">
+        ••
+      </button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="cmd('insertOrderedList')" title="List">1.</button>
+      <span class="proposalTextToolbarGap"></span>
+      <button type="button" class="proposalTextToolbarBtn" (click)="applyAlignment('left')">⟨</button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="applyAlignment('center')">⊣</button>
+      <button type="button" class="proposalTextToolbarBtn" (click)="applyAlignment('right')">⟩</button>
+    </div>
+
+    <div
+      #editor
+      class="proposalTextEditable"
+      role="textbox"
+      contenteditable="true"
+      [attr.aria-multiline]="true"
+      tabindex="0"
+      (paste)="onPaste($event)"
+      (input)="onEditableInput($any($event.target).innerHTML)"
+    ></div>
+  </div>
+} @else {
+  <div
+    class="proposalText proposalTextReadonly"
+    [ngStyle]="typographyCssVars()"
+    [innerHTML]="content().html"
+  ></div>
+}

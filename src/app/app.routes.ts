@@ -12,6 +12,13 @@ export const routes: Routes = [
       import('./pdf-editor/pdf-editor.component').then((m) => m.PdfEditorComponent)
   },
   {
+    path: 'proposal-elements',
+    loadComponent: () =>
+      import('./proposal-elements/proposal-elements-demo.component').then(
+        (m) => m.ProposalElementsDemoComponent
+      )
+  },
+  {
     path: '**',
     redirectTo: ''
   }

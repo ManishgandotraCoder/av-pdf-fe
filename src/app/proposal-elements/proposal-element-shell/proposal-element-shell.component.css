@@ -1,0 +1,66 @@
+:host.proposalShellHost {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.propShellChrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 6px;
+  cursor: grab;
+  user-select: none;
+  background: color-mix(in srgb, var(--proposal-chrome, #27272a) 92%, transparent);
+  color: #fafafa;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  border-bottom: none;
+}
+
+.propShellChrome--sel {
+  outline: 1px solid var(--proposal-accent, #3b82f6);
+}
+
+.propShellIcon {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #a1a1aa;
+}
+
+.propShellTitle {
+  font-size: 11px;
+  opacity: 0.86;
+  letter-spacing: 0.02em;
+}
+
+.propShellBody {
+  flex: 1;
+  min-height: 0;
+  background: var(--proposal-widget-body, #fff);
+  border: 1px solid color-mix(in srgb, #171717 12%, transparent);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+}
+
+.propShellResize {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  right: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  background: #3b82f6;
+  cursor: nwse-resize;
+}
+
+.propShellResize--hid {
+  display: none;
+}

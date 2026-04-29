@@ -1,0 +1,51 @@
+<div class="pedLayout">
+  <header class="pedHeader">
+    <h1 class="pedTitle">Proposal elements (new)</h1>
+    <p class="pedSub">
+      Types: text (rich), video (URL/MP4), image, text-over-image, background image + text. Existing PDF
+      editor widget text is left unchanged.
+    </p>
+  </header>
+
+  <div class="pedBody">
+    <div class="pedStageCol">
+      <proposal-slide-stage
+        [slide]="slide()"
+        [selectedElementId]="selectedId()"
+        [frameWidthPx]="920"
+        [frameHeightPx]="520"
+        [inspectorEditable]="true"
+        (selectElementId)="select($event)"
+        (patchElementPositionOnly)="patchPosition($event)"
+        (textHtmlPatch)="onTextHtml($event)"
+        (videoPatch)="onVideoPatch($event)"
+        (imagePatch)="onImagePatch($event)"
+        (overlayHtmlPatch)="onOverlay($event)"
+      ></proposal-slide-stage>
+    </div>
+
+    <aside class="pedInspector" aria-label="Inspector">
+      <div class="pedInspectorBlock">
+        <div class="pedInspectorTitle">Selection</div>
+        @if (selected(); as sel) {
+          <div class="pedMeta">
+            <div><span class="k">id</span> {{ sel.id }}</div>
+            <div><span class="k">type</span> {{ sel.type }}</div>
+            <div><span class="k">z</span> {{ sel.position.zIndex }}</div>
+          </div>
+          <div class="pedZ">
+            <button type="button" class="pedBtn" (click)="bumpZ(1)">Bring forward</button>
+            <button type="button" class="pedBtn" (click)="bumpZ(-1)">Send back</button>
+          </div>
+        } @else {
+          <p class="pedHint">Select an element on the slide.</p>
+        }
+      </div>
+
+      <div class="pedInspectorBlock">
+        <div class="pedInspectorTitle">Slide JSON</div>
+        <pre class="pedJson">{{ jsonPreview() }}</pre>
+      </div>
+    </aside>
+  </div>
+</div>

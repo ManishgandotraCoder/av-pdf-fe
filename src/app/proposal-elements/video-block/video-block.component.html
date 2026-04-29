@@ -1,0 +1,104 @@
+@let parsedNow = parsed();
+
+@if (editable()) {
+  <div class="videoBlockInspect">
+    <div class="videoSourceTabs" role="tablist" aria-label="Video source">
+      <button
+        type="button"
+        role="tab"
+        class="videoTab"
+        [class.videoTabActive]="activeSource() === 'embed'"
+        [attr.aria-selected]="activeSource() === 'embed'"
+        (click)="setTab('embed')"
+      >
+        Paste link
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="videoTab"
+        [class.videoTabActive]="activeSource() === 'upload'"
+        [attr.aria-selected]="activeSource() === 'upload'"
+        (click)="setTab('upload')"
+      >
+        Upload from device
+      </button>
+    </div>
+    <p class="videoSourceHint">
+      {{
+        activeSource() === 'embed'
+          ? 'Use YouTube, Vimeo, or a direct video file URL (MP4, WebM, …).'
+          : 'Pick a video from gallery or Files. On phones, this opens your photo / video library.'
+      }}
+    </p>
+
+    @if (activeSource() === 'embed') {
+      <label class="videoBlockLbl" for="proposalVideoLink">Embed or file URL</label>
+      <input
+        id="proposalVideoLink"
+        type="url"
+        class="videoBlockUrl"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="https://www.youtube.com/watch?v=… or https://…/clip.mp4"
+        [value]="linkInputValue()"
+        (input)="onLinkInput($event)"
+      />
+      @if (parsedNow) {
+        <div class="videoBlockHint">Detected: {{ parsedNow.kind }}</div>
+      }
+    }
+
+    @if (activeSource() === 'upload') {
+      <input
+        #fileInput
+        type="file"
+        class="videoFileHidden"
+        accept="video/*"
+        (change)="onFileSelected($event)"
+      />
+      <div class="videoUploadRow">
+        <button type="button" class="videoUploadBtn" (click)="openFilePicker($event)">
+          Choose video
+        </button>
+        @if (content().uploadedFileName) {
+          <span class="videoFileName">{{ content().uploadedFileName }}</span>
+          <button type="button" class="videoClearBtn" (click)="clearUploaded($event)">Remove</button>
+        }
+      </div>
+    }
+  </div>
+}
+
+<div class="videoFrame" [style.--proposal-video-fit]="presentation().objectFit ?? 'contain'">
+  @if (parsedNow?.kind === 'youtube' || parsedNow?.kind === 'vimeo') {
+    <iframe
+      class="videoIframe"
+      [src]="parsedNow!.embedSrc | safeVideoUrl"
+      [title]="iframeTitle()"
+      loading="lazy"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowfullscreen
+    ></iframe>
+  } @else if (parsedNow?.kind === 'fileVideo') {
+    <video class="videoTag" controls [poster]="content().thumbnailUrl || null" preload="metadata">
+      <source [src]="parsedNow!.embedSrc" [attr.type]="content().uploadMimeType || null" />
+    </video>
+  } @else {
+    <div class="videoPlaceholder">
+      @if (content().thumbnailUrl) {
+        <img class="videoPoster" [src]="content().thumbnailUrl!" alt="" />
+      }
+      <div class="videoPlaceholderLabel">
+        {{
+          editable()
+            ? activeSource() === 'embed'
+              ? 'Paste a link above, or switch to Upload from device.'
+              : 'Choose a video file — or paste a link in the other tab.'
+            : 'No video — thumbnails only preview when provided.'
+        }}
+      </div>
+    </div>
+  }
+</div>

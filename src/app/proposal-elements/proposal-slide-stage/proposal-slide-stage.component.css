@@ -1,0 +1,7 @@
+.ssFrame {
+  position: relative;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 44px rgb(15 23 42 / 15%);
+  overflow: hidden;
+}

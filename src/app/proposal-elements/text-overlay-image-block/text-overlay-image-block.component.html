@@ -1,0 +1,25 @@
+<div class="togRoot">
+  @if (content().imageSrc) {
+    <img class="togBaseImg" [src]="content().imageSrc!" alt="" draggable="false" />
+  } @else {
+    <div class="togBaseEmpty" aria-hidden="true"></div>
+  }
+
+  <div class="togMaskLayer" [style.background]="overlayGradient()"></div>
+
+  <div class="togStage" [class]="presetClass()">
+    <div
+      class="togCopy"
+      [style.transform]="overlayTransform()"
+      [style.padding]="fallbackPad()"
+      [style.text-align]="textAlign()"
+    >
+      <proposal-text-block
+        [content]="overlayRich()"
+        [editable]="textEditable()"
+        (htmlChange)="overlayPatch.emit($event)"
+        [typographyCssVars]="typographyVars()"
+      ></proposal-text-block>
+    </div>
+  </div>
+</div>

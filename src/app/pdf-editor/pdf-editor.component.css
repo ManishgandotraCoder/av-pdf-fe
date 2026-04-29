@@ -50,6 +50,7 @@
 }
 
 .docsSave,
+.docsOverwrite,
 .docsShare {
   flex: 0 0 auto;
 }
@@ -235,6 +236,190 @@
 .docsShare svg {
   width: 18px;
   height: 18px;
+}
+
+.docsOverwrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 68, 68, 0.24);
+  background: rgba(254, 226, 226, 0.72);
+  color: rgba(153, 27, 27, 0.92);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.docsOverwrite:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shareDrawer {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+}
+
+.shareDrawer__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.3);
+}
+
+.shareDrawer__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(460px, 92vw);
+  height: 100%;
+  background: #fff;
+  border-left: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: -24px 0 50px rgba(2, 6, 23, 0.2);
+  padding: 16px;
+  overflow: auto;
+}
+
+.shareDrawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.shareDrawer__title {
+  margin: 0;
+  font-size: 18px;
+  color: rgba(15, 23, 42, 0.9);
+}
+
+.shareDrawer__close {
+  border: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.7);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.shareDrawer__section {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.shareDrawer__sectionTitle {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: rgba(30, 41, 59, 0.9);
+}
+
+.shareDrawer__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.shareDrawer__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.8);
+}
+
+.shareDrawer__input,
+.shareDrawer__select {
+  min-height: 34px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.shareDrawer__input {
+  flex: 1;
+}
+
+.shareDrawer__btn {
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  background: rgba(37, 99, 235, 0.1);
+  color: rgba(30, 64, 175, 0.95);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.shareDrawer__btnGhost {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(241, 245, 249, 0.8);
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.shareDrawer__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shareDrawer__userList {
+  display: grid;
+  gap: 8px;
+}
+
+.shareDrawer__userItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.85);
+}
+
+.shareDrawer__pill {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  text-transform: capitalize;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.shareDrawer__hint {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: rgba(51, 65, 85, 0.9);
+}
+
+.shareDrawer__tooltip {
+  margin-left: 4px;
+  color: rgba(51, 65, 85, 0.65);
+  cursor: help;
+}
+
+.shareDrawer__metaLink,
+.shareDrawer__metaText {
+  font-size: 13px;
+  color: rgba(30, 64, 175, 0.95);
+}
+
+.shareDrawer__metaLink {
+  text-decoration: none;
+}
+
+.shareDrawer__metaLink:hover {
+  text-decoration: underline;
+}
+
+.docsAutoSaving {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.62);
 }
 
 .docsUpgrade {
@@ -448,14 +633,14 @@
 .workspaceWrap {
   min-height: 0;
   display: grid;
-  grid-template-columns: 220px 1fr 56px;
+  grid-template-columns: 220px 1fr 250px;
   /* Allow sidebar dropdowns to extend into the workspace area. */
   overflow: visible;
   width: 100%;
 }
 
 .workspaceWrap.isSidebarCollapsed {
-  grid-template-columns: 52px 1fr 56px;
+  grid-template-columns: 52px 1fr 250px;
 }
 
 .workspaceWrap > .sidebar {
@@ -476,28 +661,256 @@
   border-left: 1px solid rgba(15, 23, 42, 0.12);
   background: rgba(248, 250, 252, 0.92);
   backdrop-filter: blur(10px);
-  padding: 10px 8px;
+  padding: 10px 10px 14px;
   display: flex;
-  align-items: start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.rightbarTabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(241, 245, 249, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.rightbarTabs__btn {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.66);
+  cursor: pointer;
+}
+
+.rightbarTabs__btn:hover {
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.rightbarTabs__btnActive {
+  background: #fff;
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.rightbar__panel {
+  min-width: 0;
+}
+
+.rightbar__panelOptions {
+  flex: 1;
+  min-height: 0;
+}
+
+.rightbar__panelAssets {
+  padding: 4px 2px 8px;
+}
+
+.rightbar__panelVersions {
+  padding: 4px 2px 8px;
+}
+
+.versionHistoryList {
+  display: grid;
+  gap: 8px;
+}
+
+.versionHistoryCard {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 8px;
+}
+
+.versionHistoryCard__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.versionHistoryCard__meta {
+  margin-top: 4px;
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.versionHistoryCard__actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.versionHistoryCard__btn {
+  flex: 1;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: rgba(15, 23, 42, 0.82);
+  font-size: 12px;
+  font-weight: 650;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.versionHistoryCard__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rightbarAssetsHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.rightbarAssetsList {
+  display: grid;
+  gap: 8px;
+}
+
+.rightbarAssetCard {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 8px;
+  cursor: pointer;
+}
+
+.rightbarAssetCard:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+}
+
+.rightbarAssetCard__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.rightbarAssetCard__name {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rightbar__row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
+  width: 100%;
+}
+
+.rightbar__iconRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.insertSourceMenu {
+  position: relative;
+}
+
+.insertSourceMenu__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 110px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  z-index: 8;
+}
+
+.insertSourceMenu__item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.85);
+  cursor: pointer;
+}
+
+.insertSourceMenu__item:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.rightbarMediaActions {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.rightbarMediaActions__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.rightbarMediaActions__row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.rightbarMediaActions__btn {
+  flex: 1;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(248, 250, 252, 0.98);
+  color: rgba(15, 23, 42, 0.86);
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 8px;
+  padding: 7px 8px;
+  cursor: pointer;
+}
+
+.rightbarMediaActions__btnDanger {
+  border-color: rgba(220, 38, 38, 0.32);
+  color: rgba(153, 27, 27, 0.95);
 }
 
 .rightbarTextGate {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
-  max-width: 40px;
-  padding: 8px 0 4px;
-  margin-bottom: 4px;
+  max-width: none;
+  padding: 8px 4px 10px;
+  margin-bottom: 2px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.1);
 }
 
@@ -1320,6 +1733,110 @@
   cursor: crosshair;
 }
 
+.pageFurnitureLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pageFurnitureHeader,
+.pageFurnitureNumber,
+.pageFurnitureFooter {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  color: rgba(15, 23, 42, 0.86);
+  font-size: 12px;
+  line-height: 1.3;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.pageFurnitureHeader {
+  top: 14px;
+  text-align: left;
+}
+
+.pageFurnitureHeader.isCenter {
+  text-align: center;
+}
+
+.pageFurnitureHeader.isRight {
+  text-align: right;
+}
+
+.pageFurnitureLogo {
+  position: absolute;
+  top: 10px;
+  left: 18px;
+  pointer-events: auto;
+}
+
+.pageFurnitureLogo.isRight {
+  left: auto;
+  right: 18px;
+}
+
+.pageFurnitureLogo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.pageFurnitureNumber {
+  text-align: right;
+}
+
+.pageFurnitureNumber.headerLeft {
+  top: 14px;
+  text-align: left;
+}
+
+.pageFurnitureNumber.headerRight {
+  top: 14px;
+  text-align: right;
+}
+
+.pageFurnitureNumber.footerLeft {
+  bottom: 12px;
+  text-align: left;
+}
+
+.pageFurnitureNumber.footerCenter {
+  bottom: 12px;
+  text-align: center;
+}
+
+.pageFurnitureNumber.footerRight {
+  bottom: 12px;
+  text-align: right;
+}
+
+.pageFurnitureFooter {
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+.pageFurnitureFooter.withDivider {
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.2);
+}
+
+.pageFurnitureFooter__cell {
+  text-align: left;
+}
+
+.pageFurnitureFooter__cellCenter {
+  text-align: center;
+}
+
+.pageFurnitureFooter__cellRight {
+  text-align: right;
+}
+
 .textDraft {
   position: absolute;
   pointer-events: auto;
@@ -1351,6 +1868,90 @@
   display: block;
   background: #0f172a;
   border-radius: 0 0 10px 10px;
+}
+
+.widget__mediaIframe {
+  border: 0;
+}
+
+.pageSettings {
+  margin-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.1);
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.pageSettings__title {
+  font-weight: 750;
+  color: rgba(15, 23, 42, 0.9);
+}
+
+.pageSettings__hint {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.56);
+}
+
+.pageSettings__section {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.pageSettings__sectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.pageSettings__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.pageSettings__input,
+.pageSettings__textarea,
+.pageSettings__select {
+  width: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  padding: 7px 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.88);
+  background: white;
+}
+
+.pageSettings__textarea {
+  min-height: 58px;
+  resize: vertical;
+}
+
+.pageSettings__row {
+  display: flex;
+  gap: 8px;
+}
+
+.pageSettings__btn {
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: white;
+  color: rgba(15, 23, 42, 0.86);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pageSettings__btnDanger {
+  border-color: rgba(220, 38, 38, 0.26);
+  color: rgba(185, 28, 28, 0.92);
 }
 
 /* Delete slide confirmation */

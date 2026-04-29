@@ -1,0 +1,112 @@
+.cropBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(15 23 42 / 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.cropSheet {
+  width: min(940px, 100%);
+  max-height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 22%);
+}
+
+.cropTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.cropHelp {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.68;
+}
+
+.cropStageOuter {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  border-radius: 10px;
+  border: 1px solid rgb(226 232 240 / 0.95);
+  background: rgb(248 250 252);
+}
+
+.cropImgWrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.cropImgEl {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  vertical-align: top;
+  user-select: none;
+}
+
+.cropMarquee {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid rgb(236 253 245);
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 5000px rgb(15 23 42 / 0.48),
+    0 0 0 1px rgb(148 163 184 / 0.45) inset,
+    0 0 16px rgb(34 211 238 / 18%);
+  pointer-events: none;
+}
+
+.cropPointerLayer {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.cropFooter {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.cropBtn {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.cropBtnMuted {
+  border-color: rgb(148 163 184 / 40%);
+  background: #fff;
+  color: #334155;
+}
+
+.cropBtnPrimary {
+  background: rgb(37 99 235);
+  color: #fff;
+}
+
+.cropBtnPrimary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.cropBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

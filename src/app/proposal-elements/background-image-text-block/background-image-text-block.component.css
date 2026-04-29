@@ -1,0 +1,52 @@
+.bagRoot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.bagCover,
+.bagContain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.bagCover {
+  object-fit: cover;
+}
+
+.bagContain {
+  object-fit: contain;
+}
+
+.bagFall {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(#1e293b, #020617);
+}
+
+.bagTint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: color-mix(
+    in oklab,
+    var(--tint-hex, #0f172a) calc(var(--tint-alpha, 0.35) * 100%),
+    transparent 0%
+  );
+}
+
+.bagOuter {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.bagCopy {
+  width: 100%;
+}

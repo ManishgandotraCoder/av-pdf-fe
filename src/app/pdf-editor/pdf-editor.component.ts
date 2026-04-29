@@ -20,8 +20,17 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
-import { PdfApiService } from '../pdf-api/pdf-api.service';
+import {
+  PdfApiService,
+  type ProposalDetails,
+  type ProposalVersion,
+  type ShareAccessType,
+  type ShareRole,
+  type ShareUser
+} from '../pdf-api/pdf-api.service';
 import { AssetMetaService } from '../asset-meta/asset-meta.service';
+import { SafeVideoUrlPipe } from '../proposal-elements/pipes/safe-resource-url.pipe';
+import { parseVideoEmbedInput, type ParsedVideoEmbed } from '../proposal-elements/utils/video-embed';
 
 type Tool = 'pan' | 'pen' | 'text' | 'image';
 type FontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
@@ -58,6 +67,109 @@ type InsertWidgetPending = {
   imageDataUrl?: string;
   videoObjectUrl?: string;
 };
+
+type ReusableAsset = {
+  id: string;
+  kind: 'image' | 'video';
+  label: string;
+  source: 'upload' | 'url';
+  imageSrc?: string;
+  videoUrl?: string;
+  videoFile?: File;
+  createdAt: number;
+};
+
+type PersistedMediaWidget = {
+  id: string;
+  kind: 'image' | 'video';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  imageSrc?: string;
+  videoSrc?: string;
+};
+
+type PersistedMediaWidgetsByPage = Record<number, PersistedMediaWidget[]>;
+
+type FurnitureAlignment = 'left' | 'center' | 'right';
+type PageNumberFormat = '1' | '1 / N' | 'Page 1 of N';
+type PageNumberPosition = 'header-left' | 'header-right' | 'footer-left' | 'footer-center' | 'footer-right';
+
+type PageFurniture = {
+  proposalTitle: string;
+  clientName: string;
+  header: {
+    content: string;
+    alignment: FurnitureAlignment;
+    visible: boolean;
+  };
+  footer: {
+    leftContent: string;
+    centerContent: string;
+    rightContent: string;
+    visible: boolean;
+    divider: boolean;
+  };
+  pageNumber: {
+    visible: boolean;
+    format: PageNumberFormat;
+    position: PageNumberPosition;
+    startFrom: number;
+  };
+  logo: {
+    url: string;
+    position: 'header-left' | 'header-right';
+    width: number;
+    height: number;
+    keepAspectRatio: boolean;
+    linkUrl: string;
+    visible: boolean;
+  };
+};
+
+const DEFAULT_PAGE_FURNITURE: PageFurniture = {
+  proposalTitle: '',
+  clientName: '',
+  header: {
+    content: '{{proposalTitle}}',
+    alignment: 'left',
+    visible: false
+  },
+  footer: {
+    leftContent: '',
+    centerContent: '',
+    rightContent: '',
+    visible: false,
+    divider: false
+  },
+  pageNumber: {
+    visible: true,
+    format: '1 / N',
+    position: 'footer-right',
+    startFrom: 1
+  },
+  logo: {
+    url: '',
+    position: 'header-left',
+    width: 96,
+    height: 32,
+    keepAspectRatio: true,
+    linkUrl: '',
+    visible: false
+  }
+};
+
+function clonePageFurniture(f: PageFurniture): PageFurniture {
+  return {
+    proposalTitle: f.proposalTitle,
+    clientName: f.clientName,
+    header: { ...f.header },
+    footer: { ...f.footer },
+    pageNumber: { ...f.pageNumber },
+    logo: { ...f.logo }
+  };
+}
 
 type ToolbarIcon =
   | 'undo'
@@ -305,7 +417,7 @@ function weightFromStyle(style: FontStyle): 400 | 700 {
 @Component({
   selector: 'app-pdf-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SafeVideoUrlPipe],
   templateUrl: './pdf-editor.component.html',
   styleUrl: './pdf-editor.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -353,15 +465,26 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly scale = signal(0.8);
   protected readonly sidebarCollapsed = signal(false);
 
+  /** Right inspector: tooling vs library (250px rail). */
+
+  protected readonly rightbarTab = signal<'options' | 'assets' | 'versions'>('options');
+  protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
+  protected readonly reusableAssets = signal<ReusableAsset[]>([]);
+  protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
+
   protected readonly openDocsMenu = signal<'Insert' | null>(null);
 
   protected readonly widgetsByPage = signal<Record<number, Widget[]>>({});
   protected readonly selectedWidgetId = signal<string | null>(null);
+  protected readonly pageFurniture = signal<PageFurniture>(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
+  private logoNaturalAspect = 1;
+  private furnitureSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   @ViewChild('pdfImageFile') private readonly pdfImageFile?: ElementRef<HTMLInputElement>;
   @ViewChild('widgetImageFile') private readonly widgetImageFile?: ElementRef<HTMLInputElement>;
   @ViewChild('widgetVideoFile') private readonly widgetVideoFile?: ElementRef<HTMLInputElement>;
   @ViewChild('widgetSignatureFile') private readonly widgetSignatureFile?: ElementRef<HTMLInputElement>;
+  @ViewChild('furnitureLogoFile') private readonly furnitureLogoFile?: ElementRef<HTMLInputElement>;
 
   /** Click insert flow: pick type (and file for image/video), then click the page to place. */
   protected readonly insertWidgetPending = signal<InsertWidgetPending | null>(null);
@@ -407,6 +530,26 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly isPageRendering = signal(false);
 
   protected readonly docId = signal<string | null>(null);
+  protected readonly overwriteConfirmOpen = signal(false);
+  protected readonly sharePanelOpen = signal(false);
+  protected readonly shareAccessType = signal<ShareAccessType>('restricted');
+  protected readonly shareUrl = signal('');
+  protected readonly shareUsers = signal<ShareUser[]>([]);
+  protected readonly shareEmailInput = signal('');
+  protected readonly shareRoleInput = signal<ShareRole>('viewer');
+  protected readonly shareBusy = signal(false);
+  protected readonly proposalDetails = signal<ProposalDetails | null>(null);
+  protected readonly readonlyMode = signal(false);
+  protected readonly traceabilityHint =
+    'Helps track origin and maintain version lineage';
+  protected readonly versionHistory = signal<ProposalVersion[]>([]);
+  protected readonly isVersionHistoryLoading = signal(false);
+  protected readonly isAutoVersionSaving = signal(false);
+  private autoVersionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoVersionSaveInFlight = false;
+  private autoVersionSavePending = false;
+  private autoVersionSnapshotReady = false;
+  private lastAutoVersionSnapshot = '';
 
   private pdfBytes: Uint8Array | null = null;
   private pdfDoc: PDFDocumentProxy | null = null;
@@ -505,12 +648,54 @@ export class PdfEditorComponent implements AfterViewInit {
     // Load the selected PDF from the library (route param).
     effect(() => {
       const id = this.route.snapshot.paramMap.get('id');
+      this.readonlyMode.set(this.route.snapshot.queryParamMap.get('readonly') === '1');
       this.docId.set(id);
-      if (id) void this.loadFromApi(id);
+      this.autoVersionSnapshotReady = false;
+      this.lastAutoVersionSnapshot = '';
+      if (id) {
+        void this.loadFromApi(id);
+        void this.loadProposalVersions(id);
+        void this.loadProposalDetails(id);
+      } else {
+        this.proposalDetails.set(null);
+      }
+    });
+
+    effect(() => {
+      const id = this.docId();
+      const widgets = this.widgetsByPage();
+      if (!id) return;
+      this.persistMediaWidgetsForDoc(id, widgets);
+    });
+
+    effect(() => {
+      const id = this.docId();
+      const furniture = this.pageFurniture();
+      if (!id) return;
+      this.persistPageFurnitureForDoc(id, furniture);
+      this.scheduleFurnitureSave(id, furniture);
+    });
+
+    effect(() => {
+      const id = this.docId();
+      const edits = this.editsByPage();
+      const widgets = this.widgetsByPage();
+      const furniture = this.pageFurniture();
+      const pageCount = this.pageCount();
+      if (!id || pageCount === 0) return;
+      const snapshot = JSON.stringify({ edits, widgets, furniture, pageCount });
+      if (!this.autoVersionSnapshotReady) {
+        this.autoVersionSnapshotReady = true;
+        this.lastAutoVersionSnapshot = snapshot;
+        return;
+      }
+      if (snapshot === this.lastAutoVersionSnapshot) return;
+      this.lastAutoVersionSnapshot = snapshot;
+      this.scheduleAutoVersionSave();
     });
   }
 
-  protected readonly zoomOptions = [0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.25, 2.5] as const;
+  protected readonly zoomOptions = [ 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4] as const;
   protected readonly fontSizeOptions = [
     8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48, 56, 64, 72
   ] as const;
@@ -558,6 +743,234 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected toggleSidebar() {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
+  }
+
+  protected setRightbarTab(tab: 'options' | 'assets' | 'versions') {
+    this.rightbarTab.set(tab);
+  }
+
+  protected formatVersionTimestamp(ts: number): string {
+    return new Date(ts).toLocaleString();
+  }
+
+  protected openSharePanel() {
+    this.sharePanelOpen.set(true);
+  }
+
+  protected closeSharePanel() {
+    this.sharePanelOpen.set(false);
+    this.shareEmailInput.set('');
+  }
+
+  protected async generateShareLink() {
+    const proposalId = this.docId();
+    if (!proposalId) return;
+    this.errorText.set(null);
+    this.shareBusy.set(true);
+    try {
+      const proposal = this.proposalDetails();
+      const derivedFrom =
+        proposal?.derivedFrom && proposal.derivedFromDetails
+          ? { id: proposal.derivedFromDetails.id, name: proposal.derivedFromDetails.name }
+          : null;
+      const shared = await this.api.generateShareLink({
+        proposalId,
+        accessType: this.shareAccessType(),
+        derivedFrom
+      });
+      this.shareUrl.set(shared.url);
+      this.shareUsers.set(shared.users ?? []);
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to generate share link.');
+    } finally {
+      this.shareBusy.set(false);
+    }
+  }
+
+  protected async addShareUser() {
+    const proposalId = this.docId();
+    const email = this.shareEmailInput().trim();
+    if (!proposalId || !email) return;
+    this.errorText.set(null);
+    this.shareBusy.set(true);
+    try {
+      const updated = await this.api.addShareUser({
+        proposalId,
+        email,
+        role: this.shareRoleInput()
+      });
+      this.shareUsers.set(updated.users ?? []);
+      this.shareEmailInput.set('');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to add share user.');
+    } finally {
+      this.shareBusy.set(false);
+    }
+  }
+
+  protected async copyShareLink() {
+    const value = this.shareUrl().trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      this.showSlideToast('Share link copied');
+    } catch {
+      this.errorText.set('Unable to copy link.');
+    }
+  }
+
+  protected derivedFromLabel(): string {
+    const details = this.proposalDetails()?.derivedFromDetails;
+    if (!details) return '';
+    return details.name || 'Original proposal not available';
+  }
+
+  protected canOpenDerivedProposal(): boolean {
+    const details = this.proposalDetails()?.derivedFromDetails;
+    return Boolean(details && !details.isDeleted && details.hasAccess !== false);
+  }
+
+  protected async openDerivedProposalReadOnly(ev: Event) {
+    ev.preventDefault();
+    if (!this.canOpenDerivedProposal()) return;
+    const id = this.proposalDetails()?.derivedFromDetails?.id;
+    if (!id) return;
+    await this.router.navigate(['/edit', id], { queryParams: { readonly: '1' } });
+  }
+
+  private getEditedBy(): string {
+    try {
+      const stored = localStorage.getItem('avyro.editorName');
+      return stored && stored.trim() ? stored.trim() : 'Unknown User';
+    } catch {
+      return 'Unknown User';
+    }
+  }
+
+  protected furnitureAlignOptions: FurnitureAlignment[] = ['left', 'center', 'right'];
+  protected pageNumberFormatOptions: PageNumberFormat[] = ['1', '1 / N', 'Page 1 of N'];
+  protected pageNumberPositionOptions: PageNumberPosition[] = [
+    'header-left',
+    'header-right',
+    'footer-left',
+    'footer-center',
+    'footer-right'
+  ];
+
+  protected updateFurniture<K extends keyof PageFurniture>(key: K, value: PageFurniture[K]) {
+    this.pageFurniture.update((prev) => ({ ...prev, [key]: value }));
+  }
+
+  protected updateHeaderFurniture(patch: Partial<PageFurniture['header']>) {
+    this.pageFurniture.update((prev) => ({ ...prev, header: { ...prev.header, ...patch } }));
+  }
+
+  protected updateFooterFurniture(patch: Partial<PageFurniture['footer']>) {
+    this.pageFurniture.update((prev) => ({ ...prev, footer: { ...prev.footer, ...patch } }));
+  }
+
+  protected updatePageNumberFurniture(patch: Partial<PageFurniture['pageNumber']>) {
+    this.pageFurniture.update((prev) => ({
+      ...prev,
+      pageNumber: {
+        ...prev.pageNumber,
+        ...patch,
+        startFrom: Math.max(1, Number(patch.startFrom ?? prev.pageNumber.startFrom ?? 1))
+      }
+    }));
+  }
+
+  protected updateLogoFurniture(patch: Partial<PageFurniture['logo']>) {
+    this.pageFurniture.update((prev) => ({ ...prev, logo: { ...prev.logo, ...patch } }));
+  }
+
+  protected openLogoPicker(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const input = this.furnitureLogoFile?.nativeElement;
+    if (!input) return;
+    input.value = '';
+    input.click();
+  }
+
+  protected async onFurnitureLogoPicked(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp|gif|svg\+xml)$/i.test(file.type)) {
+      this.errorText.set('Please select a valid logo image.');
+      return;
+    }
+    try {
+      const dataUrl = await this.readFileAsDataUrl(file);
+      const img = await this.loadHtmlImage(dataUrl);
+      this.logoNaturalAspect = Math.max(0.1, img.width / Math.max(1, img.height));
+      this.pageFurniture.update((prev) => {
+        const width = Math.max(24, prev.logo.width || 96);
+        const nextHeight = prev.logo.keepAspectRatio
+          ? Math.max(16, Math.round(width / this.logoNaturalAspect))
+          : prev.logo.height;
+        return {
+          ...prev,
+          logo: {
+            ...prev.logo,
+            url: dataUrl,
+            visible: true,
+            width,
+            height: nextHeight
+          }
+        };
+      });
+      this.errorText.set(null);
+    } catch {
+      this.errorText.set('Failed to load logo image.');
+    }
+  }
+
+  protected removeLogo() {
+    this.pageFurniture.update((prev) => ({ ...prev, logo: { ...prev.logo, url: '', visible: false, linkUrl: '' } }));
+  }
+
+  protected onLogoWidthInput(widthRaw: string) {
+    const width = Math.max(24, Number(widthRaw) || 24);
+    this.pageFurniture.update((prev) => {
+      const height = prev.logo.keepAspectRatio
+        ? Math.max(16, Math.round(width / Math.max(0.1, this.logoNaturalAspect)))
+        : prev.logo.height;
+      return { ...prev, logo: { ...prev.logo, width, height } };
+    });
+  }
+
+  protected onLogoHeightInput(heightRaw: string) {
+    const height = Math.max(16, Number(heightRaw) || 16);
+    this.pageFurniture.update((prev) => {
+      if (!prev.logo.keepAspectRatio) return { ...prev, logo: { ...prev.logo, height } };
+      const width = Math.max(24, Math.round(height * Math.max(0.1, this.logoNaturalAspect)));
+      return { ...prev, logo: { ...prev.logo, width, height } };
+    });
+  }
+
+  protected furnitureText(content: string, pageIndex: number): string {
+    const f = this.pageFurniture();
+    const renderedPage = f.pageNumber.startFrom + pageIndex;
+    const total = this.pageCount();
+    return (content ?? '')
+      .replace(/\{\{\s*proposalTitle\s*\}\}/g, f.proposalTitle || this.derivedProposalTitle())
+      .replace(/\{\{\s*clientName\s*\}\}/g, f.clientName || '-')
+      .replace(/\{\{\s*page\s*\}\}/g, String(renderedPage))
+      .replace(/\{\{\s*totalPages\s*\}\}/g, String(total))
+      .replace(/\{\{\s*date\s*\}\}/g, new Date().toLocaleDateString());
+  }
+
+  protected pageNumberLabel(pageIndex: number): string {
+    const p = this.pageFurniture().pageNumber;
+    if (!p.visible) return '';
+    const n = p.startFrom + pageIndex;
+    const total = this.pageCount();
+    if (p.format === '1') return String(n);
+    if (p.format === '1 / N') return `${n} / ${total}`;
+    return `Page ${n} of ${total}`;
   }
 
   protected toggleDocsMenu(menu: 'Insert', ev: Event) {
@@ -662,11 +1075,82 @@ export class PdfEditorComponent implements AfterViewInit {
     this.insertWidgetPending.set({ kind });
   }
 
+  protected toggleInsertSourceMenu(kind: 'image' | 'video', ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const cur = this.insertSourceMenu();
+    this.insertSourceMenu.set(cur === kind ? null : kind);
+  }
+
+  protected pickInsertSource(kind: 'image' | 'video', source: 'url' | 'upload', ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.insertSourceMenu.set(null);
+    if (kind === 'image') {
+      this.onInsertWidgetClick('image', ev);
+      return;
+    }
+    if (source === 'upload') {
+      this.onInsertWidgetClick(kind, ev);
+      return;
+    }
+    this.insertVideoByUrlPrompt();
+  }
+
+  protected placeReusableAsset(assetId: string, ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    const asset = this.reusableAssets().find((a) => a.id === assetId);
+    if (!asset) return;
+    this.tool.set('text');
+    if (asset.kind === 'image' && asset.imageSrc) {
+      this.insertWidgetPending.set({ kind: 'image', imageDataUrl: asset.imageSrc });
+      this.rightbarTab.set('options');
+      return;
+    }
+    if (asset.kind === 'video') {
+      let src = asset.videoUrl;
+      if (!src && asset.videoFile) {
+        src = URL.createObjectURL(asset.videoFile);
+      }
+      if (src) {
+        this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: src });
+        this.rightbarTab.set('options');
+      }
+    }
+  }
+
   protected onWidgetInsertImagePicked(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     input.value = '';
     if (!file) return;
+
+    const replaceTarget = this.replaceMediaTarget();
+    if (replaceTarget?.kind === 'image') {
+      this.errorText.set(null);
+      this.isInserting.set(true);
+      const reader = new FileReader();
+      reader.onerror = () => {
+        this.errorText.set('Failed to read image.');
+        this.isInserting.set(false);
+      };
+      reader.onload = () => {
+        const dataUrl = String(reader.result ?? '');
+        if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
+          this.errorText.set('Unsupported image (use PNG or JPEG).');
+          this.isInserting.set(false);
+          return;
+        }
+        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) =>
+          w.kind === 'image' ? { ...w, imageSrc: dataUrl } : w
+        );
+        this.replaceMediaTarget.set(null);
+        this.isInserting.set(false);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
 
     this.errorText.set(null);
     this.isInserting.set(true);
@@ -684,6 +1168,14 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       this.tool.set('text');
       this.insertWidgetPending.set({ kind: 'image', imageDataUrl: dataUrl });
+      this.rememberReusableAsset({
+        id: `asset_img_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
+        kind: 'image',
+        label: file.name || 'Uploaded image',
+        source: 'upload',
+        imageSrc: dataUrl,
+        createdAt: Date.now()
+      });
     };
     reader.readAsDataURL(file);
   }
@@ -698,20 +1190,46 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     this.errorText.set(null);
-    try {
-      const objectUrl = URL.createObjectURL(file);
+    const reader = new FileReader();
+    reader.onerror = () => {
+      this.errorText.set('Failed to read video.');
+      this.pendingVideoWidgetDrop = null;
+    };
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '');
+      if (!/^data:video\//i.test(dataUrl)) {
+        this.errorText.set('Unsupported video file.');
+        this.pendingVideoWidgetDrop = null;
+        return;
+      }
+
+      const replaceTarget = this.replaceMediaTarget();
+      if (replaceTarget?.kind === 'video') {
+        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) =>
+          w.kind === 'video' ? { ...w, videoSrc: dataUrl } : w
+        );
+        this.replaceMediaTarget.set(null);
+        return;
+      }
+
       this.tool.set('text');
+      this.rememberReusableAsset({
+        id: `asset_vid_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
+        kind: 'video',
+        label: file.name || 'Uploaded video',
+        source: 'upload',
+        videoUrl: dataUrl,
+        createdAt: Date.now()
+      });
       if (this.pendingVideoWidgetDrop) {
         const { pageIndex, x, y } = this.pendingVideoWidgetDrop;
         this.pendingVideoWidgetDrop = null;
-        this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: objectUrl });
+        this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: dataUrl });
         return;
       }
-      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: objectUrl });
-    } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to read video.');
-      this.pendingVideoWidgetDrop = null;
-    }
+      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: dataUrl });
+    };
+    reader.readAsDataURL(file);
   }
 
   protected onSignatureFilePicked(event: Event) {
@@ -814,7 +1332,9 @@ export class PdfEditorComponent implements AfterViewInit {
     }
     if (kind === 'video' && opts?.videoObjectUrl) {
       widget.videoSrc = opts.videoObjectUrl;
-      this.videoObjectUrlByWidgetId.set(id, opts.videoObjectUrl);
+      if (opts.videoObjectUrl.startsWith('blob:')) {
+        this.videoObjectUrlByWidgetId.set(id, opts.videoObjectUrl);
+      }
     }
     if (kind === 'signature' && opts?.imageDataUrl) {
       widget.signatureSrc = opts.imageDataUrl;
@@ -1156,6 +1676,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.rightbarTab.set('options');
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -1163,6 +1684,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.rightbarTab.set('options');
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -1175,6 +1697,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.rightbarTab.set('options');
 
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
@@ -1202,10 +1725,12 @@ export class PdfEditorComponent implements AfterViewInit {
     const before = this.getWidget(pageIndex, widgetId);
     if (before?.kind === 'video' && before.videoSrc) {
       const url = this.videoObjectUrlByWidgetId.get(widgetId) ?? before.videoSrc;
-      try {
-        URL.revokeObjectURL(url);
-      } catch {
-        // ignore
+      if (url.startsWith('blob:')) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
       }
       this.videoObjectUrlByWidgetId.delete(widgetId);
     }
@@ -1216,6 +1741,8 @@ export class PdfEditorComponent implements AfterViewInit {
       return { ...prev, [pageIndex]: next };
     });
     if (this.selectedWidgetId() === widgetId) this.selectedWidgetId.set(null);
+    const target = this.replaceMediaTarget();
+    if (target?.widgetId === widgetId) this.replaceMediaTarget.set(null);
   }
 
   protected readonly toolbarItems: ToolbarItem[] = [
@@ -1419,6 +1946,14 @@ export class PdfEditorComponent implements AfterViewInit {
         clearTimeout(this.slideToastClearTimer);
         this.slideToastClearTimer = null;
       }
+      if (this.furnitureSaveTimer !== null) {
+        clearTimeout(this.furnitureSaveTimer);
+        this.furnitureSaveTimer = null;
+      }
+      if (this.autoVersionSaveTimer !== null) {
+        clearTimeout(this.autoVersionSaveTimer);
+        this.autoVersionSaveTimer = null;
+      }
       try {
         this.pdfDoc?.destroy();
       } catch {
@@ -1461,6 +1996,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
       this.resetHistory();
       void this.generateAllPageThumbnails();
 
@@ -1484,7 +2020,11 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isLoading.set(true);
     try {
-      const [meta, bytes] = await Promise.all([this.api.getMeta(id), this.api.getBytes(id)]);
+      const [meta, bytes, furniture] = await Promise.all([
+        this.api.getMeta(id),
+        this.api.getBytes(id),
+        this.api.getFurniture(id).catch(() => null)
+      ]);
 
       this.fileName.set(meta.name);
       this.assertReadablePdfHeader(bytes);
@@ -1501,6 +2041,11 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.widgetsByPage.set(this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
+      const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
+      this.pageFurniture.set(
+        this.normalizePageFurniture(localFurniture ?? furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
+      );
       this.resetHistory();
       void this.generateAllPageThumbnails();
 
@@ -1921,10 +2466,10 @@ export class PdfEditorComponent implements AfterViewInit {
       await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
       // Composite edits + widgets in viewport coordinates.
-      if (edit) {
-        const fx = viewport.width / edit.viewportWidth;
-        const fy = viewport.height / edit.viewportHeight;
+      const fx = viewport.width / (edit?.viewportWidth ?? viewport.width);
+      const fy = viewport.height / (edit?.viewportHeight ?? viewport.height);
 
+      if (edit) {
         // Replaces (color or inpaint)
         for (const r of edit.replaces) {
           const rx = r.x * fx;
@@ -1995,10 +2540,11 @@ export class PdfEditorComponent implements AfterViewInit {
           ctx.textBaseline = 'top';
           ctx.fillText(t.text, t.x * fx, t.y * fy);
         }
-
-        // Widgets (table/text/image/signature/video)
-        await this.drawWidgetsToFlattenCanvas(pageIndex, ctx, fx, fy, widgetsByPage);
       }
+
+      // Widgets should be flattened even when no text/ink edits exist on this page.
+      await this.drawWidgetsToFlattenCanvas(pageIndex, ctx, fx, fy, widgetsByPage);
+      this.drawPageFurnitureToFlattenCanvas(pageIndex, ctx, fx, fy);
 
       // Embed rendered page image into output PDF page at original size.
       const pngDataUrl = canvas.toDataURL('image/png');
@@ -2142,6 +2688,59 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  private drawPageFurnitureToFlattenCanvas(pageIndex: number, ctx: CanvasRenderingContext2D, fx: number, fy: number) {
+    const furniture = this.pageFurniture();
+    const cw = ctx.canvas.width;
+    const ch = ctx.canvas.height;
+    const padX = 20 * fx;
+    const headerY = 16 * fy;
+    const footerY = ch - 24 * fy;
+
+    const drawAlignedText = (txt: string, align: CanvasTextAlign, x: number, y: number) => {
+      if (!txt.trim()) return;
+      ctx.save();
+      ctx.fillStyle = 'rgba(15,23,42,0.88)';
+      ctx.font = `${Math.max(11, 12 * Math.min(fx, fy))}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`;
+      ctx.textAlign = align;
+      ctx.textBaseline = 'top';
+      ctx.fillText(txt, x, y);
+      ctx.restore();
+    };
+
+    if (furniture.header.visible) {
+      const text = this.furnitureText(furniture.header.content, pageIndex);
+      if (furniture.header.alignment === 'left') drawAlignedText(text, 'left', padX, headerY);
+      if (furniture.header.alignment === 'center') drawAlignedText(text, 'center', cw / 2, headerY);
+      if (furniture.header.alignment === 'right') drawAlignedText(text, 'right', cw - padX, headerY);
+    }
+
+    if (furniture.footer.visible) {
+      if (furniture.footer.divider) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(15,23,42,0.2)';
+        ctx.lineWidth = Math.max(1, Math.min(fx, fy));
+        ctx.beginPath();
+        ctx.moveTo(padX, ch - 40 * fy);
+        ctx.lineTo(cw - padX, ch - 40 * fy);
+        ctx.stroke();
+        ctx.restore();
+      }
+      drawAlignedText(this.furnitureText(furniture.footer.leftContent, pageIndex), 'left', padX, footerY);
+      drawAlignedText(this.furnitureText(furniture.footer.centerContent, pageIndex), 'center', cw / 2, footerY);
+      drawAlignedText(this.furnitureText(furniture.footer.rightContent, pageIndex), 'right', cw - padX, footerY);
+    }
+
+    const pageLabel = this.pageNumberLabel(pageIndex);
+    if (pageLabel) {
+      const pos = furniture.pageNumber.position;
+      if (pos === 'header-left') drawAlignedText(pageLabel, 'left', padX, headerY);
+      else if (pos === 'header-right') drawAlignedText(pageLabel, 'right', cw - padX, headerY);
+      else if (pos === 'footer-left') drawAlignedText(pageLabel, 'left', padX, footerY);
+      else if (pos === 'footer-center') drawAlignedText(pageLabel, 'center', cw / 2, footerY);
+      else drawAlignedText(pageLabel, 'right', cw - padX, footerY);
+    }
+  }
+
   protected async exportPdf() {
     if (!this.pdfBytes) return;
     this.errorText.set(null);
@@ -2176,6 +2775,10 @@ export class PdfEditorComponent implements AfterViewInit {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  protected async downloadAsPpt() {
+    this.showSlideToast('PPT export is queued for backend conversion');
   }
 
   protected async extractTemplate() {
@@ -2263,8 +2866,9 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly isSaving = signal(false);
 
-  /** Save the current document (including annotations) to the server. Requires a library document id. */
-  protected async savePdfToDb() {
+  /** Default save behavior: create a new immutable proposal version. */
+  protected async savePdfAsNewVersion() {
+    if (this.readonlyMode()) return;
     const id = this.docId();
     if (!id) {
       this.errorText.set('Open a document from the library to save to the server.');
@@ -2278,11 +2882,126 @@ export class PdfEditorComponent implements AfterViewInit {
       const safeBytes = this.exportNeedsFlatten()
         ? await this.buildFlattenedExportBytes()
         : await this.buildSemanticExportBytes();
-      await this.api.saveBytes(id, safeBytes);
+      const nextName = this.buildVersionName(this.fileName() ?? 'Proposal.pdf');
+      const created = await this.api.saveAsNewProposal(id, safeBytes, {
+        name: nextName,
+        editedBy: this.getEditedBy()
+      });
+      this.showSlideToast('New version saved');
+      await this.router.navigate(['/edit', created.id]);
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to save PDF.');
     } finally {
       this.isSaving.set(false);
+    }
+  }
+
+  protected openOverwriteConfirmation() {
+    if (this.readonlyMode()) return;
+    this.overwriteConfirmOpen.set(true);
+  }
+
+  protected closeOverwriteConfirmation() {
+    this.overwriteConfirmOpen.set(false);
+  }
+
+  protected async confirmOverwriteProposal() {
+    const id = this.docId();
+    if (!id || !this.pdfBytes || this.pageCount() === 0) return;
+    this.errorText.set(null);
+    this.isSaving.set(true);
+    try {
+      const safeBytes = this.exportNeedsFlatten()
+        ? await this.buildFlattenedExportBytes()
+        : await this.buildSemanticExportBytes();
+      await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
+      this.showSlideToast('Original overwritten successfully');
+      await this.loadProposalVersions(id);
+      this.closeOverwriteConfirmation();
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to overwrite proposal.');
+    } finally {
+      this.isSaving.set(false);
+    }
+  }
+
+  protected async viewProposalVersion(version: ProposalVersion) {
+    await this.router.navigate(['/edit', version.proposalId]);
+  }
+
+  private async loadProposalVersions(id: string) {
+    this.isVersionHistoryLoading.set(true);
+    try {
+      const versions = await this.api.getProposalVersions(id);
+      this.versionHistory.set(versions);
+    } catch {
+      this.versionHistory.set([]);
+    } finally {
+      this.isVersionHistoryLoading.set(false);
+    }
+  }
+
+  private async loadProposalDetails(id: string) {
+    try {
+      const details = await this.api.getProposal(id);
+      this.proposalDetails.set(details);
+    } catch {
+      this.proposalDetails.set(null);
+    }
+  }
+
+  private buildVersionName(currentName: string): string {
+    const dot = currentName.lastIndexOf('.');
+    const hasExt = dot > 0;
+    const base = hasExt ? currentName.slice(0, dot) : currentName;
+    const ext = hasExt ? currentName.slice(dot) : '.pdf';
+    const match = base.match(/(.+)\s\(v(\d+)\)$/i);
+    if (!match) return `${base} (v2)${ext}`;
+    const stem = match[1];
+    const num = Number(match[2] ?? 1);
+    const next = Number.isFinite(num) ? num + 1 : 2;
+    return `${stem} (v${next})${ext}`;
+  }
+
+  private scheduleAutoVersionSave() {
+    if (this.autoVersionSaveTimer !== null) {
+      clearTimeout(this.autoVersionSaveTimer);
+      this.autoVersionSaveTimer = null;
+    }
+    this.autoVersionSaveTimer = setTimeout(() => {
+      this.autoVersionSaveTimer = null;
+      void this.flushAutoVersionSave();
+    }, 400);
+  }
+
+  private async flushAutoVersionSave() {
+    const id = this.docId();
+    if (!id || !this.pdfBytes || this.pageCount() === 0) return;
+    if (this.isLoading() || this.isSaving()) {
+      this.autoVersionSavePending = true;
+      return;
+    }
+    if (this.autoVersionSaveInFlight) {
+      this.autoVersionSavePending = true;
+      return;
+    }
+    this.autoVersionSaveInFlight = true;
+    this.isAutoVersionSaving.set(true);
+    try {
+      const safeBytes = this.exportNeedsFlatten()
+        ? await this.buildFlattenedExportBytes()
+        : await this.buildSemanticExportBytes();
+      await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
+      await this.loadProposalVersions(id);
+    } catch {
+      // Avoid blocking editing flow for auto-version failures.
+    } finally {
+      this.autoVersionSaveInFlight = false;
+      this.isAutoVersionSaving.set(false);
+      if (this.autoVersionSavePending) {
+        this.autoVersionSavePending = false;
+        this.scheduleAutoVersionSave();
+      }
     }
   }
 
@@ -2473,12 +3192,105 @@ export class PdfEditorComponent implements AfterViewInit {
     if (target.closest('.pageMenuBtn')) return;
     if (target.closest('.widget')) return;
     if (target.closest('.imageCropBar')) return;
+    if (target.closest('.insertSourceMenu')) return;
+    if (target.closest('.rightbarMediaActions')) return;
     if (target.closest('.textDraft')) return;
     if (this.selectedWidgetId() !== null) this.selectedWidgetId.set(null);
     if (this.openPageMenuIndex() !== null) this.openPageMenuIndex.set(null);
     if (this.sidebarSlideMenuOpenIndex() !== null) this.sidebarSlideMenuOpenIndex.set(null);
     if (this.selectedPlacedImageId() !== null) this.selectedPlacedImageId.set(null);
     if (this.imageCropSession() !== null) this.imageCropSession.set(null);
+    if (this.insertSourceMenu() !== null) this.insertSourceMenu.set(null);
+  }
+
+  protected parseWidgetVideo(src?: string): ParsedVideoEmbed | null {
+    const raw = (src ?? '').trim();
+    if (!raw) return null;
+    return parseVideoEmbedInput(raw);
+  }
+
+  protected selectedMediaWidget(): { pageIndex: number; widget: Widget } | null {
+    const id = this.selectedWidgetId();
+    if (!id) return null;
+    const pageIndex = this.activePageIndex();
+    const widget = this.getWidget(pageIndex, id);
+    if (!widget) return null;
+    if (widget.kind !== 'image' && widget.kind !== 'video') return null;
+    return { pageIndex, widget };
+  }
+
+  protected replaceSelectedMedia(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const selected = this.selectedMediaWidget();
+    if (!selected) return;
+    const { pageIndex, widget } = selected;
+    const kind: 'image' | 'video' = widget.kind === 'image' ? 'image' : 'video';
+    this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind });
+    if (widget.kind === 'image') {
+      const el = this.widgetImageFile?.nativeElement;
+      if (el) {
+        el.value = '';
+        el.click();
+      }
+      return;
+    }
+    const el = this.widgetVideoFile?.nativeElement;
+    if (el) {
+      el.value = '';
+      el.click();
+    }
+  }
+
+  protected removeSelectedMedia(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const selected = this.selectedMediaWidget();
+    if (!selected) return;
+    this.removeWidget(selected.pageIndex, selected.widget.id);
+  }
+
+  private insertVideoByUrlPrompt() {
+    const raw = window.prompt('Paste video URL');
+    if (!raw) return;
+    const input = raw.trim();
+    const maybeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`;
+    let url = '';
+    try {
+      const parsed = new URL(maybeUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('invalid protocol');
+      url = parsed.toString();
+    } catch {
+      this.errorText.set('Please enter a valid video URL (http/https).');
+      return;
+    }
+    this.errorText.set(null);
+    this.tool.set('text');
+    this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: url });
+    this.rememberReusableAsset({
+      id: `asset_vid_url_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
+      kind: 'video',
+      label: 'Video URL',
+      source: 'url',
+      videoUrl: url,
+      createdAt: Date.now()
+    });
+  }
+
+  private rememberReusableAsset(next: ReusableAsset) {
+    this.reusableAssets.update((prev) => {
+      const duplicateIdx = prev.findIndex((a) => {
+        if (a.kind !== next.kind || a.source !== next.source) return false;
+        if (next.kind === 'image') return a.imageSrc === next.imageSrc;
+        if (next.source === 'url') return a.videoUrl === next.videoUrl;
+        return a.label === next.label;
+      });
+      if (duplicateIdx === -1) return [next, ...prev].slice(0, 24);
+      const existing = prev[duplicateIdx]!;
+      const merged = { ...existing, ...next, id: existing.id, createdAt: Date.now() };
+      const without = prev.filter((_, i) => i !== duplicateIdx);
+      return [merged, ...without].slice(0, 24);
+    });
   }
 
   @HostListener('document:pointermove', ['$event'])
@@ -4227,6 +5039,14 @@ export class PdfEditorComponent implements AfterViewInit {
         return;
       }
       this.pendingImageDataUrl = dataUrl;
+      this.rememberReusableAsset({
+        id: `asset_img_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
+        kind: 'image',
+        label: file.name || 'Uploaded image',
+        source: 'upload',
+        imageSrc: dataUrl,
+        createdAt: Date.now()
+      });
       this.tool.set('image');
 
       // If this picker was triggered by a sidebar drag+drop, place on that page/position.
@@ -4244,6 +5064,15 @@ export class PdfEditorComponent implements AfterViewInit {
     } finally {
       this.isImagePlacing.set(false);
     }
+  }
+
+  private readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read file.'));
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.readAsDataURL(file);
+    });
   }
 
   private async placePendingImage(pageIndex: number, x: number, y: number) {
@@ -4413,6 +5242,156 @@ export class PdfEditorComponent implements AfterViewInit {
         height: img.h * sy
       });
     }
+  }
+
+  private derivedProposalTitle(): string {
+    return (this.fileName() ?? 'Proposal').replace(/\.pdf$/i, '');
+  }
+
+  private normalizePageFurniture(raw: unknown): PageFurniture {
+    const fallback = clonePageFurniture(DEFAULT_PAGE_FURNITURE);
+    if (!raw || typeof raw !== 'object') return fallback;
+    const r = raw as Partial<PageFurniture>;
+    const num = (v: unknown, d: number, min = 0) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(min, n) : d;
+    };
+    return {
+      proposalTitle: typeof r.proposalTitle === 'string' ? r.proposalTitle : fallback.proposalTitle,
+      clientName: typeof r.clientName === 'string' ? r.clientName : fallback.clientName,
+      header: {
+        content: typeof r.header?.content === 'string' ? r.header.content : fallback.header.content,
+        alignment: (['left', 'center', 'right'] as const).includes(r.header?.alignment as any)
+          ? (r.header!.alignment as FurnitureAlignment)
+          : fallback.header.alignment,
+        visible: typeof r.header?.visible === 'boolean' ? r.header.visible : fallback.header.visible
+      },
+      footer: {
+        leftContent: typeof r.footer?.leftContent === 'string' ? r.footer.leftContent : fallback.footer.leftContent,
+        centerContent:
+          typeof r.footer?.centerContent === 'string' ? r.footer.centerContent : fallback.footer.centerContent,
+        rightContent:
+          typeof r.footer?.rightContent === 'string' ? r.footer.rightContent : fallback.footer.rightContent,
+        visible: typeof r.footer?.visible === 'boolean' ? r.footer.visible : fallback.footer.visible,
+        divider: typeof r.footer?.divider === 'boolean' ? r.footer.divider : fallback.footer.divider
+      },
+      pageNumber: {
+        visible: typeof r.pageNumber?.visible === 'boolean' ? r.pageNumber.visible : fallback.pageNumber.visible,
+        format: (['1', '1 / N', 'Page 1 of N'] as const).includes(r.pageNumber?.format as any)
+          ? (r.pageNumber!.format as PageNumberFormat)
+          : fallback.pageNumber.format,
+        position: (['header-left', 'header-right', 'footer-left', 'footer-center', 'footer-right'] as const).includes(
+          r.pageNumber?.position as any
+        )
+          ? (r.pageNumber!.position as PageNumberPosition)
+          : fallback.pageNumber.position,
+        startFrom: num(r.pageNumber?.startFrom, fallback.pageNumber.startFrom, 1)
+      },
+      logo: {
+        url: typeof r.logo?.url === 'string' ? r.logo.url : fallback.logo.url,
+        position: (['header-left', 'header-right'] as const).includes(r.logo?.position as any)
+          ? (r.logo!.position as 'header-left' | 'header-right')
+          : fallback.logo.position,
+        width: num(r.logo?.width, fallback.logo.width, 24),
+        height: num(r.logo?.height, fallback.logo.height, 16),
+        keepAspectRatio:
+          typeof r.logo?.keepAspectRatio === 'boolean' ? r.logo.keepAspectRatio : fallback.logo.keepAspectRatio,
+        linkUrl: typeof r.logo?.linkUrl === 'string' ? r.logo.linkUrl : fallback.logo.linkUrl,
+        visible: typeof r.logo?.visible === 'boolean' ? r.logo.visible : fallback.logo.visible
+      }
+    };
+  }
+
+  private scheduleFurnitureSave(id: string, furniture: PageFurniture) {
+    if (this.furnitureSaveTimer) clearTimeout(this.furnitureSaveTimer);
+    const snapshot = this.normalizePageFurniture(furniture);
+    this.furnitureSaveTimer = setTimeout(() => {
+      void this.api.putFurniture(id, snapshot).catch(() => {
+        // non-fatal
+      });
+    }, 350);
+  }
+
+  private pageFurnitureStorageKey(id: string): string {
+    return `avyro:pdf-page-furniture:v1:${id}`;
+  }
+
+  private persistPageFurnitureForDoc(id: string, furniture: PageFurniture) {
+    try {
+      localStorage.setItem(this.pageFurnitureStorageKey(id), JSON.stringify(this.normalizePageFurniture(furniture)));
+    } catch {
+      // ignore storage issues
+    }
+  }
+
+  private loadPersistedPageFurnitureForDoc(id: string): PageFurniture | null {
+    try {
+      const raw = localStorage.getItem(this.pageFurnitureStorageKey(id));
+      if (!raw) return null;
+      return this.normalizePageFurniture(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  private persistMediaWidgetsForDoc(id: string, widgetsByPage: Record<number, Widget[]>) {
+    const key = this.mediaWidgetsStorageKey(id);
+    const out: PersistedMediaWidgetsByPage = {};
+    for (const [k, list] of Object.entries(widgetsByPage)) {
+      const pageIndex = Number(k);
+      const media = (list ?? [])
+        .filter((w) => w.kind === 'image' || w.kind === 'video')
+        .map((w) => ({
+          id: w.id,
+          kind: (w.kind === 'image' ? 'image' : 'video') as 'image' | 'video',
+          x: w.x,
+          y: w.y,
+          w: w.w,
+          h: w.h,
+          imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
+          videoSrc: w.kind === 'video' ? w.videoSrc : undefined
+        }));
+      if (media.length > 0) out[pageIndex] = media;
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(out));
+    } catch {
+      // ignore storage issues
+    }
+  }
+
+  private loadPersistedMediaWidgetsForDoc(id: string, pageCount: number): Record<number, Widget[]> {
+    const key = this.mediaWidgetsStorageKey(id);
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as PersistedMediaWidgetsByPage;
+      const out: Record<number, Widget[]> = {};
+      for (const [k, list] of Object.entries(parsed ?? {})) {
+        const pageIndex = Number(k);
+        if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) continue;
+        const widgets: Widget[] = (list ?? [])
+          .filter((w) => w && (w.kind === 'image' || w.kind === 'video'))
+          .map((w) => ({
+            id: w.id,
+            kind: w.kind,
+            x: Number.isFinite(w.x) ? w.x : 0,
+            y: Number.isFinite(w.y) ? w.y : 0,
+            w: Number.isFinite(w.w) ? w.w : 220,
+            h: Number.isFinite(w.h) ? w.h : 160,
+            imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
+            videoSrc: w.kind === 'video' ? w.videoSrc : undefined
+          }));
+        if (widgets.length > 0) out[pageIndex] = widgets;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  private mediaWidgetsStorageKey(id: string): string {
+    return `avyro:pdf-media-widgets:v1:${id}`;
   }
 
   private dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; kind: 'png' | 'jpg' } {

@@ -1,0 +1,99 @@
+@if (editable()) {
+  <div class="imageInspect">
+    <div class="imageTabs" role="tablist" aria-label="Image source">
+      <button
+        type="button"
+        role="tab"
+        class="imageTab"
+        [class.imageTabActive]="activeTab() === 'link'"
+        [attr.aria-selected]="activeTab() === 'link'"
+        (click)="setTab('link')"
+      >
+        Paste link
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="imageTab"
+        [class.imageTabActive]="activeTab() === 'upload'"
+        [attr.aria-selected]="activeTab() === 'upload'"
+        (click)="setTab('upload')"
+      >
+        Upload from gallery
+      </button>
+    </div>
+    <p class="imageInspectHint">
+      {{
+        activeTab() === 'link'
+          ? 'Use any https image URL. Switch to Upload to pick from your gallery, then crop before inserting.'
+          : 'Choose a photo — you can crop next. On phones this opens Photos / gallery.'
+      }}
+    </p>
+
+    @if (activeTab() === 'link') {
+      <label class="imageLbl" for="proposalImgLink">Image URL</label>
+      <input
+        id="proposalImgLink"
+        type="url"
+        class="imageUrlFld"
+        placeholder="https://…"
+        autocomplete="off"
+        spellcheck="false"
+        [value]="linkValue()"
+        (input)="onLinkInput($event)"
+      />
+      @if (linkValue()) {
+        <button type="button" class="imageClearLink" (click)="clearLink($event)">Clear URL</button>
+      }
+    }
+
+    @if (activeTab() === 'upload') {
+      <input
+        #fileInput
+        type="file"
+        class="imageFileHidden"
+        accept="image/*"
+        (change)="onFilePicked($event)"
+      />
+      <div class="imageUploadRow">
+        <button type="button" class="imageChooseBtn" (click)="openFilePicker($event)">Choose image</button>
+        @if (content().uploadedFileName) {
+          <span class="imageFileName">{{ content().uploadedFileName }}</span>
+        }
+        @if ((content().src ?? '').length && (content().src!.startsWith('data:') || content().src!.startsWith('http'))) {
+          <button type="button" class="imageClearLink" (click)="clearUploadSlot($event)">Remove image</button>
+        }
+      </div>
+    }
+  </div>
+}
+
+<div
+  class="imageRoot"
+  [style.borderRadius.px]="presentation().borderRadiusPx ?? null"
+  [style.boxShadow]="presentation().boxShadow ?? null"
+>
+  @if (content().src && !cropBlobUrl()) {
+    <img class="imageMedia" [src]="content().src!" [attr.alt]="content().alt || ''" draggable="false" />
+  } @else {
+    @if (!cropBlobUrl()) {
+      <div class="imageEmpty">
+        {{
+          editable()
+            ? activeTab() === 'upload'
+              ? 'Choose an image above to crop.'
+              : 'Paste a link or upload from gallery.'
+            : 'No image'
+        }}
+      </div>
+    }
+  }
+</div>
+
+@if (cropBlobUrl(); as patchUrl) {
+  <proposal-image-crop-dialog
+    [sourceUrl]="patchUrl"
+    (dismissed)="onCropDismissed()"
+    (confirmed)="onCropConfirmed($event)"
+  ></proposal-image-crop-dialog>
+}
