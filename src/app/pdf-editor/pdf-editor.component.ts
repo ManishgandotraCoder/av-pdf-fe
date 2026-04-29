@@ -433,6 +433,11 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly pages = computed(() => Array.from({ length: this.pageCount() }, (_, i) => i));
   protected readonly activePageIndex = signal(0);
   protected readonly openPageMenuIndex = signal<number | null>(null);
+  protected readonly deleteSlideModalOpen = signal(false);
+  protected readonly deleteSlideTargetIndex = signal<number | null>(null);
+  /** Short-lived UX messages (toast) for slide management */
+  protected readonly slideToast = signal<string | null>(null);
+  private slideToastClearTimer: ReturnType<typeof setTimeout> | null = null;
   protected readonly pageThumbUrlByPage = signal<Record<number, string>>({});
   private thumbsEpoch = 0;
 
@@ -1401,6 +1406,10 @@ export class PdfEditorComponent implements AfterViewInit {
     queueMicrotask(() => void this.renderActivePage());
 
     this.destroyRef.onDestroy(() => {
+      if (this.slideToastClearTimer !== null) {
+        clearTimeout(this.slideToastClearTimer);
+        this.slideToastClearTimer = null;
+      }
       try {
         this.pdfDoc?.destroy();
       } catch {
@@ -1575,6 +1584,10 @@ export class PdfEditorComponent implements AfterViewInit {
     if (isTyping) return;
 
     if (ev.key === 'Escape') {
+      if (this.deleteSlideModalOpen()) {
+        this.closeDeleteSlideModal();
+        return;
+      }
       this.cancelInsertWidgetMode();
       return;
     }
@@ -2669,7 +2682,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const count = this.pageCount();
     if (count <= 1) {
       // Don't allow deleting the last page; it would leave an empty PDF and disable save/export flows.
-      this.errorText.set('Cannot delete the last page.');
+      this.errorText.set('At least one slide is required');
       return;
     }
 
@@ -2681,8 +2694,62 @@ export class PdfEditorComponent implements AfterViewInit {
       { kind: 'delete', at: pageIndex }
     );
 
+    // After removing page at pageIndex: keep the same index (previous "next" page), or prior page if last was removed.
     const nextActive = clamp(pageIndex, 0, this.pageCount() - 1);
     this.setActivePage(nextActive);
+  }
+
+  protected requestDeleteSlide(pageIndex: number, ev?: Event) {
+    ev?.stopPropagation();
+    if (this.isLoading() || this.isSaving()) return;
+    if (this.pageCount() <= 1) {
+      this.showSlideToast('At least one slide is required');
+      return;
+    }
+    this.deleteSlideTargetIndex.set(pageIndex);
+    this.deleteSlideModalOpen.set(true);
+  }
+
+  protected closeDeleteSlideModal() {
+    this.deleteSlideModalOpen.set(false);
+    this.deleteSlideTargetIndex.set(null);
+  }
+
+  protected async confirmDeleteSlide() {
+    const idx = this.deleteSlideTargetIndex();
+    this.closeDeleteSlideModal();
+    if (idx === null || !this.pdfBytes) return;
+    await this.deletePage(idx);
+    if (!this.errorText()) {
+      this.showSlideToast('Slide deleted');
+    }
+  }
+
+  /**
+   * When a PDF page index is deleted, remap `Record<number, T>` keyed by page index immutably
+   * (drop `deletedAt`, shift higher keys down).
+   */
+  protected reindexKeyedByDeletedPage<T>(prev: Record<number, T>, deletedAt: number): Record<number, T> {
+    const next: Record<number, T> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      if (idx === deletedAt) continue;
+      next[idx > deletedAt ? idx - 1 : idx] = v as T;
+    }
+    return next;
+  }
+
+  private showSlideToast(message: string) {
+    if (this.slideToastClearTimer !== null) {
+      clearTimeout(this.slideToastClearTimer);
+      this.slideToastClearTimer = null;
+    }
+    this.slideToast.set(message);
+    this.slideToastClearTimer = setTimeout(() => {
+      this.slideToast.set(null);
+      this.slideToastClearTimer = null;
+    }, 3200);
   }
 
   private remapEditsAfterInsert(atIndex: number) {
@@ -2697,15 +2764,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private remapEditsAfterDelete(atIndex: number) {
-    const prev = this.editsByPage();
-    const next: Record<number, PageEdits> = {};
-    for (const [k, v] of Object.entries(prev)) {
-      const idx = Number(k);
-      if (!Number.isFinite(idx) || !v) continue;
-      if (idx === atIndex) continue;
-      next[idx > atIndex ? idx - 1 : idx] = v;
-    }
-    this.editsByPage.set(next);
+    this.editsByPage.set(this.reindexKeyedByDeletedPage(this.editsByPage(), atIndex));
   }
 
   private remapEditsAfterCopy(fromIndex: number, toIndex: number) {
@@ -2751,7 +2810,10 @@ export class PdfEditorComponent implements AfterViewInit {
       await this.persistPdfBytesToBackend();
 
       if (remap.kind === 'insert') this.remapEditsAfterInsert(remap.at);
-      if (remap.kind === 'delete') this.remapEditsAfterDelete(remap.at);
+      if (remap.kind === 'delete') {
+        this.remapEditsAfterDelete(remap.at);
+        this.widgetsByPage.set(this.reindexKeyedByDeletedPage(this.widgetsByPage(), remap.at));
+      }
       if (remap.kind === 'copy') this.remapEditsAfterCopy(remap.from, remap.to);
 
       this.pageThumbUrlByPage.set({});

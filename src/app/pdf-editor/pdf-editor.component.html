@@ -1,4 +1,37 @@
 <div class="shell">
+  @if (deleteSlideModalOpen()) {
+    <div class="deleteSlideModal" (click)="closeDeleteSlideModal()">
+      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
+      <div
+        class="deleteSlideModal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deleteSlideModalTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <h2 id="deleteSlideModalTitle" class="deleteSlideModal__title">Delete Slide?</h2>
+        <p class="deleteSlideModal__message">This action cannot be undone.</p>
+        <div class="deleteSlideModal__actions">
+          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="closeDeleteSlideModal()">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="deleteSlideModal__btn deleteSlideModal__btn--danger"
+            [disabled]="isLoading()"
+            (click)="confirmDeleteSlide()"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (slideToast()) {
+    <div class="slideToast" role="status" aria-live="polite">{{ slideToast() }}</div>
+  }
+
   @if (openDocsMenu()) {
     <div class="docsMenuBackdrop" (pointerdown)="closeDocsMenu()"></div>
   }
@@ -310,9 +343,10 @@
                   <button
                     type="button"
                     class="pageDeleteBtn"
-                    title="Delete page"
-                    [disabled]="pageCount() <= 1 || isLoading() || isSaving()"
-                    (click)="$event.stopPropagation(); deletePage(pageIndex)"
+                    title="Delete slide"
+                    [disabled]="isLoading() || isSaving()"
+                    [attr.aria-label]="'Delete slide ' + (pageIndex + 1)"
+                    (click)="requestDeleteSlide(pageIndex, $event)"
                   >
                     ✕
                   </button>
