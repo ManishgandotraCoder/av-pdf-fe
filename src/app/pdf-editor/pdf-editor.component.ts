@@ -498,6 +498,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly penWidth = signal(3);
   protected readonly textColor = signal('#22c55e');
   protected readonly textSize = signal(18);
+  protected readonly textSizeInput = signal('18');
   protected readonly textStyle = signal<FontStyle>('regular');
   protected readonly textFamily = signal<FontFamily>('helvetica');
   protected readonly textBgEnabled = signal(false);
@@ -733,6 +734,10 @@ export class PdfEditorComponent implements AfterViewInit {
       // Re-render pages when zoom changes.
       const _ = this.scale();
       void this.renderActivePage();
+    });
+
+    effect(() => {
+      this.textSizeInput.set(String(this.textSize()));
     });
 
     effect(() => {
@@ -2225,14 +2230,14 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected readonly toolbarItems: ToolbarItem[] = [
-    {
-      kind: 'button',
-      id: 'print',
-      title: 'Print (Clear edits)',
-      icon: 'print',
-      onClick: () => this.clearEdits(),
-      disabled: () => this.pageCount() === 0
-    },
+    // {
+    //   kind: 'button',
+    //   id: 'print',
+    //   title: 'Print (Clear edits)',
+    //   icon: 'print',
+    //   onClick: () => this.clearEdits(),
+    //   disabled: () => this.pageCount() === 0
+    // },
     {
       kind: 'button',
       id: 'extract-template',
@@ -2241,13 +2246,13 @@ export class PdfEditorComponent implements AfterViewInit {
       onClick: () => void this.extractTemplate(),
       disabled: () => this.pageCount() === 0 || this.isLoading() || this.isSaving()
     },
-    {
-      kind: 'button',
-      id: 'spellcheck',
-      title: 'Spellcheck (noop)',
-      icon: 'spellcheck',
-      onClick: () => {}
-    },
+    // {
+    //   kind: 'button',
+    //   id: 'spellcheck',
+    //   title: 'Spellcheck (noop)',
+    //   icon: 'spellcheck',
+    //   onClick: () => {}
+    // },
     { kind: 'sep', id: 'sep-2' },
     {
       kind: 'group',
@@ -5316,6 +5321,26 @@ export class PdfEditorComponent implements AfterViewInit {
     this.applyTextToolbarChange(() => {
       this.textSize.set(size);
     });
+  }
+
+  protected setTextSizeFromInput(raw: string) {
+    const parsed = Number(String(raw ?? '').trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    this.setTextSize(parsed);
+  }
+
+  protected onTextSizeInputChange(raw: string) {
+    this.textSizeInput.set(String(raw ?? ''));
+  }
+
+  protected commitTextSizeInput() {
+    const raw = this.textSizeInput();
+    const parsed = Number(String(raw ?? '').trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      this.textSizeInput.set(String(this.textSize()));
+      return;
+    }
+    this.setTextSize(parsed);
   }
 
   protected setTextColor(color: string) {

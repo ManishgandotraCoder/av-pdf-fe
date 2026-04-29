@@ -528,6 +528,10 @@
   color: rgba(15, 23, 42, 0.76);
 }
 
+.stripInput {
+  width: 76px;
+}
+
 .stripCombo {
   display: inline-flex;
   align-items: center;
@@ -1961,6 +1965,31 @@
 .textDraft {
   position: absolute;
   pointer-events: auto;
+}
+
+.textDraft__close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+  background: rgba(255, 255, 255, 0.95);
+  color: rgba(15, 23, 42, 0.85);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.textDraft__close:hover {
+  background: rgba(254, 242, 242, 0.96);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: rgba(153, 27, 27, 0.95);
 }
 
 .textDraft textarea {

@@ -402,17 +402,32 @@
               }
             </button>
           } @else if (it.kind === 'select') {
-            <select
-              class="stripSelect"
-              [title]="it.title"
-              [ngModel]="it.value()"
-              (ngModelChange)="it.setValue($event)"
-              [disabled]="it.disabled?.() ?? false"
-            >
-              @for (opt of it.options; track opt.value) {
-                <option [ngValue]="opt.value">{{ opt.label }}</option>
-              }
-            </select>
+            @if (it.id === 'font-size') {
+              <input
+                class="stripSelect stripInput"
+                type="text"
+                inputmode="numeric"
+                [title]="it.title"
+                [ngModel]="textSizeInput()"
+                (ngModelChange)="onTextSizeInputChange($event)"
+                (blur)="commitTextSizeInput()"
+                (keydown.enter)="commitTextSizeInput(); $event.preventDefault()"
+                [disabled]="it.disabled?.() ?? false"
+                placeholder="Size"
+              />
+            } @else {
+              <select
+                class="stripSelect"
+                [title]="it.title"
+                [ngModel]="it.value()"
+                (ngModelChange)="it.setValue($event)"
+                [disabled]="it.disabled?.() ?? false"
+              >
+                @for (opt of it.options; track opt.value) {
+                  <option [ngValue]="opt.value">{{ opt.label }}</option>
+                }
+              </select>
+            }
           } @else if (it.kind === 'color') {
             <input
               class="stripColor"
@@ -984,6 +999,15 @@
 
                 @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
                   <div class="textDraft" [ngStyle]="textDraftStyle()">
+                    <button
+                      type="button"
+                      class="textDraft__close"
+                      title="Delete text"
+                      (pointerdown)="$event.stopPropagation()"
+                      (click)="cancelTextDraft()"
+                    >
+                      ✕
+                    </button>
                     <textarea
                       #textDraftEditor
                       [(ngModel)]="textDraft"
