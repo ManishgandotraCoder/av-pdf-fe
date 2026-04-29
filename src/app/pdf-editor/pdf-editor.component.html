@@ -109,6 +109,10 @@
           @if (shareUrl()) {
             <input class="shareDrawer__input" [value]="shareUrl()" readonly />
           }
+          @if (lastShareRecord(); as shareMeta) {
+            <div class="shareDrawer__metaText">Shared by: {{ shareMeta.sharedBy }}</div>
+            <div class="shareDrawer__metaText">Shared at: {{ formatTimestamp(shareMeta.sharedAt) }}</div>
+          }
         </section>
 
         <section class="shareDrawer__section">
@@ -152,6 +156,31 @@
             <button type="button" class="shareDrawer__btn" [disabled]="isLoading()" (click)="exportPdf()">Download as PDF</button>
             <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="isLoading()" (click)="downloadAsPpt()">
               Download as PPT
+            </button>
+          </div>
+        </section>
+
+        <section class="shareDrawer__section">
+          <h3 class="shareDrawer__sectionTitle">Rejection</h3>
+          <div class="shareDrawer__metaText">Status: {{ rejectionLabel() }}</div>
+          @if (rejection(); as r) {
+            <div class="shareDrawer__metaText">By: {{ r.rejectedBy }} on {{ formatTimestamp(r.rejectedAt) }}</div>
+            @if (r.reason) {
+              <div class="shareDrawer__metaText">Reason: {{ r.reason }}</div>
+            }
+          }
+          <input
+            class="shareDrawer__input"
+            [ngModel]="rejectionReasonInput()"
+            (ngModelChange)="rejectionReasonInput.set($event)"
+            placeholder="Optional rejection reason"
+          />
+          <div class="shareDrawer__row">
+            <button type="button" class="shareDrawer__btn" [disabled]="rejectionBusy()" (click)="rejectProposal('internal')">
+              Internal reject
+            </button>
+            <button type="button" class="shareDrawer__btn shareDrawer__btnGhost" [disabled]="rejectionBusy()" (click)="rejectProposal('client')">
+              Client reject
             </button>
           </div>
         </section>
@@ -591,6 +620,15 @@
                           </svg>
                           Add slide
                         </button>
+                        <button
+                          type="button"
+                          class="sidebarSlideMenu__item"
+                          role="menuitem"
+                          [disabled]="isLoading() || isSaving()"
+                          (click)="onSidebarAddSlideFromTemplate(pageIndex, $event)"
+                        >
+                          Add slide from template
+                        </button>
                       </div>
                     }
                   </div>
@@ -992,6 +1030,32 @@
                   class="pageSettings__hint"
                   [textContent]="'Dynamic fields: {{proposalTitle}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
                 ></p>
+
+                <div class="pageSettings__section">
+                  <div class="pageSettings__sectionTitle">Global Typography</div>
+                  <div class="pageSettings__hint">Applies across all slides; existing per-block edits are preserved.</div>
+
+                  <div class="pageSettings__sectionTitle">Heading</div>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().heading.fontFamily" (ngModelChange)="updateGlobalTypography('heading', { fontFamily: $any($event) })" placeholder="Font family" />
+                  <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().heading.size" (ngModelChange)="updateGlobalTypography('heading', { size: +$event || 16 })" placeholder="Font size" />
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().heading.bold" (change)="updateGlobalTypography('heading', { bold: $any($event.target).checked })" /> Bold</label>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().heading.italic" (change)="updateGlobalTypography('heading', { italic: $any($event.target).checked })" /> Italic</label>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().heading.color" (ngModelChange)="updateGlobalTypography('heading', { color: $event })" placeholder="Color (#hex)" />
+
+                  <div class="pageSettings__sectionTitle">Subheading</div>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().subheading.fontFamily" (ngModelChange)="updateGlobalTypography('subheading', { fontFamily: $any($event) })" placeholder="Font family" />
+                  <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().subheading.size" (ngModelChange)="updateGlobalTypography('subheading', { size: +$event || 16 })" placeholder="Font size" />
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().subheading.bold" (change)="updateGlobalTypography('subheading', { bold: $any($event.target).checked })" /> Bold</label>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().subheading.italic" (change)="updateGlobalTypography('subheading', { italic: $any($event.target).checked })" /> Italic</label>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().subheading.color" (ngModelChange)="updateGlobalTypography('subheading', { color: $event })" placeholder="Color (#hex)" />
+
+                  <div class="pageSettings__sectionTitle">Body</div>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().body.fontFamily" (ngModelChange)="updateGlobalTypography('body', { fontFamily: $any($event) })" placeholder="Font family" />
+                  <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().body.size" (ngModelChange)="updateGlobalTypography('body', { size: +$event || 16 })" placeholder="Font size" />
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().body.bold" (change)="updateGlobalTypography('body', { bold: $any($event.target).checked })" /> Bold</label>
+                  <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().body.italic" (change)="updateGlobalTypography('body', { italic: $any($event.target).checked })" /> Italic</label>
+                  <input class="pageSettings__input" [ngModel]="globalTypography().body.color" (ngModelChange)="updateGlobalTypography('body', { color: $event })" placeholder="Color (#hex)" />
+                </div>
 
                 <div class="pageSettings__section">
                   <div class="pageSettings__sectionTitle">Header Settings</div>

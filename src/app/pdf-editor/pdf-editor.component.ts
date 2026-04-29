@@ -23,7 +23,9 @@ import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } 
 import {
   PdfApiService,
   type ProposalDetails,
+  type ProposalRejection,
   type ProposalVersion,
+  type RejectionLevel,
   type ShareAccessType,
   type ShareRole,
   type ShareUser
@@ -171,6 +173,20 @@ function clonePageFurniture(f: PageFurniture): PageFurniture {
   };
 }
 
+const DEFAULT_GLOBAL_TYPOGRAPHY: GlobalTypographySettings = {
+  heading: { fontFamily: 'helvetica', size: 26, bold: true, italic: false, color: '#111827' },
+  subheading: { fontFamily: 'helvetica', size: 20, bold: true, italic: false, color: '#1f2937' },
+  body: { fontFamily: 'helvetica', size: 16, bold: false, italic: false, color: '#111827' }
+};
+
+function cloneGlobalTypography(v: GlobalTypographySettings): GlobalTypographySettings {
+  return {
+    heading: { ...v.heading },
+    subheading: { ...v.subheading },
+    body: { ...v.body }
+  };
+}
+
 type ToolbarIcon =
   | 'undo'
   | 'redo'
@@ -292,6 +308,20 @@ type DetectedBlock = {
   fontSize: number;
   fontStyle: FontStyle;
   kind: DetectedBlockKind;
+};
+
+type GlobalTypographySection = {
+  fontFamily: FontFamily;
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+};
+
+type GlobalTypographySettings = {
+  heading: GlobalTypographySection;
+  subheading: GlobalTypographySection;
+  body: GlobalTypographySection;
 };
 
 type TextReplace = {
@@ -538,13 +568,21 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly shareEmailInput = signal('');
   protected readonly shareRoleInput = signal<ShareRole>('viewer');
   protected readonly shareBusy = signal(false);
+  protected readonly lastShareRecord = signal<{
+    sharedBy: string;
+    sharedAt: number;
+  } | null>(null);
   protected readonly proposalDetails = signal<ProposalDetails | null>(null);
+  protected readonly rejection = signal<ProposalRejection | null>(null);
+  protected readonly rejectionReasonInput = signal('');
+  protected readonly rejectionBusy = signal(false);
   protected readonly readonlyMode = signal(false);
   protected readonly traceabilityHint =
     'Helps track origin and maintain version lineage';
   protected readonly versionHistory = signal<ProposalVersion[]>([]);
   protected readonly isVersionHistoryLoading = signal(false);
   protected readonly isAutoVersionSaving = signal(false);
+  protected readonly globalTypography = signal<GlobalTypographySettings>(cloneGlobalTypography(DEFAULT_GLOBAL_TYPOGRAPHY));
   private autoVersionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private autoVersionSaveInFlight = false;
   private autoVersionSavePending = false;
@@ -656,8 +694,11 @@ export class PdfEditorComponent implements AfterViewInit {
         void this.loadFromApi(id);
         void this.loadProposalVersions(id);
         void this.loadProposalDetails(id);
+        void this.loadProposalRejection(id);
       } else {
         this.proposalDetails.set(null);
+        this.rejection.set(null);
+        this.lastShareRecord.set(null);
       }
     });
 
@@ -776,10 +817,15 @@ export class PdfEditorComponent implements AfterViewInit {
       const shared = await this.api.generateShareLink({
         proposalId,
         accessType: this.shareAccessType(),
+        sharedBy: this.getEditedBy(),
         derivedFrom
       });
       this.shareUrl.set(shared.url);
       this.shareUsers.set(shared.users ?? []);
+      this.lastShareRecord.set({
+        sharedBy: shared.sharedBy ?? this.getEditedBy(),
+        sharedAt: Number(shared.updatedAt ?? Date.now())
+      });
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to generate share link.');
     } finally {
@@ -808,6 +854,32 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  protected rejectionLabel(): string {
+    const r = this.rejection();
+    if (!r) return 'Not rejected';
+    return r.level === 'client' ? 'Client rejected' : 'Internally rejected';
+  }
+
+  protected async rejectProposal(level: RejectionLevel) {
+    const id = this.docId();
+    if (!id) return;
+    this.errorText.set(null);
+    this.rejectionBusy.set(true);
+    try {
+      const rec = await this.api.rejectProposal(id, {
+        level,
+        reason: this.rejectionReasonInput().trim(),
+        rejectedBy: this.getEditedBy()
+      });
+      this.rejection.set(rec);
+      this.showSlideToast(level === 'client' ? 'Marked as client rejected' : 'Marked as internally rejected');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to reject proposal.');
+    } finally {
+      this.rejectionBusy.set(false);
+    }
+  }
+
   protected async copyShareLink() {
     const value = this.shareUrl().trim();
     if (!value) return;
@@ -817,6 +889,11 @@ export class PdfEditorComponent implements AfterViewInit {
     } catch {
       this.errorText.set('Unable to copy link.');
     }
+  }
+
+  protected formatTimestamp(ts: number): string {
+    if (!Number.isFinite(ts)) return '-';
+    return new Date(ts).toLocaleString();
   }
 
   protected derivedFromLabel(): string {
@@ -845,6 +922,115 @@ export class PdfEditorComponent implements AfterViewInit {
     } catch {
       return 'Unknown User';
     }
+  }
+
+  protected updateGlobalTypography(
+    section: keyof GlobalTypographySettings,
+    patch: Partial<GlobalTypographySection>
+  ) {
+    this.globalTypography.update((prev) => ({
+      ...prev,
+      [section]: { ...prev[section], ...patch }
+    }));
+    void this.applyGlobalTypographyToDocument();
+  }
+
+  private blockSectionForDetected(block: DetectedBlock): keyof GlobalTypographySettings {
+    if (block.kind === 'heading') return 'heading';
+    if (block.kind === 'list') return 'subheading';
+    return 'body';
+  }
+
+  private styleToFontStyle(style: GlobalTypographySection): FontStyle {
+    if (style.bold && style.italic) return 'boldItalic';
+    if (style.bold) return 'bold';
+    if (style.italic) return 'italic';
+    return 'regular';
+  }
+
+  private async detectBlocksForPage(pageIndex: number): Promise<DetectedBlock[]> {
+    if (!this.pdfDoc) return [];
+    const page = await this.pdfDoc.getPage(pageIndex + 1);
+    const cssViewport = page.getViewport({ scale: this.scale() });
+    try {
+      const textContent = await page.getTextContent();
+      const styles = (textContent as any).styles ?? {};
+      const items: DetectedText[] = [];
+      for (const it of textContent.items as any[]) {
+        const str = String(it.str ?? '');
+        if (!str.trim()) continue;
+        const tx = Array.isArray(it.transform) ? it.transform : null;
+        if (!tx || tx.length < 6) continue;
+        const xPdf = Number(tx[4] ?? 0);
+        const yPdf = Number(tx[5] ?? 0);
+        const [x, yBottom] = cssViewport.convertToViewportPoint(xPdf, yPdf);
+        const w = Math.max(1, Number(it.width ?? 0) * cssViewport.scale);
+        const h = Math.max(1, Math.hypot(Number(tx[2] ?? 0), Number(tx[3] ?? 0)) * cssViewport.scale);
+        const y = yBottom - h;
+        const fontName = String(it.fontName ?? '');
+        items.push({
+          x,
+          y,
+          w,
+          h,
+          text: str,
+          fontSize: Math.max(6, h),
+          fontStyle: inferFontStyleFromPdfJsStyle(styles[fontName] ?? { fontName })
+        });
+      }
+      const blocks = this.groupDetectedTextIntoBlocks(items);
+      this.detectedBlocksByPage.update((prev) => ({ ...prev, [pageIndex]: blocks }));
+      return blocks;
+    } catch {
+      return [];
+    }
+  }
+
+  protected async applyGlobalTypographyToDocument() {
+    if (!this.pdfDoc || this.pageCount() <= 0) return;
+    const typography = this.globalTypography();
+    const next = this.cloneEdits(this.editsByPage());
+    this.beginHistoryStep();
+
+    for (let pageIndex = 0; pageIndex < this.pageCount(); pageIndex++) {
+      const blocks = await this.detectBlocksForPage(pageIndex);
+      const existing = next[pageIndex] ?? {
+        viewportWidth: 0,
+        viewportHeight: 0,
+        ink: [],
+        text: [],
+        images: [],
+        replaces: []
+      };
+      const replaces = [...(existing.replaces ?? [])];
+
+      for (const block of blocks) {
+        const alreadyOverridden = replaces.some(
+          (r) => r.oldText === block.text && Math.abs(r.x - block.x) < 2 && Math.abs(r.y - block.y) < 2
+        );
+        if (alreadyOverridden) continue;
+        const section = typography[this.blockSectionForDetected(block)];
+        replaces.push({
+          x: block.x,
+          y: block.y,
+          w: block.w,
+          h: block.h,
+          oldText: block.text,
+          newText: block.text,
+          maskMode: 'color',
+          bgColor: '#ffffff',
+          color: section.color,
+          fontSize: section.size,
+          fontStyle: this.styleToFontStyle(section),
+          fontFamily: section.fontFamily
+        });
+      }
+
+      next[pageIndex] = { ...existing, replaces };
+    }
+
+    this.editsByPage.set(next);
+    await this.renderActivePage();
   }
 
   protected furnitureAlignOptions: FurnitureAlignment[] = ['left', 'center', 'right'];
@@ -2224,6 +2410,20 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  protected async onSidebarAddSlideFromTemplate(pageIndex: number, ev: Event) {
+    ev.stopPropagation();
+    if (!this.pdfBytes || this.isLoading() || this.isSaving()) return;
+    this.sidebarSlideMenuOpenIndex.set(null);
+    const templateId = (prompt('Template proposal ID') ?? '').trim();
+    if (!templateId) return;
+    const pageRaw = (prompt('Template page number (1-based)', '1') ?? '').trim();
+    const pageNumber = Math.max(1, Number(pageRaw || '1'));
+    await this.addSlideFromTemplate(pageIndex, templateId, pageNumber - 1);
+    if (!this.errorText()) {
+      this.showSlideToast('Slide inserted from template');
+    }
+  }
+
   protected scrollToPage(_pageIndex: number) {
     // Single-page mode: nothing to scroll; page switching is handled via `activePageIndex`.
   }
@@ -2945,8 +3145,18 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const details = await this.api.getProposal(id);
       this.proposalDetails.set(details);
+      this.rejection.set(details.rejection ?? null);
     } catch {
       this.proposalDetails.set(null);
+    }
+  }
+
+  private async loadProposalRejection(id: string) {
+    try {
+      const rej = await this.api.getProposalRejection(id);
+      this.rejection.set(rej);
+    } catch {
+      this.rejection.set(null);
     }
   }
 
@@ -3539,6 +3749,23 @@ export class PdfEditorComponent implements AfterViewInit {
       { kind: 'copy', from: pageIndex, to: pageIndex + 1 }
     );
     this.setActivePage(pageIndex + 1);
+  }
+
+  protected async addSlideFromTemplate(afterPageIndex: number, templateProposalId: string, templatePageIndex = 0) {
+    const cleanTemplateId = String(templateProposalId || '').trim();
+    if (!cleanTemplateId) return;
+    await this.mutatePdfPages(
+      async (pdf) => {
+        const templateBytes = await this.api.getBytes(cleanTemplateId);
+        const templatePdf = await PDFDocument.load(new Uint8Array(templateBytes));
+        const srcIndex = clamp(templatePageIndex, 0, Math.max(0, templatePdf.getPageCount() - 1));
+        const [copied] = await pdf.copyPages(templatePdf, [srcIndex]);
+        const insertAt = clamp(afterPageIndex + 1, 0, pdf.getPageCount());
+        pdf.insertPage(insertAt, copied);
+      },
+      { kind: 'insert', at: afterPageIndex + 1 }
+    );
+    this.setActivePage(afterPageIndex + 1);
   }
 
   protected async deletePage(pageIndex: number) {

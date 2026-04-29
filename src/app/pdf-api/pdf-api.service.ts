@@ -22,12 +22,23 @@ export type ProposalDetails = {
   id: string;
   name: string;
   derivedFrom: string | null;
+  rejection?: ProposalRejection | null;
   derivedFromDetails?: {
     id: string;
     name: string;
     isDeleted?: boolean;
     hasAccess?: boolean;
   } | null;
+};
+
+export type RejectionLevel = 'internal' | 'client';
+
+export type ProposalRejection = {
+  proposalId: string;
+  level: RejectionLevel;
+  reason: string;
+  rejectedBy: string;
+  rejectedAt: number;
 };
 
 export type ShareAccessType = 'public' | 'restricted';
@@ -46,6 +57,7 @@ export type ShareRecord = {
   linkToken: string;
   createdAt: number;
   updatedAt: number;
+  sharedBy?: string;
   derivedFrom?: {
     id: string;
     name: string;
@@ -55,10 +67,17 @@ export type ShareRecord = {
 export type GenerateShareLinkBody = {
   proposalId: string;
   accessType: ShareAccessType;
+  sharedBy?: string;
   derivedFrom?: {
     id: string;
     name: string;
   } | null;
+};
+
+export type RejectProposalBody = {
+  level: RejectionLevel;
+  reason?: string;
+  rejectedBy?: string;
 };
 
 export type AddShareUserBody = {
@@ -294,6 +313,29 @@ export class PdfApiService {
       throw new Error(msg);
     }
     return (await res.json()) as ShareRecord;
+  }
+
+  async rejectProposal(id: string, body: RejectProposalBody): Promise<ProposalRejection> {
+    const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/reject`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to reject proposal.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ProposalRejection;
+  }
+
+  async getProposalRejection(id: string): Promise<ProposalRejection | null> {
+    const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/rejection`));
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load rejection status.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as ProposalRejection;
   }
 
   async restoreProposalVersion(
