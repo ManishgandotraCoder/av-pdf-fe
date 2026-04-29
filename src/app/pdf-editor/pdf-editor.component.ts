@@ -760,11 +760,8 @@ export class PdfEditorComponent implements AfterViewInit {
     });
 
     effect(() => {
-      const createFlow = this.isCreateFlow();
       const currentTab = this.rightbarTab();
-      const allowed = createFlow
-        ? (['options', 'settings', 'typography'] as const)
-        : (['options', 'assets', 'versions'] as const);
+      const allowed = ['options', 'settings', 'typography', 'assets', 'versions'] as const;
       if (!allowed.includes(currentTab as any)) {
         this.rightbarTab.set('options');
       }
@@ -1018,15 +1015,6 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions') {
-    const createFlow = this.isCreateFlow();
-    if (createFlow && (tab === 'assets' || tab === 'versions')) {
-      this.rightbarTab.set('options');
-      return;
-    }
-    if (!createFlow && (tab === 'settings' || tab === 'typography')) {
-      this.rightbarTab.set('options');
-      return;
-    }
     this.rightbarTab.set(tab);
   }
 

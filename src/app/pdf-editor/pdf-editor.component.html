@@ -1026,29 +1026,27 @@
               <path d="M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
-          @if (isCreateFlow()) {
-            <button
-              type="button"
-              role="tab"
-              class="rightbarTabs__btn"
-              [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
-              [attr.aria-selected]="rightbarTab() === 'settings'"
-              aria-label="Settings"
-              title="Settings"
-              (click)="setRightbarTab('settings')"
-            >
-              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-          }
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
+            [attr.aria-selected]="rightbarTab() === 'settings'"
+            aria-label="Settings"
+            title="Settings"
+            (click)="setRightbarTab('settings')"
+          >
+            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
           @if (!isCreateFlow()) {
             <button
               type="button"
@@ -1067,24 +1065,22 @@
               </svg>
             </button>
           }
-          @if (isCreateFlow()) {
-            <button
-              type="button"
-              role="tab"
-              class="rightbarTabs__btn"
-              [class.rightbarTabs__btnActive]="rightbarTab() === 'typography'"
-              [attr.aria-selected]="rightbarTab() === 'typography'"
-              aria-label="Typography"
-              title="Typography"
-              (click)="setRightbarTab('typography')"
-            >
-              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-            </button>
-          }
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'typography'"
+            [attr.aria-selected]="rightbarTab() === 'typography'"
+            aria-label="Typography"
+            title="Typography"
+            (click)="setRightbarTab('typography')"
+          >
+            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
           @if (!isCreateFlow()) {
             <button
               type="button"
@@ -1294,7 +1290,7 @@
           </div>
         }
 
-        @if (isCreateFlow() && rightbarTab() === 'settings') {
+        @if (rightbarTab() === 'settings') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Page settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Page Settings</div>
@@ -1348,7 +1344,7 @@
           </div>
         }
 
-        @if (isCreateFlow() && rightbarTab() === 'typography') {
+        @if (rightbarTab() === 'typography') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Typography settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Typography</div>
