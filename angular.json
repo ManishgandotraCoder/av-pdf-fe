@@ -32,22 +32,22 @@
             ],
             "styles": [
               "src/styles.css"
+            ],
+            "budgets": [
+              {
+                "type": "initial",
+                "maximumWarning": "500kB",
+                "maximumError": "1MB"
+              },
+              {
+                "type": "anyComponentStyle",
+                "maximumWarning": "45kB",
+                "maximumError": "56kB"
+              }
             ]
           },
           "configurations": {
             "production": {
-              "budgets": [
-                {
-                  "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "40kB",
-                  "maximumError": "48kB"
-                }
-              ],
               "outputHashing": "all"
             },
             "development": {
