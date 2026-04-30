@@ -507,6 +507,9 @@ export class PdfEditorComponent implements AfterViewInit {
   /** When false, embedded-text detection is skipped and PDF text/editing widgets are inactive. */
   protected readonly textFeatureEnabled = signal(true);
   // Default PDF display at 80%.
+  private static readonly minZoom = 0.1;
+  private static readonly maxZoom = 2.5;
+  private static readonly zoomStep = 0.1;
   protected readonly scale = signal(0.8);
   protected readonly sidebarCollapsed = signal(false);
 
@@ -525,6 +528,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions'>('options');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
+  protected readonly rightbarLibraryCollapsed = signal(false);
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
   protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
 
@@ -533,8 +537,15 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly widgetsByPage = signal<Record<number, Widget[]>>({});
   protected readonly selectedWidgetId = signal<string | null>(null);
   protected readonly pageFurniture = signal<PageFurniture>(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
+  protected readonly proposalTitleDraft = signal(DEFAULT_PAGE_FURNITURE.proposalTitle);
+  protected readonly clientNameDraft = signal(DEFAULT_PAGE_FURNITURE.clientName);
+  protected readonly hasUnsavedDynamicFields = computed(() => {
+    const furniture = this.pageFurniture();
+    return this.proposalTitleDraft() !== furniture.proposalTitle || this.clientNameDraft() !== furniture.clientName;
+  });
   private logoNaturalAspect = 1;
   private furnitureSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private furniturePersistenceReady = false;
 
   @ViewChild('pdfImageFile') private readonly pdfImageFile?: ElementRef<HTMLInputElement>;
   @ViewChild('widgetImageFile') private readonly widgetImageFile?: ElementRef<HTMLInputElement>;
@@ -751,6 +762,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const id = this.route.snapshot.paramMap.get('id');
       this.isCreateFlow.set(!id);
       this.readonlyMode.set(this.route.snapshot.queryParamMap.get('readonly') === '1');
+      this.furniturePersistenceReady = false;
       this.docId.set(id);
       this.autoVersionSnapshotReady = false;
       this.lastAutoVersionSnapshot = '';
@@ -784,7 +796,7 @@ export class PdfEditorComponent implements AfterViewInit {
     effect(() => {
       const id = this.docId();
       const furniture = this.pageFurniture();
-      if (!id) return;
+      if (!id || !this.furniturePersistenceReady) return;
       this.persistPageFurnitureForDoc(id, furniture);
       this.scheduleFurnitureSave(id, furniture);
     });
@@ -827,7 +839,7 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
-  protected readonly zoomOptions = [ 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4] as const;
+  protected readonly zoomOptions = [0.25, 0.5, 0.75, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4] as const;
   protected readonly fontSizeOptions = [
     8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48, 56, 64, 72
   ] as const;
@@ -839,6 +851,19 @@ export class PdfEditorComponent implements AfterViewInit {
     { label: 'Montserrat', value: 'montserrat' },
     { label: 'Helvetica Bold (subset)', value: 'abcdee_helvetica_bold' }
   ];
+
+  private normalizeZoom(value: number): number {
+    // Round to avoid precision artifacts from repeated +/- step operations.
+    return Number(value.toFixed(2));
+  }
+
+  private clampZoom(value: number): number {
+    return this.normalizeZoom(Math.min(PdfEditorComponent.maxZoom, Math.max(PdfEditorComponent.minZoom, value)));
+  }
+
+  private applyZoomDelta(delta: number): void {
+    this.scale.set(this.clampZoom(this.scale() + delta));
+  }
 
   protected toggleItalic() {
     this.applyTextToolbarChange(() => {
@@ -888,6 +913,10 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected toggleSidebar() {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
+  }
+
+  protected toggleRightbarLibraryCollapsed() {
+    this.rightbarLibraryCollapsed.set(!this.rightbarLibraryCollapsed());
   }
 
   protected isKeySlotPageIndex(pageIndex: number): boolean {
@@ -1303,6 +1332,24 @@ export class PdfEditorComponent implements AfterViewInit {
     this.pageFurniture.update((prev) => ({ ...prev, [key]: value }));
   }
 
+  protected updateProposalTitleFurniture(value: unknown) {
+    this.proposalTitleDraft.set(this.coerceFurnitureTextValue(value));
+  }
+
+  protected updateClientNameFurniture(value: unknown) {
+    this.clientNameDraft.set(this.coerceFurnitureTextValue(value));
+  }
+
+  protected saveDynamicFields() {
+    if (!this.hasUnsavedDynamicFields()) return;
+    this.pageFurniture.update((prev) => ({
+      ...prev,
+      proposalTitle: this.proposalTitleDraft(),
+      clientName: this.clientNameDraft()
+    }));
+    this.showSlideToast('Dynamic fields saved');
+  }
+
   protected updateHeaderFurniture(patch: Partial<PageFurniture['header']>) {
     this.pageFurniture.update((prev) => ({ ...prev, header: { ...prev.header, ...patch } }));
   }
@@ -1397,8 +1444,9 @@ export class PdfEditorComponent implements AfterViewInit {
     const f = this.pageFurniture();
     const renderedPage = f.pageNumber.startFrom + pageIndex;
     const total = this.pageCount();
+    const proposalTitle = f.proposalTitle || this.derivedProposalTitle();
     return (content ?? '')
-      .replace(/\{\{\s*proposalTitle\s*\}\}/g, f.proposalTitle || this.derivedProposalTitle())
+      .replace(/\{\{\s*(proposalTitle|projectName)\s*\}\}/g, proposalTitle)
       .replace(/\{\{\s*clientName\s*\}\}/g, f.clientName || '-')
       .replace(/\{\{\s*page\s*\}\}/g, String(renderedPage))
       .replace(/\{\{\s*totalPages\s*\}\}/g, String(total))
@@ -2271,14 +2319,14 @@ export class PdfEditorComponent implements AfterViewInit {
           id: 'zoom-out',
           title: 'Zoom out',
           icon: 'zoomOut',
-          onClick: () => this.scale.set(Math.max(0.75, this.scale() - 0.1))
+          onClick: () => this.applyZoomDelta(-PdfEditorComponent.zoomStep)
         },
         {
           kind: 'select',
           id: 'zoom-select',
           title: 'Zoom',
           value: () => this.scale(),
-          setValue: (v) => this.scale.set(v),
+          setValue: (v) => this.scale.set(this.clampZoom(Number(v))),
           options: this.zoomOptions.map((z) => ({ label: `${(z * 100).toFixed(0)}%`, value: z }))
         },
         {
@@ -2286,7 +2334,7 @@ export class PdfEditorComponent implements AfterViewInit {
           id: 'zoom-in',
           title: 'Zoom in',
           icon: 'zoomIn',
-          onClick: () => this.scale.set(Math.min(2.5, this.scale() + 0.1))
+          onClick: () => this.applyZoomDelta(PdfEditorComponent.zoomStep)
         }
       ]
     },
@@ -2476,6 +2524,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sectionOverridesByPage.set({});
       this.removedSectionsByPage.set({});
       this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
+      this.syncDynamicFieldDrafts(this.pageFurniture());
       this.resetHistory();
       void this.generateAllPageThumbnails();
       void this.primeSidebarSectionDetection();
@@ -2580,6 +2629,8 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageFurniture.set(
         this.normalizePageFurniture(localFurniture ?? furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
       );
+      this.syncDynamicFieldDrafts(this.pageFurniture());
+      this.furniturePersistenceReady = true;
       this.resetHistory();
       void this.generateAllPageThumbnails();
       void this.primeSidebarSectionDetection();
@@ -2643,17 +2694,22 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected onMainTitleChange(value: string) {
     if (this.readonlyMode()) return;
+    const previousDerivedTitle = this.derivedProposalTitle();
     this.fileName.set(value);
+    this.syncProposalTitleWithMainTitle(previousDerivedTitle);
   }
 
   protected onMainTitleBlur() {
     if (this.readonlyMode()) return;
+    const previousDerivedTitle = this.derivedProposalTitle();
     const current = (this.fileName() ?? '').trim();
     if (!current) {
       this.fileName.set('Proposal.pdf');
+      this.syncProposalTitleWithMainTitle(previousDerivedTitle);
       return;
     }
     if (current !== this.fileName()) this.fileName.set(current);
+    this.syncProposalTitleWithMainTitle(previousDerivedTitle);
   }
 
   protected canRedo() {
@@ -6306,21 +6362,38 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private derivedProposalTitle(): string {
+  protected derivedProposalTitle(): string {
     return (this.fileName() ?? 'Proposal').replace(/\.pdf$/i, '');
+  }
+
+  private syncProposalTitleWithMainTitle(previousDerivedTitle: string) {
+    this.pageFurniture.update((prev) => {
+      const current = (prev.proposalTitle ?? '').trim();
+      if (current.length > 0 && current !== previousDerivedTitle) return prev;
+      const next = this.derivedProposalTitle();
+      if (current === next) return prev;
+      return { ...prev, proposalTitle: next };
+    });
   }
 
   private normalizePageFurniture(raw: unknown): PageFurniture {
     const fallback = clonePageFurniture(DEFAULT_PAGE_FURNITURE);
     if (!raw || typeof raw !== 'object') return fallback;
     const r = raw as Partial<PageFurniture>;
+    const legacy = raw as Record<string, unknown>;
     const num = (v: unknown, d: number, min = 0) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.max(min, n) : d;
     };
+    const text = (...candidates: unknown[]): string | null => {
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string') return candidate;
+      }
+      return null;
+    };
     return {
-      proposalTitle: typeof r.proposalTitle === 'string' ? r.proposalTitle : fallback.proposalTitle,
-      clientName: typeof r.clientName === 'string' ? r.clientName : fallback.clientName,
+      proposalTitle: text(r.proposalTitle, legacy['projectName'], legacy['project_title']) ?? fallback.proposalTitle,
+      clientName: text(r.clientName, legacy['client'], legacy['client_name'], legacy['customerName']) ?? fallback.clientName,
       header: {
         content: typeof r.header?.content === 'string' ? r.header.content : fallback.header.content,
         alignment: (['left', 'center', 'right'] as const).includes(r.header?.alignment as any)
@@ -6362,6 +6435,23 @@ export class PdfEditorComponent implements AfterViewInit {
         visible: typeof r.logo?.visible === 'boolean' ? r.logo.visible : fallback.logo.visible
       }
     };
+  }
+
+  private coerceFurnitureTextValue(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object' && 'target' in value) {
+      const maybeTarget = (value as { target?: unknown }).target;
+      if (maybeTarget && typeof maybeTarget === 'object' && 'value' in maybeTarget) {
+        const next = (maybeTarget as { value?: unknown }).value;
+        if (typeof next === 'string') return next;
+      }
+    }
+    return '';
+  }
+
+  private syncDynamicFieldDrafts(furniture: PageFurniture) {
+    this.proposalTitleDraft.set(furniture.proposalTitle ?? '');
+    this.clientNameDraft.set(furniture.clientName ?? '');
   }
 
   private scheduleFurnitureSave(id: string, furniture: PageFurniture) {

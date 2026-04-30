@@ -28,35 +28,6 @@
     </div>
   }
 
-  @if (overwriteConfirmOpen()) {
-    <div class="deleteSlideModal" (click)="closeOverwriteConfirmation()">
-      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
-      <div
-        class="deleteSlideModal__panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="overwriteProposalTitle"
-        (click)="$event.stopPropagation()"
-      >
-        <h2 id="overwriteProposalTitle" class="deleteSlideModal__title">Overwrite original proposal?</h2>
-        <p class="deleteSlideModal__message">This will replace the original file. This action cannot be undone.</p>
-        <div class="deleteSlideModal__actions">
-          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="closeOverwriteConfirmation()">
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="deleteSlideModal__btn deleteSlideModal__btn--danger"
-            [disabled]="isSaving()"
-            (click)="confirmOverwriteProposal()"
-          >
-            Confirm Overwrite
-          </button>
-        </div>
-      </div>
-    </div>
-  }
-
   @if (rejectConfirmOpen()) {
     <div class="deleteSlideModal" (click)="closeRejectConfirmation()">
       <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
@@ -261,16 +232,6 @@
         @if (isAutoVersionSaving() && !isSaving()) {
           <span class="docsAutoSaving">Auto-saving versions...</span>
         }
-
-        <button
-          class="docsOverwrite"
-          type="button"
-          (click)="openOverwriteConfirmation()"
-          [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null || readonlyMode()"
-          title="Overwrite original proposal"
-        >
-          Overwrite
-        </button>
 
         <button
           class="docsToolbarBtn"
@@ -1148,110 +1109,139 @@
                 </button>
               </div>
 
-              <div class="rightbar__iconRow" aria-label="Insert widgets">
+              <section class="rightbarLibrary" aria-label="Library and elements">
                 <button
                   type="button"
-                  class="rightbar__icon"
-                  draggable="true"
-                  title="Insert image"
-                  (dragstart)="onPdfImageDragStart($event)"
-                  (click)="onInsertWidgetClick('image', $event)"
-                  [disabled]="pageCount() === 0 || isLoading()"
+                  class="rightbarLibrary__toggle"
+                  [attr.aria-expanded]="!rightbarLibraryCollapsed()"
+                  (click)="toggleRightbarLibraryCollapsed()"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                    <path
-                      d="M8 14l2-2 4 4 2-2 2 2"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linejoin="round"
-                    />
-                    <path
-                      d="M10 9a1.5 1.5 0 1 0 0 .01"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                    />
-                  </svg>
+                  <span class="rightbarLibrary__title">Library & Elements</span>
+                  <span class="rightbarLibrary__chevron" [class.rightbarLibrary__chevronCollapsed]="rightbarLibraryCollapsed()">▾</span>
                 </button>
 
-              <button
-                type="button"
-                class="rightbar__icon"
-                draggable="true"
-                title="Insert table"
-                (dragstart)="onWidgetDragStart('table', $event)"
-                (click)="onInsertWidgetClick('table', $event)"
-                [disabled]="pageCount() === 0 || isLoading()"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                  <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
-                  <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
-                  <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-                  <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-                </svg>
-              </button>
+                @if (!rightbarLibraryCollapsed()) {
+                  <div class="rightbarLibrary__content">
+                    <div class="rightbarLibraryGroup">
+                      <div class="rightbarLibraryGroup__label">Media</div>
+                      <div class="rightbar__iconRow rightbar__iconRow--media" aria-label="Insert media elements">
+                        <button
+                          type="button"
+                          class="rightbar__icon rightbar__iconLabeled"
+                          draggable="true"
+                          title="Insert image"
+                          (dragstart)="onPdfImageDragStart($event)"
+                          (click)="onInsertWidgetClick('image', $event)"
+                          [disabled]="pageCount() === 0 || isLoading()"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path
+                              d="M8 14l2-2 4 4 2-2 2 2"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linejoin="round"
+                            />
+                            <path
+                              d="M10 9a1.5 1.5 0 1 0 0 .01"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                            />
+                          </svg>
+                          <span class="rightbar__iconLabel">Image</span>
+                        </button>
 
-              <button
-                type="button"
-                class="rightbar__icon"
-                draggable="true"
-                title="Insert text over image"
-                (dragstart)="onWidgetDragStart('textOverImage', $event)"
-                (click)="onInsertWidgetClick('textOverImage', $event)"
-                [disabled]="pageCount() === 0 || isLoading()"
-              >
-                <span class="rightbar__iconTextLite">T/I</span>
-              </button>
+                        <div class="insertSourceMenu">
+                          <button
+                            type="button"
+                            class="rightbar__icon rightbar__iconLabeled"
+                            draggable="true"
+                            title="Insert video"
+                            (dragstart)="onPdfVideoDragStart($event)"
+                            (click)="toggleInsertSourceMenu('video', $event)"
+                            [disabled]="pageCount() === 0 || isLoading()"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                              <path
+                                d="M15 10l5-3v10l-5-3z"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linejoin="round"
+                              />
+                            </svg>
+                            <span class="rightbar__iconLabel">Video</span>
+                          </button>
+                          @if (insertSourceMenu() === 'video') {
+                            <div class="insertSourceMenu__panel" role="menu">
+                              <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
+                                URL
+                              </button>
+                              <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
+                                Upload
+                              </button>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    </div>
 
-              <button
-                type="button"
-                class="rightbar__icon"
-                draggable="true"
-                title="Insert image as background of text"
-                (dragstart)="onWidgetDragStart('imageBackgroundText', $event)"
-                (click)="onInsertWidgetClick('imageBackgroundText', $event)"
-                [disabled]="pageCount() === 0 || isLoading()"
-              >
-                <span class="rightbar__iconTextLite">I/T</span>
-              </button>
+                    <div class="rightbarLibraryGroup">
+                      <div class="rightbarLibraryGroup__label">Layouts</div>
+                      <div class="rightbar__iconRow rightbar__iconRow--layouts" aria-label="Insert layout elements">
+                        <button
+                          type="button"
+                          class="rightbar__icon rightbar__iconLabeled"
+                          draggable="true"
+                          title="Insert table"
+                          (dragstart)="onWidgetDragStart('table', $event)"
+                          (click)="onInsertWidgetClick('table', $event)"
+                          [disabled]="pageCount() === 0 || isLoading()"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                          </svg>
+                          <span class="rightbar__iconLabel">Table</span>
+                        </button>
 
-              <div class="insertSourceMenu">
-                <button
-                  type="button"
-                  class="rightbar__icon"
-                  draggable="true"
-                  title="Insert video"
-                  (dragstart)="onPdfVideoDragStart($event)"
-                  (click)="toggleInsertSourceMenu('video', $event)"
-                  [disabled]="pageCount() === 0 || isLoading()"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                    <path
-                      d="M15 10l5-3v10l-5-3z"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </button>
-                @if (insertSourceMenu() === 'video') {
-                  <div class="insertSourceMenu__panel" role="menu">
-                    <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
-                      URL
-                    </button>
-                    <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
-                      Upload
-                    </button>
+                        <button
+                          type="button"
+                          class="rightbar__icon rightbar__iconLabeled"
+                          draggable="true"
+                          title="Insert text over image"
+                          (dragstart)="onWidgetDragStart('textOverImage', $event)"
+                          (click)="onInsertWidgetClick('textOverImage', $event)"
+                          [disabled]="pageCount() === 0 || isLoading()"
+                        >
+                          <span class="rightbar__iconTextLite">T/I</span>
+                          <span class="rightbar__iconLabel">Text over image</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          class="rightbar__icon rightbar__iconLabeled"
+                          draggable="true"
+                          title="Insert image as background of text"
+                          (dragstart)="onWidgetDragStart('imageBackgroundText', $event)"
+                          (click)="onInsertWidgetClick('imageBackgroundText', $event)"
+                          [disabled]="pageCount() === 0 || isLoading()"
+                        >
+                          <span class="rightbar__iconTextLite">I/T</span>
+                          <span class="rightbar__iconLabel">Image behind text</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 }
-              </div>
-              </div>
+              </section>
 
               @if (selectedItemWidget(); as selectedItem) {
                 <div class="rightbarMediaActions" role="group" aria-label="Selected media actions">
@@ -1341,7 +1331,7 @@
               <div class="pageSettings__title">Page Settings</div>
               <p
                 class="pageSettings__hint"
-                [textContent]="'Dynamic fields: {{proposalTitle}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
+                [textContent]="'Dynamic fields: {{proposalTitle}} / {{projectName}}, {{clientName}}, {{page}}, {{totalPages}}, {{date}}'"
               ></p>
 
               <div class="pageSettings__section">
@@ -1362,8 +1352,11 @@
 
               <div class="pageSettings__section">
                 <div class="pageSettings__sectionTitle">Dynamic Fields</div>
-                <input class="pageSettings__input" [ngModel]="pageFurniture().proposalTitle" (ngModelChange)="updateFurniture('proposalTitle', $event)" placeholder="Proposal title" />
-                <input class="pageSettings__input" [ngModel]="pageFurniture().clientName" (ngModelChange)="updateFurniture('clientName', $event)" placeholder="Client name" />
+                <input class="pageSettings__input" [ngModel]="proposalTitleDraft()" (ngModelChange)="updateProposalTitleFurniture($event)" placeholder="Project name" />
+                <input class="pageSettings__input" [ngModel]="clientNameDraft()" (ngModelChange)="updateClientNameFurniture($event)" placeholder="Client name" />
+                @if (hasUnsavedDynamicFields()) {
+                  <button type="button" class="pageSettings__btn" (click)="saveDynamicFields()">Save</button>
+                }
               </div>
             </div>
           </div>

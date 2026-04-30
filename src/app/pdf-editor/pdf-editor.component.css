@@ -901,6 +901,78 @@
   justify-content: flex-start;
 }
 
+.rightbar__iconRow--media {
+  flex-wrap: nowrap;
+}
+
+.rightbar__iconRow--media .insertSourceMenu {
+  flex: 0 0 auto;
+}
+
+.rightbar__iconRow--layouts {
+  flex-wrap: nowrap;
+}
+
+.rightbarLibrary {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.rightbarLibrary__toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.rightbarLibrary__title {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.rightbarLibrary__chevron {
+  font-size: 14px;
+  line-height: 1;
+  color: rgba(15, 23, 42, 0.6);
+  transition: transform 140ms ease;
+}
+
+.rightbarLibrary__chevronCollapsed {
+  transform: rotate(-90deg);
+}
+
+.rightbarLibrary__content {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rightbarLibraryGroup {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.rightbarLibraryGroup__label {
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.55);
+}
+
 .rightbar__iconTextLite {
   font-size: 11px;
   font-weight: 800;
@@ -1053,6 +1125,23 @@
     box-shadow 140ms ease,
     border-color 140ms ease,
     background 140ms ease;
+}
+
+.rightbar__iconLabeled {
+  width: 92px;
+  height: 64px;
+  padding: 6px 8px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rightbar__iconLabel {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.1;
+  color: rgba(15, 23, 42, 0.74);
+  text-align: center;
 }
 
 .rightbar__icon:hover:not(:disabled) {
