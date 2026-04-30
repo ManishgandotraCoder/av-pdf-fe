@@ -428,7 +428,12 @@
   }
 
   @if (isLoading() || isInserting() || isImagePlacing()) {
-    <div class="banner">Working…</div>
+    <div class="busyOverlay" role="status" aria-live="polite" aria-busy="true">
+      <div class="busyOverlay__panel">
+        <div class="busySpinner" aria-hidden="true"></div>
+        <div class="busyOverlay__text">{{ busyHint() }}</div>
+      </div>
+    </div>
   }
 
   @if (pageCount() === 0) {

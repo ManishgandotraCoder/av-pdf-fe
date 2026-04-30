@@ -594,6 +594,8 @@ export class PdfEditorComponent implements AfterViewInit {
   } | null>(null);
 
   protected readonly isLoading = signal(false);
+  /** Shown in the busy overlay while `isLoading` (and related) is true. */
+  protected readonly busyHint = signal('Working…');
   protected readonly errorText = signal<string | null>(null);
   protected readonly isInserting = signal(false);
   protected readonly isPageRendering = signal(false);
@@ -1264,6 +1266,7 @@ export class PdfEditorComponent implements AfterViewInit {
         });
       }
       const blocks = this.groupDetectedTextIntoBlocks(items);
+      this.detectedTextByPage.update((prev) => ({ ...prev, [pageIndex]: items }));
       this.detectedBlocksByPage.update((prev) => ({ ...prev, [pageIndex]: blocks }));
       return blocks;
     } catch {
@@ -2265,13 +2268,25 @@ export class PdfEditorComponent implements AfterViewInit {
     if (before?.kind === 'video' && before.videoSrc) {
       const url = this.videoObjectUrlByWidgetId.get(widgetId) ?? before.videoSrc;
       if (url.startsWith('blob:')) {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {
-          // ignore
+        this.videoObjectUrlByWidgetId.delete(widgetId);
+        const stillUsed = Object.values(this.widgetsByPage()).some((list) =>
+          (list ?? []).some(
+            (w) =>
+              w.id !== widgetId &&
+              w.kind === 'video' &&
+              (w.videoSrc === url || this.videoObjectUrlByWidgetId.get(w.id) === url)
+          )
+        );
+        if (!stillUsed) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
         }
+      } else {
+        this.videoObjectUrlByWidgetId.delete(widgetId);
       }
-      this.videoObjectUrlByWidgetId.delete(widgetId);
     }
 
     this.widgetsByPage.update((prev) => {
@@ -2499,7 +2514,9 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!file) return;
 
     this.errorText.set(null);
+    this.busyHint.set('Loading PDF…');
     this.isLoading.set(true);
+    await this.yieldForUiPaint();
     this.fileName.set(file.name);
 
     try {
@@ -2526,7 +2543,9 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
       this.syncDynamicFieldDrafts(this.pageFurniture());
       this.resetHistory();
-      void this.generateAllPageThumbnails();
+      await this.waitForActiveCanvasReady(1200);
+      await this.renderActivePage();
+      this.generateNearThumbnailsThenRest(5);
       void this.primeSidebarSectionDetection();
 
       // Rendering will happen via QueryList changes.
@@ -2537,6 +2556,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(0);
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
       input.value = '';
     }
   }
@@ -2565,7 +2585,9 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.isLoading() || this.isSaving() || this.readonlyMode()) return;
 
     this.errorText.set(null);
+    this.busyHint.set('Creating proposal…');
     this.isLoading.set(true);
+    await this.yieldForUiPaint();
     try {
       this.customKeySlots.set([]);
 
@@ -2588,12 +2610,15 @@ export class PdfEditorComponent implements AfterViewInit {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to start fresh proposal.');
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
     }
   }
 
   private async loadFromApi(id: string) {
     this.errorText.set(null);
+    this.busyHint.set('Loading document…');
     this.isLoading.set(true);
+    await this.yieldForUiPaint();
     try {
       const [meta, bytes, furniture] = await Promise.all([
         this.api.getMeta(id),
@@ -2632,12 +2657,12 @@ export class PdfEditorComponent implements AfterViewInit {
       this.syncDynamicFieldDrafts(this.pageFurniture());
       this.furniturePersistenceReady = true;
       this.resetHistory();
-      void this.generateAllPageThumbnails();
-      void this.primeSidebarSectionDetection();
 
       // Ensure the first page is fully rendered before we drop the loading banner.
       await this.waitForActiveCanvasReady(1600);
       await this.renderActivePage();
+      this.generateNearThumbnailsThenRest(5);
+      void this.primeSidebarSectionDetection();
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Upload failed - retry.');
       this.pdfBytes = null;
@@ -2645,6 +2670,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(0);
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
     }
   }
 
@@ -3807,9 +3833,26 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       await this.renderPage(pageIndex);
       this.redrawOverlay(pageIndex);
+    } catch (e) {
+      // pdf.js throws cancellation exceptions when a render is superseded by a newer one.
+      // Those are expected during fast interactions (zoom/page changes) and should stay silent.
+      if (!this.isPdfRenderCancellationError(e)) throw e;
     } finally {
       if (epoch === this.renderAllPagesEpoch) this.isPageRendering.set(false);
     }
+  }
+
+  private isPdfRenderCancellationError(err: unknown): boolean {
+    if (!err) return false;
+    const maybe = err as { name?: unknown; message?: unknown };
+    const name = String(maybe.name ?? '').toLowerCase();
+    const message = String(maybe.message ?? '').toLowerCase();
+    return (
+      name.includes('renderingcancelledexception') ||
+      name.includes('renderingcancelexception') ||
+      message.includes('rendering cancelled') ||
+      message.includes('rendering canceled')
+    );
   }
 
   private async renderPage(pageIndex: number) {
@@ -4577,7 +4620,9 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.openPageMenuIndex.set(null);
     this.sidebarSlideMenuOpenIndex.set(null);
+    this.busyHint.set('Reordering slides…');
     this.isLoading.set(true);
+    await this.yieldForUiPaint();
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
@@ -4648,13 +4693,14 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pdfDoc = doc;
       this.pageCount.set(doc.numPages);
       await this.renderActivePage();
-      void this.generateAllPageThumbnails();
+      await this.generateAllPageThumbnails();
       void this.primeSidebarSectionDetection();
       this.showSlideToast('Slides reordered');
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder slides.');
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
     }
   }
 
@@ -4682,7 +4728,9 @@ export class PdfEditorComponent implements AfterViewInit {
     this.sidebarSlideMenuOpenIndex.set(null);
     this.slideDragFromIndex.set(null);
     this.slideDropHoverIndex.set(null);
+    this.busyHint.set('Reordering slides…');
     this.isLoading.set(true);
+    await this.yieldForUiPaint();
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
@@ -4751,13 +4799,14 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pdfDoc = doc;
       this.pageCount.set(doc.numPages);
       await this.renderActivePage();
-      void this.generateAllPageThumbnails();
+      await this.generateAllPageThumbnails();
       void this.primeSidebarSectionDetection();
       this.showSlideToast('Key slots reordered');
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to reorder key slots.');
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
     }
   }
 
@@ -4834,6 +4883,141 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  private async yieldForUiPaint(): Promise<void> {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }
+
+  private cloneImageData(src: ImageData): ImageData {
+    return new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+  }
+
+  private reindexSnapshotMapAfterInsert(map: Map<number, ImageData>, insertedAt: number) {
+    const next = new Map<number, ImageData>();
+    for (const [k, v] of map) {
+      next.set(k >= insertedAt ? k + 1 : k, v);
+    }
+    map.clear();
+    for (const [k, v] of next) map.set(k, v);
+    map.delete(insertedAt);
+  }
+
+  private reindexSnapshotMapAfterDelete(map: Map<number, ImageData>, deletedAt: number) {
+    const next = new Map<number, ImageData>();
+    for (const [k, v] of map) {
+      if (k === deletedAt) continue;
+      next.set(k > deletedAt ? k - 1 : k, v);
+    }
+    map.clear();
+    for (const [k, v] of next) map.set(k, v);
+  }
+
+  private duplicatePageSnapshot(map: Map<number, ImageData>, fromIndex: number, toIndex: number) {
+    const src = map.get(fromIndex);
+    if (src) map.set(toIndex, this.cloneImageData(src));
+  }
+
+  private reindexRotateMapAfterInsert(insertedAt: number) {
+    const next = new Map<number, number>();
+    for (const [k, v] of this.pageRotateByPage) {
+      next.set(k >= insertedAt ? k + 1 : k, v);
+    }
+    this.pageRotateByPage.clear();
+    for (const [k, v] of next) this.pageRotateByPage.set(k, v);
+    this.pageRotateByPage.delete(insertedAt);
+  }
+
+  private reindexRotateMapAfterDelete(deletedAt: number) {
+    const next = new Map<number, number>();
+    for (const [k, v] of this.pageRotateByPage) {
+      if (k === deletedAt) continue;
+      next.set(k > deletedAt ? k - 1 : k, v);
+    }
+    this.pageRotateByPage.clear();
+    for (const [k, v] of next) this.pageRotateByPage.set(k, v);
+  }
+
+  private reindexThumbUrlsAfterInsert(prev: Record<number, string>, at: number): Record<number, string> {
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      next[idx >= at ? idx + 1 : idx] = v;
+    }
+    return next;
+  }
+
+  private reindexThumbUrlsAfterDelete(prev: Record<number, string>, at: number): Record<number, string> {
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      if (idx === at) continue;
+      next[idx > at ? idx - 1 : idx] = v;
+    }
+    return next;
+  }
+
+  private remapThumbUrlsAfterCopy(prev: Record<number, string>, fromIndex: number, toIndex: number): Record<number, string> {
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      next[idx >= toIndex ? idx + 1 : idx] = v;
+    }
+    const src = prev[fromIndex];
+    if (src) next[toIndex] = src;
+    return next;
+  }
+
+  private remapDetectedAfterCopy(fromIndex: number, toIndex: number) {
+    const prevText = this.detectedTextByPage();
+    const prevBlocks = this.detectedBlocksByPage();
+    const nextText: Record<number, DetectedText[]> = {};
+    const nextBlocks: Record<number, DetectedBlock[]> = {};
+    for (const [k, v] of Object.entries(prevText)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      nextText[idx >= toIndex ? idx + 1 : idx] = v.map((t) => ({ ...t }));
+    }
+    for (const [k, v] of Object.entries(prevBlocks)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      nextBlocks[idx >= toIndex ? idx + 1 : idx] = v.map((b) => ({ ...b }));
+    }
+    const srcText = prevText[fromIndex] ?? [];
+    const srcBlocks = prevBlocks[fromIndex] ?? [];
+    nextText[toIndex] = srcText.map((t) => ({ ...t }));
+    nextBlocks[toIndex] = srcBlocks.map((b) => ({ ...b }));
+    this.detectedTextByPage.set(nextText);
+    this.detectedBlocksByPage.set(nextBlocks);
+  }
+
+  private newWidgetId(): string {
+    return `w_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  }
+
+  private cloneWidgetForDuplicatePage(w: Widget): Widget {
+    const id = this.newWidgetId();
+    const copy: Widget = { ...w, id };
+    if (w.kind === 'video' && w.videoSrc?.startsWith('blob:')) {
+      this.videoObjectUrlByWidgetId.set(id, w.videoSrc);
+    }
+    return copy;
+  }
+
+  private remapWidgetsAfterCopy(fromIndex: number, toIndex: number) {
+    const prev = this.widgetsByPage();
+    const next: Record<number, Widget[]> = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      next[idx >= toIndex ? idx + 1 : idx] = v;
+    }
+    const src = prev[fromIndex] ?? [];
+    next[toIndex] = src.map((w) => this.cloneWidgetForDuplicatePage(w));
+    this.widgetsByPage.set(next);
+  }
+
   private async mutatePdfPages(
     mutate: (pdf: PDFDocument) => void | Promise<void>,
     remap:
@@ -4843,9 +5027,11 @@ export class PdfEditorComponent implements AfterViewInit {
   ) {
     if (!this.pdfBytes) return;
     this.errorText.set(null);
+    this.busyHint.set('Updating slides…');
     this.isLoading.set(true);
     this.openPageMenuIndex.set(null);
     this.sidebarSlideMenuOpenIndex.set(null);
+    await this.yieldForUiPaint();
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
@@ -4867,22 +5053,36 @@ export class PdfEditorComponent implements AfterViewInit {
       if (remap.kind === 'insert') {
         this.remapEditsAfterInsert(remap.at);
         this.remapSectionMetaAfterInsert(remap.at);
+        this.widgetsByPage.set(this.reindexKeyedByInsertedPage(this.widgetsByPage(), remap.at));
+        this.pageThumbUrlByPage.set(this.reindexThumbUrlsAfterInsert(this.pageThumbUrlByPage(), remap.at));
+        this.detectedTextByPage.set(this.reindexKeyedByInsertedPage(this.detectedTextByPage(), remap.at));
+        this.detectedBlocksByPage.set(this.reindexKeyedByInsertedPage(this.detectedBlocksByPage(), remap.at));
+        this.reindexSnapshotMapAfterInsert(this.baseSnapshotByPage, remap.at);
+        this.reindexRotateMapAfterInsert(remap.at);
       }
       if (remap.kind === 'delete') {
         this.remapEditsAfterDelete(remap.at);
         this.widgetsByPage.set(this.reindexKeyedByDeletedPage(this.widgetsByPage(), remap.at));
         this.remapSectionMetaAfterDelete(remap.at);
+        this.pageThumbUrlByPage.set(this.reindexThumbUrlsAfterDelete(this.pageThumbUrlByPage(), remap.at));
+        this.detectedTextByPage.set(this.reindexKeyedByDeletedPage(this.detectedTextByPage(), remap.at));
+        this.detectedBlocksByPage.set(this.reindexKeyedByDeletedPage(this.detectedBlocksByPage(), remap.at));
+        this.reindexSnapshotMapAfterDelete(this.baseSnapshotByPage, remap.at);
+        this.reindexRotateMapAfterDelete(remap.at);
       }
       if (remap.kind === 'copy') {
+        const fromRot = this.pageRotateByPage.get(remap.from);
         this.remapEditsAfterCopy(remap.from, remap.to);
         this.remapSectionMetaAfterCopy(remap.from, remap.to);
+        this.remapWidgetsAfterCopy(remap.from, remap.to);
+        this.pageThumbUrlByPage.set(this.remapThumbUrlsAfterCopy(this.pageThumbUrlByPage(), remap.from, remap.to));
+        this.remapDetectedAfterCopy(remap.from, remap.to);
+        this.reindexSnapshotMapAfterInsert(this.baseSnapshotByPage, remap.to);
+        this.duplicatePageSnapshot(this.baseSnapshotByPage, remap.from, remap.to);
+        this.reindexRotateMapAfterInsert(remap.to);
+        if (fromRot !== undefined) this.pageRotateByPage.set(remap.to, fromRot);
       }
 
-      this.pageThumbUrlByPage.set({});
-      this.detectedTextByPage.set({});
-      this.detectedBlocksByPage.set({});
-      this.baseSnapshotByPage.clear();
-      this.pageRotateByPage.clear();
       this.renderTaskByPage.clear();
       this.resetHistory();
 
@@ -4905,12 +5105,39 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageCount.set(doc.numPages);
       // Re-render immediately so editing continues to work without needing a full refresh.
       await this.renderActivePage();
-      void this.generateAllPageThumbnails();
-      void this.primeSidebarSectionDetection();
+      await this.generateAllPageThumbnails();
+      if (remap.kind === 'insert') {
+        await this.detectBlocksForPage(remap.at);
+      }
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to update PDF pages.');
     } finally {
       this.isLoading.set(false);
+      this.busyHint.set('Working…');
+    }
+  }
+
+  private async renderPageThumbnailIfMissing(pageIndex: number, epoch: number): Promise<void> {
+    if (!this.pdfDoc) return;
+    if (epoch !== this.thumbsEpoch) return;
+    if (this.pageThumbUrlByPage()[pageIndex]) return;
+    try {
+      const page = await this.pdfDoc.getPage(pageIndex + 1);
+      const rotation = (((page.rotate ?? 0) % 360) + 360) % 360;
+      const viewport = page.getViewport({ scale: 0.18, rotation: rotation === 180 ? 0 : rotation });
+      const canvas = document.createElement('canvas');
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+      canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+      await page.render({ canvasContext: ctx, viewport, transform, canvas }).promise;
+      const url = canvas.toDataURL('image/jpeg', 0.6);
+      if (epoch !== this.thumbsEpoch) return;
+      this.pageThumbUrlByPage.update((prev) => ({ ...prev, [pageIndex]: url }));
+    } catch {
+      // ignore thumbnail failures (page still usable)
     }
   }
 
@@ -4920,29 +5147,46 @@ export class PdfEditorComponent implements AfterViewInit {
     const count = this.pageCount();
     if (count <= 0) return;
 
-    // Generate thumbnails in the background; keep them small to avoid memory bloat.
-    // We use a separate offscreen canvas per page.
     for (let pageIndex = 0; pageIndex < count; pageIndex++) {
       if (epoch !== this.thumbsEpoch) return;
-      if (this.pageThumbUrlByPage()[pageIndex]) continue;
+      await this.renderPageThumbnailIfMissing(pageIndex, epoch);
+    }
+  }
+
+  /** Fast path for open/upload: render sidebar thumbs near the active page first, then the rest in the background. */
+  private generateNearThumbnailsThenRest(radius = 5): void {
+    if (!this.pdfDoc) return;
+    const epoch = ++this.thumbsEpoch;
+    const count = this.pageCount();
+    if (count <= 0) return;
+    const a = clamp(this.activePageIndex(), 0, count - 1);
+    const near = new Set<number>();
+    for (let d = -radius; d <= radius; d++) {
+      const i = a + d;
+      if (i >= 0 && i < count) near.add(i);
+    }
+    void (async () => {
       try {
-        const page = await this.pdfDoc.getPage(pageIndex + 1);
-        const rotation = (((page.rotate ?? 0) % 360) + 360) % 360;
-        const viewport = page.getViewport({ scale: 0.18, rotation: rotation === 180 ? 0 : rotation });
-        const canvas = document.createElement('canvas');
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
-        canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
-        const ctx = canvas.getContext('2d');
-        if (!ctx) continue;
-        const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
-        await page.render({ canvasContext: ctx, viewport, transform, canvas }).promise;
-        const url = canvas.toDataURL('image/jpeg', 0.6);
-        if (epoch !== this.thumbsEpoch) return;
-        this.pageThumbUrlByPage.update((prev) => ({ ...prev, [pageIndex]: url }));
+        for (const i of near) {
+          if (epoch !== this.thumbsEpoch) return;
+          await this.renderPageThumbnailIfMissing(i, epoch);
+        }
       } catch {
-        // ignore thumbnail failures (page still usable)
+        // ignore
       }
+      void this.finishRemainingThumbnails(epoch, count, near);
+    })();
+  }
+
+  private async finishRemainingThumbnails(epoch: number, count: number, skip: Set<number>): Promise<void> {
+    try {
+      for (let pageIndex = 0; pageIndex < count; pageIndex++) {
+        if (skip.has(pageIndex)) continue;
+        if (epoch !== this.thumbsEpoch) return;
+        await this.renderPageThumbnailIfMissing(pageIndex, epoch);
+      }
+    } catch {
+      // ignore
     }
   }
 

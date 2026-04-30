@@ -575,6 +575,53 @@
   cursor: pointer;
 }
 
+.busyOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(3px);
+  pointer-events: all;
+}
+
+.busyOverlay__panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  max-width: min(420px, 100%);
+}
+
+.busySpinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(15, 23, 42, 0.12);
+  border-top-color: rgba(37, 99, 235, 0.9);
+  animation: busySpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes busySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busyOverlay__text {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.88);
+  line-height: 1.35;
+}
+
 .banner {
   padding: 10px 16px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.12);
