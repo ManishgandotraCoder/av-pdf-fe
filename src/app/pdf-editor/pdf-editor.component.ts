@@ -536,16 +536,16 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly sidebarCollapsed = signal(false);
 
   /** Fixed key-page slots always present in the left navigation. */
-  private static readonly fixedKeySlots = [
-    // { id: 'with', title: 'W/', kind: 'fixed' as const },
-    // { id: 'project', title: 'Project', kind: 'fixed' as const },
-    // { id: 'gut', title: 'Gut', kind: 'fixed' as const },
-    // { id: 'cover_letter', title: 'Cover Letter', kind: 'fixed' as const },
-    // { id: 'acceptance', title: 'Acceptance', kind: 'fixed' as const }
+  private static readonly fixedKeySlots: KeySlot[] = [
+    // { id: 'with', title: 'W/', kind: 'fixed' },
+    // { id: 'project', title: 'Project', kind: 'fixed' },
+    // { id: 'gut', title: 'Gut', kind: 'fixed' },
+    // { id: 'cover_letter', title: 'Cover Letter', kind: 'fixed' },
+    // { id: 'acceptance', title: 'Acceptance', kind: 'fixed' }
   ];
 
   /** Instance alias for templates (section pills + custom slot index base). */
-  protected readonly fixedKeySlotsForNav = PdfEditorComponent.fixedKeySlots;
+  protected readonly fixedKeySlotsForNav: KeySlot[] = PdfEditorComponent.fixedKeySlots;
 
   protected readonly customKeySlots = signal<KeySlot[]>([]);
   protected readonly keySlotDragFromCustomIndex = signal<number | null>(null);
