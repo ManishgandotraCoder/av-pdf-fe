@@ -18,7 +18,14 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { ActivatedRoute, Router } from '@angular/router';
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
+import {
+  AnnotationType,
+  GlobalWorkerOptions,
+  getDocument,
+  OPS,
+  Util,
+  type PDFDocumentProxy
+} from 'pdfjs-dist';
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import {
   PdfApiService,
@@ -319,6 +326,16 @@ type DetectedBlock = {
   kind: DetectedBlockKind;
 };
 
+/** Raster images / masks from content streams, plus movie/screen annotations (viewport CSS px). */
+type DetectedPdfMedia = {
+  id: string;
+  kind: 'image' | 'video';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
 type SidebarSectionType = 'section' | 'imageHeader';
 type EditHistoryEventKind = 'apply' | 'undo' | 'redo' | 'clear';
 type EditHistoryEvent = {
@@ -361,6 +378,7 @@ type TextReplace = {
   fontSize: number;
   fontStyle: FontStyle;
   fontFamily: FontFamily;
+  source?: 'textEdit' | 'mediaErase';
 };
 
 type PageEdits = {
@@ -559,6 +577,40 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
   protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
 
+  /**
+   * After picking a file, erase the embedded PDF region then place the new asset (Shift+click on detected media).
+   * Separate from widget `replaceMediaTarget` so we do not change widget replace behaviour.
+   */
+  private embeddedMediaReplaceTarget: {
+    pageIndex: number;
+    id: string;
+    kind: 'image' | 'video';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
+  private placedImageReplaceTarget: { pageIndex: number; id: string } | null = null;
+  protected readonly selectedDetectedPdfMedia = signal<{ pageIndex: number; media: DetectedPdfMedia } | null>(null);
+
+  protected readonly imageUploadCropModal = signal<{
+    dataUrl: string;
+    leftPct: number;
+    topPct: number;
+    rightPct: number;
+    bottomPct: number;
+  } | null>(null);
+  private imageUploadCropResolve: ((value: string | null) => void) | null = null;
+  private activeUploadCropHandle:
+    | {
+        pointerId: number;
+        handle: 'tl' | 'tr' | 'bl' | 'br';
+        startClientX: number;
+        startClientY: number;
+        start: { leftPct: number; topPct: number; rightPct: number; bottomPct: number };
+      }
+    | null = null;
+
   protected readonly openDocsMenu = signal<'Insert' | null>(null);
 
   protected readonly widgetsByPage = signal<Record<number, Widget[]>>({});
@@ -580,6 +632,7 @@ export class PdfEditorComponent implements AfterViewInit {
   @ViewChild('widgetSignatureFile') private readonly widgetSignatureFile?: ElementRef<HTMLInputElement>;
   @ViewChild('furnitureLogoFile') private readonly furnitureLogoFile?: ElementRef<HTMLInputElement>;
   @ViewChild('textDraftEditor') private readonly textDraftEditor?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('uploadCropSurface') private readonly uploadCropSurface?: ElementRef<HTMLDivElement>;
 
   /** Click insert flow: pick type (and file for image/video), then click the page to place. */
   protected readonly insertWidgetPending = signal<InsertWidgetPending | null>(null);
@@ -731,6 +784,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly editsByPage = signal<Record<number, PageEdits>>({});
   protected readonly detectedTextByPage = signal<Record<number, DetectedText[]>>({});
   protected readonly detectedBlocksByPage = signal<Record<number, DetectedBlock[]>>({});
+  protected readonly detectedMediaByPage = signal<Record<number, DetectedPdfMedia[]>>({});
   private readonly baseSnapshotByPage = new Map<number, ImageData>();
   private readonly pageRotateByPage = new Map<number, number>();
 
@@ -1703,11 +1757,70 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  protected onWidgetInsertImagePicked(event: Event) {
+  protected async onWidgetInsertImagePicked(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     input.value = '';
     if (!file) return;
+
+    const embeddedReplace = this.embeddedMediaReplaceTarget;
+    if (embeddedReplace?.kind === 'image') {
+      this.embeddedMediaReplaceTarget = null;
+      this.errorText.set(null);
+      this.isInserting.set(true);
+      try {
+        const dataUrl = await this.readAndCropImageFile(file);
+        if (!dataUrl) return;
+        // Keep original PDF layer/background untouched for replace flows.
+        await this.placeReplacementImageInPdfMediaRect(embeddedReplace.pageIndex, dataUrl, {
+          id: embeddedReplace.id,
+          kind: 'image',
+          x: embeddedReplace.x,
+          y: embeddedReplace.y,
+          w: embeddedReplace.w,
+          h: embeddedReplace.h
+        });
+      } catch (e) {
+        this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
+      } finally {
+        this.isInserting.set(false);
+      }
+      return;
+    }
+
+    const placedReplace = this.placedImageReplaceTarget;
+    if (placedReplace) {
+      this.placedImageReplaceTarget = null;
+      this.errorText.set(null);
+      this.isInserting.set(true);
+      try {
+        const dataUrl = await this.readAndCropImageFile(file);
+        if (!dataUrl) return;
+        const img = await this.loadHtmlImage(dataUrl);
+        this.beginHistoryStep();
+        this.updatePlacedImage(placedReplace.pageIndex, placedReplace.id, (a) => {
+          const nextBounds = this.withMaxImageBounds(
+            { x: a.x, y: a.y, w: a.w, h: a.h },
+            img.naturalWidth,
+            img.naturalHeight
+          );
+          return {
+            ...a,
+            ...nextBounds,
+          dataUrl,
+          srcW: Math.max(1, img.naturalWidth),
+          srcH: Math.max(1, img.naturalHeight),
+          crop: undefined
+          };
+        });
+        this.redrawOverlay(placedReplace.pageIndex);
+      } catch (e) {
+        this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
+      } finally {
+        this.isInserting.set(false);
+      }
+      return;
+    }
 
     const replaceTarget = this.replaceMediaTarget();
     const layeredTargetWidgetId = this.layeredImagePickTargetWidgetId;
@@ -1715,67 +1828,48 @@ export class PdfEditorComponent implements AfterViewInit {
     if (replaceTarget?.kind === 'image') {
       this.errorText.set(null);
       this.isInserting.set(true);
-      const reader = new FileReader();
-      reader.onerror = () => {
-        this.errorText.set('Failed to read image.');
-        this.isInserting.set(false);
-      };
-      reader.onload = () => {
-        const dataUrl = String(reader.result ?? '');
-        if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-          this.errorText.set('Unsupported image (use PNG or JPEG).');
-          this.isInserting.set(false);
-          return;
-        }
-        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) =>
-          w.kind === 'image' ? { ...w, imageSrc: dataUrl } : w
-        );
+      try {
+        const dataUrl = await this.readAndCropImageFile(file);
+        if (!dataUrl) return;
+        const img = await this.loadHtmlImage(dataUrl);
+        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) => {
+          if (w.kind !== 'image') return w;
+          const nextBounds = this.withMaxImageBounds(
+            { x: w.x, y: w.y, w: w.w, h: w.h },
+            img.naturalWidth,
+            img.naturalHeight
+          );
+          return { ...w, ...nextBounds, imageSrc: dataUrl };
+        });
+      } finally {
+        // Always clear replace target, even when crop/validation is cancelled.
         this.replaceMediaTarget.set(null);
         this.isInserting.set(false);
-      };
-      reader.readAsDataURL(file);
+      }
       return;
     }
     if (layeredTargetWidgetId) {
       this.errorText.set(null);
       this.isInserting.set(true);
-      const reader = new FileReader();
-      reader.onerror = () => {
-        this.errorText.set('Failed to read image.');
-        this.isInserting.set(false);
-      };
-      reader.onload = () => {
-        const dataUrl = String(reader.result ?? '');
-        if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-          this.errorText.set('Unsupported image (use PNG or JPEG).');
-          this.isInserting.set(false);
-          return;
-        }
+      try {
+        const dataUrl = await this.readAndCropImageFile(file);
+        if (!dataUrl) return;
         this.updateWidget(this.activePageIndex(), layeredTargetWidgetId, (w) =>
           w.kind === 'textOverImage' || w.kind === 'imageBackgroundText'
             ? { ...w, imageSrc: dataUrl }
             : w
         );
+      } finally {
         this.isInserting.set(false);
-      };
-      reader.readAsDataURL(file);
+      }
       return;
     }
 
     this.errorText.set(null);
     this.isInserting.set(true);
-    const reader = new FileReader();
-    reader.onerror = () => {
-      this.errorText.set('Failed to read image.');
-      this.isInserting.set(false);
-    };
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? '');
-      if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-        this.errorText.set('Unsupported image (use PNG or JPEG).');
-        this.isInserting.set(false);
-        return;
-      }
+    try {
+      const dataUrl = await this.readAndCropImageFile(file);
+      if (!dataUrl) return;
       this.tool.set('text');
       this.insertWidgetPending.set({ kind: 'image', imageDataUrl: dataUrl });
       this.rememberReusableAsset({
@@ -1786,8 +1880,9 @@ export class PdfEditorComponent implements AfterViewInit {
         imageSrc: dataUrl,
         createdAt: Date.now()
       });
-    };
-    reader.readAsDataURL(file);
+    } finally {
+      this.isInserting.set(false);
+    }
   }
 
   protected onWidgetInsertVideoPicked(event: Event) {
@@ -1796,6 +1891,28 @@ export class PdfEditorComponent implements AfterViewInit {
     input.value = '';
     if (!file) {
       this.pendingVideoWidgetDrop = null;
+      return;
+    }
+
+    const embeddedVideoReplace = this.embeddedMediaReplaceTarget;
+    if (embeddedVideoReplace?.kind === 'video') {
+      this.embeddedMediaReplaceTarget = null;
+      this.errorText.set(null);
+      const readerEmb = new FileReader();
+      readerEmb.onerror = () => this.errorText.set('Failed to read video.');
+      readerEmb.onload = () => {
+        const dataUrl = String(readerEmb.result ?? '');
+        if (!/^data:video\//i.test(dataUrl)) {
+          this.errorText.set('Unsupported video file.');
+          return;
+        }
+        // Keep original PDF layer/background untouched for replace flows.
+        const cx = embeddedVideoReplace.x + embeddedVideoReplace.w / 2;
+        const cy = embeddedVideoReplace.y + embeddedVideoReplace.h / 2;
+        this.tool.set('text');
+        this.addWidgetAtPoint(embeddedVideoReplace.pageIndex, 'video', cx, cy, { videoObjectUrl: dataUrl });
+      };
+      readerEmb.readAsDataURL(file);
       return;
     }
 
@@ -2308,6 +2425,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.selectedDetectedPdfMedia.set(null);
     this.rightbarTab.set('options');
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
@@ -2316,6 +2434,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.selectedDetectedPdfMedia.set(null);
     this.rightbarTab.set('options');
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
@@ -2329,6 +2448,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
+    this.selectedDetectedPdfMedia.set(null);
     this.rightbarTab.set('options');
 
     const { overlay } = this.getCanvasPair(pageIndex);
@@ -2628,6 +2748,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.editsByPage.set({});
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
+      this.detectedMediaByPage.set({});
       this.sectionOverridesByPage.set({});
       this.removedSectionsByPage.set({});
       this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
@@ -2735,6 +2856,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.editsByPage.set({});
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
+      this.detectedMediaByPage.set({});
       this.sectionOverridesByPage.set({});
       this.removedSectionsByPage.set({});
       // Key slots are session-scoped (re-created on load).
@@ -3136,8 +3258,13 @@ export class PdfEditorComponent implements AfterViewInit {
   }): boolean {
     const widgetsByPage = opts?.widgetsByPage ?? this.widgetsByPage();
     const editsByPage = opts?.edits ?? this.editsByPage();
-    const hasWidgets = Object.values(widgetsByPage).some((list) => (list ?? []).length > 0);
-    if (hasWidgets) return true;
+    const hasFlattenOnlyWidgets = Object.values(widgetsByPage).some((list) =>
+      (list ?? []).some((w) =>
+        w.kind !== 'image' &&
+        w.kind !== 'signature'
+      )
+    );
+    if (hasFlattenOnlyWidgets) return true;
     return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
   }
 
@@ -3176,7 +3303,7 @@ export class PdfEditorComponent implements AfterViewInit {
       for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
         const page = pages[pageIndex];
         const edit = edits[pageIndex];
-        if (!edit) continue;
+        const pageWidgets = this.widgetsByPage()[pageIndex] ?? [];
 
         // If we neutralized a bogus 180° page rotation in the editor view,
         // do the same in the exported PDF so it doesn't re-flip in viewers.
@@ -3190,98 +3317,139 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         const { width, height } = page.getSize();
-        const sx = width / edit.viewportWidth;
-        const sy = height / edit.viewportHeight;
+        const sx = width / (edit?.viewportWidth ?? width);
+        const sy = height / (edit?.viewportHeight ?? height);
 
-        // Replace text first (cover original area, then draw new).
-        for (const r of edit.replaces) {
-          // NOTE: In semantic PDF export, we can only do a flat rectangle mask.
-          // For scanned/image PDFs we should prefer a flatten export instead of 'inpaint' masking.
-          const bg = hexToRgb01(r.bgColor);
-          page.drawRectangle({
-            x: r.x * sx,
-            y: height - (r.y + r.h) * sy,
-            width: r.w * sx,
-            height: r.h * sy,
-            color: rgb(bg.r, bg.g, bg.b)
-          });
+        if (edit) {
+          // Replace text first (cover original area, then draw new).
+          for (const r of edit.replaces) {
+            // NOTE: In semantic PDF export, we can only do a flat rectangle mask.
+            // For scanned/image PDFs we should prefer a flatten export instead of 'inpaint' masking.
+            const bg = hexToRgb01(r.bgColor);
+            page.drawRectangle({
+              x: r.x * sx,
+              y: height - (r.y + r.h) * sy,
+              width: r.w * sx,
+              height: r.h * sy,
+              color: rgb(bg.r, bg.g, bg.b)
+            });
 
-          if (r.newText.length > 0) {
-            const c = hexToRgb01(r.color);
-            const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
+            if (r.newText.length > 0) {
+              const c = hexToRgb01(r.color);
+              const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
+              const family: Exclude<FontFamily, 'poppins' | 'montserrat'> =
+                familyRaw === 'poppins' || familyRaw === 'montserrat' || familyRaw === 'abcdee_helvetica_bold'
+                  ? 'helvetica'
+                  : familyRaw;
+              const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
+              page.drawText(r.newText, {
+                x: r.x * sx,
+                y: height - r.y * sy - r.fontSize * sy,
+                size: r.fontSize * sy,
+                font,
+                color: rgb(c.r, c.g, c.b)
+              });
+            }
+          }
+
+          await this.drawImagesToPdf(pdf, page, edit, sx, sy);
+
+          for (const stroke of edit.ink) {
+            const c = hexToRgb01(stroke.color);
+            for (let i = 1; i < stroke.points.length; i++) {
+              const a = stroke.points[i - 1];
+              const b = stroke.points[i];
+              page.drawLine({
+                start: { x: a.x * sx, y: height - a.y * sy },
+                end: { x: b.x * sx, y: height - b.y * sy },
+                thickness: Math.max(0.5, stroke.width * sx),
+                color: rgb(c.r, c.g, c.b)
+              });
+            }
+          }
+
+          for (const t of edit.text) {
+            const c = hexToRgb01(t.color);
+            const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
             const family: Exclude<FontFamily, 'poppins' | 'montserrat'> =
               familyRaw === 'poppins' || familyRaw === 'montserrat' || familyRaw === 'abcdee_helvetica_bold'
                 ? 'helvetica'
                 : familyRaw;
-            const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
-            page.drawText(r.newText, {
-              x: r.x * sx,
-              y: height - r.y * sy - r.fontSize * sy,
-              size: r.fontSize * sy,
+            const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
+            const size = t.fontSize * sy;
+
+            // Optional background fill behind text (best-effort bbox).
+            if (t.bgColor) {
+              const bg = hexToRgb01(t.bgColor);
+              const lines = t.text.split('\n');
+              const lh = Math.max(1, Math.round(size * 1.2));
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i] ?? '';
+                const w = font.widthOfTextAtSize(line, size);
+                page.drawRectangle({
+                  x: t.x * sx,
+                  y: height - t.y * sy - size - i * lh,
+                  width: w,
+                  height: lh,
+                  color: rgb(bg.r, bg.g, bg.b)
+                });
+              }
+            }
+
+            page.drawText(t.text, {
+              x: t.x * sx,
+              y: height - t.y * sy - size,
+              size,
               font,
               color: rgb(c.r, c.g, c.b)
             });
           }
         }
 
-        await this.drawImagesToPdf(pdf, page, edit, sx, sy);
-
-        for (const stroke of edit.ink) {
-          const c = hexToRgb01(stroke.color);
-          for (let i = 1; i < stroke.points.length; i++) {
-            const a = stroke.points[i - 1];
-            const b = stroke.points[i];
-            page.drawLine({
-              start: { x: a.x * sx, y: height - a.y * sy },
-              end: { x: b.x * sx, y: height - b.y * sy },
-              thickness: Math.max(0.5, stroke.width * sx),
-              color: rgb(c.r, c.g, c.b)
-            });
-          }
-        }
-
-        for (const t of edit.text) {
-          const c = hexToRgb01(t.color);
-          const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
-          const family: Exclude<FontFamily, 'poppins' | 'montserrat'> =
-            familyRaw === 'poppins' || familyRaw === 'montserrat' || familyRaw === 'abcdee_helvetica_bold'
-              ? 'helvetica'
-              : familyRaw;
-          const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
-          const size = t.fontSize * sy;
-
-          // Optional background fill behind text (best-effort bbox).
-          if (t.bgColor) {
-            const bg = hexToRgb01(t.bgColor);
-            const lines = t.text.split('\n');
-            const lh = Math.max(1, Math.round(size * 1.2));
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i] ?? '';
-              const w = font.widthOfTextAtSize(line, size);
-              page.drawRectangle({
-                x: t.x * sx,
-                y: height - t.y * sy - size - i * lh,
-                width: w,
-                height: lh,
-                color: rgb(bg.r, bg.g, bg.b)
-              });
-            }
-          }
-
-          page.drawText(t.text, {
-            x: t.x * sx,
-            y: height - t.y * sy - size,
-            size,
-            font,
-            color: rgb(c.r, c.g, c.b)
-          });
-        }
+        await this.drawSemanticWidgetsToPdf(pdf, page, pageWidgets, sx, sy);
       }
 
     const out = await pdf.save();
     const safeBytes = new Uint8Array(out.byteLength);
     safeBytes.set(out);
     return safeBytes;
+  }
+
+  private async drawSemanticWidgetsToPdf(
+    pdf: PDFDocument,
+    page: PDFPage,
+    widgets: Widget[],
+    sx: number,
+    sy: number
+  ) {
+    if (!widgets.length) return;
+    const { height } = page.getSize();
+    for (const w of widgets) {
+      if (w.kind === 'image' && w.imageSrc) {
+        const embedded = await this.embedImageDataUrlForPdf(pdf, w.imageSrc);
+        page.drawImage(embedded, {
+          x: w.x * sx,
+          y: height - (w.y + w.h) * sy,
+          width: w.w * sx,
+          height: w.h * sy
+        });
+        continue;
+      }
+      if (w.kind === 'signature' && w.signatureSrc) {
+        const embedded = await this.embedImageDataUrlForPdf(pdf, w.signatureSrc);
+        page.drawImage(embedded, {
+          x: w.x * sx,
+          y: height - (w.y + w.h) * sy,
+          width: w.w * sx,
+          height: w.h * sy
+        });
+      }
+    }
+  }
+
+  private async embedImageDataUrlForPdf(pdf: PDFDocument, dataUrl: string) {
+    const { bytes, kind } = this.dataUrlToBytes(dataUrl);
+    return kind === 'png' ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
   }
 
   /**
@@ -4120,6 +4288,13 @@ export class PdfEditorComponent implements AfterViewInit {
       }));
     }
 
+    // Media detection is independent from text editing, so keep it enabled.
+    try {
+      await this.detectPdfMediaForPage(pageIndex, page, cssViewport);
+    } catch {
+      this.detectedMediaByPage.update((prev) => ({ ...prev, [pageIndex]: [] }));
+    }
+
     // Ensure we have viewport metadata for export.
     this.editsByPage.update((prev) => {
       const existing = prev[pageIndex];
@@ -4156,6 +4331,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected onDocPointerDown(ev: PointerEvent) {
     const target = ev.target as HTMLElement | null;
     if (!target) return;
+    if (target.closest('.page__overlay')) return;
     if (target.closest('.sidebarSlideMenu')) return;
     if (target.closest('.pageMenu')) return;
     if (target.closest('.pageMenuBtn')) return;
@@ -4165,6 +4341,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (target.closest('.rightbarMediaActions')) return;
     if (target.closest('.textDraft')) return;
     if (this.selectedWidgetId() !== null) this.selectedWidgetId.set(null);
+    if (this.selectedDetectedPdfMedia() !== null) this.selectedDetectedPdfMedia.set(null);
     if (this.openPageMenuIndex() !== null) this.openPageMenuIndex.set(null);
     if (this.sidebarSlideMenuOpenIndex() !== null) this.sidebarSlideMenuOpenIndex.set(null);
     if (this.selectedPlacedImageId() !== null) this.selectedPlacedImageId.set(null);
@@ -4192,6 +4369,55 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!selected) return null;
     if (selected.widget.kind !== 'image' && selected.widget.kind !== 'video') return null;
     return selected;
+  }
+
+  protected selectedDetectedMediaItem(): { pageIndex: number; media: DetectedPdfMedia } | null {
+    return this.selectedDetectedPdfMedia();
+  }
+
+  protected selectedDetectedMediaTitle(): string {
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected) return '';
+    return selected.media.kind === 'video' ? 'Detected video' : 'Detected image';
+  }
+
+  protected selectedPlacedImage(): { pageIndex: number; image: ImageAnno } | null {
+    const id = this.selectedPlacedImageId();
+    if (!id) return null;
+    const pageIndex = this.activePageIndex();
+    const image = this.getImageAnno(pageIndex, id);
+    if (!image) return null;
+    return { pageIndex, image };
+  }
+
+  protected replaceSelectedPlacedImage(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    this.placedImageReplaceTarget = { pageIndex: sel.pageIndex, id: sel.image.id };
+    const el = this.widgetImageFile?.nativeElement;
+    if (el) {
+      el.value = '';
+      el.click();
+    }
+  }
+
+  protected replaceSelectedDetectedMedia(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected) return;
+    this.beginEmbeddedMediaReplace(selected.pageIndex, selected.media);
+  }
+
+  protected removeSelectedDetectedMedia(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected) return;
+    this.eraseDetectedPdfMedia(selected.pageIndex, selected.media);
+    this.selectedDetectedPdfMedia.set(null);
   }
 
   protected selectedWidgetTitle(): string {
@@ -4305,6 +4531,43 @@ export class PdfEditorComponent implements AfterViewInit {
 
   @HostListener('document:pointermove', ['$event'])
   protected onDocPointerMove(ev: PointerEvent) {
+    const cropOp = this.activeUploadCropHandle;
+    if (cropOp) {
+      if (ev.pointerId !== cropOp.pointerId) return;
+      const crop = this.imageUploadCropModal();
+      const surface = this.uploadCropSurface?.nativeElement;
+      if (!crop || !surface) return;
+      const rect = surface.getBoundingClientRect();
+      const dxPct = rect.width > 0 ? ((ev.clientX - cropOp.startClientX) / rect.width) * 100 : 0;
+      const dyPct = rect.height > 0 ? ((ev.clientY - cropOp.startClientY) / rect.height) * 100 : 0;
+      const minSpan = 2;
+      let leftPct = cropOp.start.leftPct;
+      let topPct = cropOp.start.topPct;
+      let rightPct = cropOp.start.rightPct;
+      let bottomPct = cropOp.start.bottomPct;
+      if (cropOp.handle === 'tl') {
+        leftPct = clamp(cropOp.start.leftPct + dxPct, 0, 100 - rightPct - minSpan);
+        topPct = clamp(cropOp.start.topPct + dyPct, 0, 100 - bottomPct - minSpan);
+      } else if (cropOp.handle === 'tr') {
+        rightPct = clamp(cropOp.start.rightPct - dxPct, 0, 100 - leftPct - minSpan);
+        topPct = clamp(cropOp.start.topPct + dyPct, 0, 100 - bottomPct - minSpan);
+      } else if (cropOp.handle === 'bl') {
+        leftPct = clamp(cropOp.start.leftPct + dxPct, 0, 100 - rightPct - minSpan);
+        bottomPct = clamp(cropOp.start.bottomPct - dyPct, 0, 100 - topPct - minSpan);
+      } else {
+        rightPct = clamp(cropOp.start.rightPct - dxPct, 0, 100 - leftPct - minSpan);
+        bottomPct = clamp(cropOp.start.bottomPct - dyPct, 0, 100 - topPct - minSpan);
+      }
+      this.imageUploadCropModal.set({
+        ...crop,
+        leftPct,
+        topPct,
+        rightPct,
+        bottomPct
+      });
+      return;
+    }
+
     const opI = this.activePlacedImageOp;
     if (opI) {
       if (ev.pointerId !== opI.pointerId) return;
@@ -4451,6 +4714,13 @@ export class PdfEditorComponent implements AfterViewInit {
 
   @HostListener('document:pointerup', ['$event'])
   protected onDocPointerUp(ev: PointerEvent) {
+    const cropOp = this.activeUploadCropHandle;
+    if (cropOp) {
+      if (ev.pointerId !== cropOp.pointerId) return;
+      this.activeUploadCropHandle = null;
+      return;
+    }
+
     const opI = this.activePlacedImageOp;
     if (opI) {
       if (ev.pointerId !== opI.pointerId) return;
@@ -4814,6 +5084,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageThumbUrlByPage.set({});
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
+      this.detectedMediaByPage.set({});
       this.baseSnapshotByPage.clear();
       this.cancelAllPdfRenderTasks();
       this.resetHistory();
@@ -4922,6 +5193,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageThumbUrlByPage.set({});
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
+      this.detectedMediaByPage.set({});
       this.baseSnapshotByPage.clear();
       this.cancelAllPdfRenderTasks();
       this.resetHistory();
@@ -5118,8 +5390,10 @@ export class PdfEditorComponent implements AfterViewInit {
   private remapDetectedAfterCopy(fromIndex: number, toIndex: number) {
     const prevText = this.detectedTextByPage();
     const prevBlocks = this.detectedBlocksByPage();
+    const prevMedia = this.detectedMediaByPage();
     const nextText: Record<number, DetectedText[]> = {};
     const nextBlocks: Record<number, DetectedBlock[]> = {};
+    const nextMedia: Record<number, DetectedPdfMedia[]> = {};
     for (const [k, v] of Object.entries(prevText)) {
       const idx = Number(k);
       if (!Number.isFinite(idx) || !v) continue;
@@ -5130,12 +5404,20 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!Number.isFinite(idx) || !v) continue;
       nextBlocks[idx >= toIndex ? idx + 1 : idx] = v.map((b) => ({ ...b }));
     }
+    for (const [k, v] of Object.entries(prevMedia)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || !v) continue;
+      nextMedia[idx >= toIndex ? idx + 1 : idx] = v.map((m) => ({ ...m }));
+    }
     const srcText = prevText[fromIndex] ?? [];
     const srcBlocks = prevBlocks[fromIndex] ?? [];
+    const srcMedia = prevMedia[fromIndex] ?? [];
     nextText[toIndex] = srcText.map((t) => ({ ...t }));
     nextBlocks[toIndex] = srcBlocks.map((b) => ({ ...b }));
+    nextMedia[toIndex] = srcMedia.map((m) => ({ ...m }));
     this.detectedTextByPage.set(nextText);
     this.detectedBlocksByPage.set(nextBlocks);
+    this.detectedMediaByPage.set(nextMedia);
   }
 
   private newWidgetId(): string {
@@ -5205,6 +5487,7 @@ export class PdfEditorComponent implements AfterViewInit {
         this.pageThumbUrlByPage.set(this.reindexThumbUrlsAfterInsert(this.pageThumbUrlByPage(), remap.at));
         this.detectedTextByPage.set(this.reindexKeyedByInsertedPage(this.detectedTextByPage(), remap.at));
         this.detectedBlocksByPage.set(this.reindexKeyedByInsertedPage(this.detectedBlocksByPage(), remap.at));
+        this.detectedMediaByPage.set(this.reindexKeyedByInsertedPage(this.detectedMediaByPage(), remap.at));
         this.reindexSnapshotMapAfterInsert(this.baseSnapshotByPage, remap.at);
         this.reindexRotateMapAfterInsert(remap.at);
       }
@@ -5215,6 +5498,7 @@ export class PdfEditorComponent implements AfterViewInit {
         this.pageThumbUrlByPage.set(this.reindexThumbUrlsAfterDelete(this.pageThumbUrlByPage(), remap.at));
         this.detectedTextByPage.set(this.reindexKeyedByDeletedPage(this.detectedTextByPage(), remap.at));
         this.detectedBlocksByPage.set(this.reindexKeyedByDeletedPage(this.detectedBlocksByPage(), remap.at));
+        this.detectedMediaByPage.set(this.reindexKeyedByDeletedPage(this.detectedMediaByPage(), remap.at));
         this.reindexSnapshotMapAfterDelete(this.baseSnapshotByPage, remap.at);
         this.reindexRotateMapAfterDelete(remap.at);
       }
@@ -5468,6 +5752,7 @@ export class PdfEditorComponent implements AfterViewInit {
             return;
           }
           this.selectedWidgetId.set(null);
+          this.selectedDetectedPdfMedia.set(null);
           this.beginHistoryStep();
           this.selectedPlacedImageId.set(hit.id);
           (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
@@ -5489,6 +5774,23 @@ export class PdfEditorComponent implements AfterViewInit {
         this.selectedPlacedImageId.set(null);
         this.imageCropSession.set(null);
         this.redrawOverlay(pageIndex);
+      }
+    }
+
+    if (this.tool() !== 'pen' && !(this.tool() === 'image' && this.pendingImageDataUrl)) {
+      const { overlay } = this.getCanvasPair(pageIndex);
+      if (overlay) {
+        const p = this.eventToPoint(overlay, ev);
+        const hitMedia = this.hitTestDetectedMedia(pageIndex, p.x, p.y);
+        if (hitMedia) {
+          this.selectedWidgetId.set(null);
+          this.selectedPlacedImageId.set(null);
+          this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
+          this.rightbarTab.set('options');
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
       }
     }
 
@@ -5514,6 +5816,16 @@ export class PdfEditorComponent implements AfterViewInit {
       const { overlay } = this.getCanvasPair(pageIndex);
       if (!overlay) return;
       const p = this.eventToPoint(overlay, ev);
+
+      const hitMedia = this.hitTestDetectedMedia(pageIndex, p.x, p.y);
+      if (hitMedia) {
+        this.selectedWidgetId.set(null);
+        this.selectedPlacedImageId.set(null);
+        this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
+        this.rightbarTab.set('options');
+        return;
+      }
+      this.selectedDetectedPdfMedia.set(null);
 
       if (this.editExistingText()) {
         const hitReplace = this.hitTestExistingReplace(pageIndex, p.x, p.y);
@@ -5552,10 +5864,8 @@ export class PdfEditorComponent implements AfterViewInit {
         const hit = this.hitTestDetectedBlock(pageIndex, p.x, p.y);
         if (hit) {
           this.editingReplace = null;
-          const { fg } = this.sampleTextAndBgColors(pageIndex, hit);
-          // For a clean edit experience, always mask with solid white.
-          // (Inpainting can leave ghosting/overrides depending on nearby pixels.)
-          const bg = '#ffffff';
+          const { fg, bg } = this.sampleTextAndBgColors(pageIndex, hit);
+          // Preserve sampled background so replace/edit keeps the original look.
           this.isTextPlacing.set(true);
           this.textDraft.set(hit.text);
           this.textDraftPageIndex.set(pageIndex);
@@ -5578,7 +5888,9 @@ export class PdfEditorComponent implements AfterViewInit {
             oldText: hit.text,
             bgColor: bg,
             color: fg,
-            maskMode: 'color',
+            // Preserve the underlying PDF background when committing edits (Enter/click),
+            // so we don't introduce a flat gray patch behind replaced text.
+            maskMode: 'inpaint',
             fontSize: hitFontSize,
             fontStyle: hit.fontStyle,
             fontFamily: this.textFamily()
@@ -5588,6 +5900,7 @@ export class PdfEditorComponent implements AfterViewInit {
           this.redrawOverlay(pageIndex);
           return;
         }
+
       }
 
       // New text
@@ -5922,11 +6235,30 @@ export class PdfEditorComponent implements AfterViewInit {
         images: [],
         replaces: []
       };
+      const replaces =
+        rep.source === 'mediaErase'
+          ? existing.replaces.filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, rep)))
+          : existing.replaces;
       return {
         ...prev,
-        [pageIndex]: { ...existing, replaces: [...existing.replaces, rep] }
+        [pageIndex]: { ...existing, replaces: [...replaces, rep] }
       };
     });
+  }
+
+  private isSameReplaceRegion(a: TextReplace, b: TextReplace): boolean {
+    const left = Math.max(a.x, b.x);
+    const top = Math.max(a.y, b.y);
+    const right = Math.min(a.x + a.w, b.x + b.w);
+    const bottom = Math.min(a.y + a.h, b.y + b.h);
+    const overlapW = Math.max(0, right - left);
+    const overlapH = Math.max(0, bottom - top);
+    const overlapArea = overlapW * overlapH;
+    if (overlapArea <= 0) return false;
+    const aArea = Math.max(1, a.w * a.h);
+    const bArea = Math.max(1, b.w * b.h);
+    const coverage = overlapArea / Math.min(aArea, bArea);
+    return coverage >= 0.7;
   }
 
   private updateTextReplace(pageIndex: number, idx: number, rep: TextReplace) {
@@ -6061,9 +6393,9 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.clearRect(0, 0, w, h);
 
     // If we're editing existing text, temporarily cover the old region on the overlay.
-    // This uses "white" intentionally (requested behavior) so underlying content doesn't show through.
+    // Match the selected background so preview and commit are visually consistent.
     if (this.isTextPlacing() && this.textDraftPageIndex() === pageIndex && this.textDraftBox) {
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = this.textBgColor();
       ctx.fillRect(this.textDraftX(), this.textDraftY(), this.textDraftBox.w, this.textDraftBox.h);
     }
 
@@ -6183,6 +6515,397 @@ export class PdfEditorComponent implements AfterViewInit {
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
     return { x: clamp(x, 0, rect.width), y: clamp(y, 0, rect.height) };
+  }
+
+  private pdfCornersToViewportAabb(
+    cssViewport: { convertToViewportPoint: (x: number, y: number) => number[] },
+    cornersPdf: [number, number][]
+  ): { x: number; y: number; w: number; h: number } {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [px, py] of cornersPdf) {
+      const [vx, vy] = cssViewport.convertToViewportPoint(px, py);
+      minX = Math.min(minX, vx);
+      maxX = Math.max(maxX, vx);
+      minY = Math.min(minY, vy);
+      maxY = Math.max(maxY, vy);
+    }
+    return {
+      x: minX,
+      y: minY,
+      w: Math.max(1, maxX - minX),
+      h: Math.max(1, maxY - minY)
+    };
+  }
+
+  private collectImageRectsFromOperatorList(
+    opList: { fnArray: number[]; argsArray: any[] },
+    cssViewport: { convertToViewportPoint: (x: number, y: number) => number[] }
+  ): Array<{ x: number; y: number; w: number; h: number }> {
+    const out: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const stack: number[][] = [[1, 0, 0, 1, 0, 0]];
+    const ctm = () => stack[stack.length - 1]!;
+
+    const unitSquareToViewport = (m: number[]) => {
+      const corners: [number, number][] = [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1]
+      ];
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const [ux, uy] of corners) {
+        const p: number[] = [ux, uy];
+        Util.applyTransform(p, m, 0);
+        const [vx, vy] = cssViewport.convertToViewportPoint(p[0]!, p[1]!);
+        minX = Math.min(minX, vx);
+        maxX = Math.max(maxX, vx);
+        minY = Math.min(minY, vy);
+        maxY = Math.max(maxY, vy);
+      }
+      out.push({
+        x: minX,
+        y: minY,
+        w: Math.max(1, maxX - minX),
+        h: Math.max(1, maxY - minY)
+      });
+    };
+
+    const { fnArray, argsArray } = opList;
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i]!;
+      const args = argsArray[i] ?? [];
+      switch (fn) {
+        case OPS.save:
+          stack.push([...ctm()]);
+          break;
+        case OPS.restore:
+          if (stack.length > 1) stack.pop();
+          break;
+        case OPS.transform: {
+          const t = args as number[];
+          if (t.length >= 6) {
+            stack[stack.length - 1] = Util.transform(ctm(), [
+              t[0]!,
+              t[1]!,
+              t[2]!,
+              t[3]!,
+              t[4]!,
+              t[5]!
+            ]);
+          }
+          break;
+        }
+        case OPS.paintImageXObject:
+          unitSquareToViewport(ctm());
+          break;
+        case OPS.paintInlineImageXObject: {
+          const img = args[0];
+          const iw = Number(img?.width ?? 0);
+          const ih = Number(img?.height ?? 0);
+          if (iw > 0 && ih > 0) unitSquareToViewport(ctm());
+          break;
+        }
+        case OPS.paintImageXObjectRepeat: {
+          const scaleX = Number(args[1] ?? 1);
+          const scaleY = Number(args[2] ?? 1);
+          const positions = args[3] as number[] | undefined;
+          if (positions && positions.length >= 2) {
+            for (let k = 0; k < positions.length; k += 2) {
+              const local = [scaleX, 0, 0, scaleY, positions[k]!, positions[k + 1]!];
+              unitSquareToViewport(Util.transform(ctm(), local));
+            }
+          }
+          break;
+        }
+        case OPS.paintInlineImageXObjectGroup: {
+          const map = args[1] as Array<{ transform: number[] }> | undefined;
+          if (map) {
+            for (const entry of map) {
+              const tr = entry.transform;
+              if (Array.isArray(tr) && tr.length >= 6) {
+                unitSquareToViewport(Util.transform(ctm(), tr));
+              }
+            }
+          }
+          break;
+        }
+        case OPS.paintImageMaskXObjectGroup: {
+          const images = args[0] as Array<{ transform: number[] }> | undefined;
+          if (images) {
+            for (const image of images) {
+              const tr = image.transform;
+              if (Array.isArray(tr) && tr.length >= 6) {
+                unitSquareToViewport(Util.transform(ctm(), tr));
+              }
+            }
+          }
+          break;
+        }
+        case OPS.paintImageMaskXObjectRepeat: {
+          const scaleX = Number(args[1] ?? 1);
+          const skewX = Number(args[2] ?? 0);
+          const skewY = Number(args[3] ?? 0);
+          const scaleY = Number(args[4] ?? 1);
+          const positions = args[5] as number[] | undefined;
+          if (positions && positions.length >= 2) {
+            for (let k = 0; k < positions.length; k += 2) {
+              const local = [scaleX, skewX, skewY, scaleY, positions[k]!, positions[k + 1]!];
+              unitSquareToViewport(Util.transform(ctm(), local));
+            }
+          }
+          break;
+        }
+        case OPS.paintImageMaskXObject:
+        case OPS.paintSolidColorImageMask:
+          unitSquareToViewport(ctm());
+          break;
+        default:
+          break;
+      }
+    }
+    return out;
+  }
+
+  private async collectVideoRectsFromAnnotations(
+    page: { getAnnotations: () => Promise<any[]> },
+    cssViewport: { convertToViewportPoint: (x: number, y: number) => number[] }
+  ): Promise<Array<{ x: number; y: number; w: number; h: number }>> {
+    const out: Array<{ x: number; y: number; w: number; h: number }> = [];
+    let annotations: any[] = [];
+    try {
+      annotations = await page.getAnnotations();
+    } catch {
+      return out;
+    }
+    for (const a of annotations) {
+      const t = Number(a.annotationType ?? 0);
+      if (t !== AnnotationType.MOVIE && t !== AnnotationType.SCREEN) continue;
+      const rect = a.rect;
+      if (!Array.isArray(rect) || rect.length < 4) continue;
+      const x1 = Number(rect[0]);
+      const y1 = Number(rect[1]);
+      const x2 = Number(rect[2]);
+      const y2 = Number(rect[3]);
+      const box = this.pdfCornersToViewportAabb(cssViewport, [
+        [x1, y1],
+        [x2, y1],
+        [x2, y2],
+        [x1, y2]
+      ]);
+      if (box.w < 2 || box.h < 2) continue;
+      out.push(box);
+    }
+    return out;
+  }
+
+  private async detectPdfMediaForPage(pageIndex: number, page: any, cssViewport: any) {
+    const opList = await page.getOperatorList();
+    const imageRects = this.collectImageRectsFromOperatorList(opList, cssViewport);
+    const videoRects = await this.collectVideoRectsFromAnnotations(page, cssViewport);
+    const items: DetectedPdfMedia[] = [];
+    let seq = 0;
+    const rnd = () => Math.random().toString(16).slice(2, 9);
+    for (const r of imageRects) {
+      if (r.w < 3 || r.h < 3) continue;
+      if (this.isWholePageLikeMediaRect(r, cssViewport)) continue;
+      items.push({
+        id: `pdfmedia_p${pageIndex}_i${seq++}_${rnd()}`,
+        kind: 'image',
+        ...r
+      });
+    }
+    for (const r of videoRects) {
+      items.push({
+        id: `pdfmedia_p${pageIndex}_v${seq++}_${rnd()}`,
+        kind: 'video',
+        ...r
+      });
+    }
+    this.detectedMediaByPage.update((prev) => ({ ...prev, [pageIndex]: items }));
+  }
+
+  /**
+   * Skip page-covering/background raster ops from PDF operator lists.
+   * Those are not user-targeted media and can appear after save/reload.
+   */
+  private isWholePageLikeMediaRect(
+    rect: { x: number; y: number; w: number; h: number },
+    cssViewport: { width: number; height: number }
+  ): boolean {
+    const pageW = Math.max(1, Number(cssViewport?.width ?? 0));
+    const pageH = Math.max(1, Number(cssViewport?.height ?? 0));
+    const wRatio = rect.w / pageW;
+    const hRatio = rect.h / pageH;
+    const areaRatio = (rect.w * rect.h) / (pageW * pageH);
+
+    // If a detected image nearly covers the page, treat it as background render content.
+    return (wRatio >= 0.95 && hRatio >= 0.95) || areaRatio >= 0.9;
+  }
+
+  private pushPdfMediaEraseReplace(
+    pageIndex: number,
+    box: { x: number; y: number; w: number; h: number },
+    opts?: { maskMode?: 'color' | 'inpaint'; insetPx?: number }
+  ) {
+    const inset = Math.max(0, Number(opts?.insetPx ?? 0));
+    const w = Math.max(1, box.w - inset * 2);
+    const h = Math.max(1, box.h - inset * 2);
+    const x = box.x + (box.w - w) / 2;
+    const y = box.y + (box.h - h) / 2;
+    const maskMode = opts?.maskMode ?? 'color';
+    const sample = this.sampleTextAndBgColors(pageIndex, { x, y, w, h });
+    this.pushTextReplace(pageIndex, {
+      x,
+      y,
+      w,
+      h,
+      oldText: '',
+      newText: '',
+      maskMode,
+      bgColor: maskMode === 'inpaint' ? sample.bg : '#ffffff',
+      color: '#000000',
+      fontSize: 12,
+      fontStyle: 'regular',
+      fontFamily: 'helvetica',
+      source: 'mediaErase'
+    });
+  }
+
+  private dropDetectedMediaEntry(pageIndex: number, id: string) {
+    this.detectedMediaByPage.update((prev) => ({
+      ...prev,
+      [pageIndex]: (prev[pageIndex] ?? []).filter((x) => x.id !== id)
+    }));
+  }
+
+  private eraseDetectedPdfMedia(pageIndex: number, m: DetectedPdfMedia) {
+    // "Remove detected image/video" should affect only the selected media area:
+    // fill that full area with white, leave everything else untouched.
+    this.pushPdfMediaEraseReplace(pageIndex, m, { maskMode: 'color', insetPx: 0 });
+    this.dropDetectedMediaEntry(pageIndex, m.id);
+    const selected = this.selectedDetectedPdfMedia();
+    if (selected && selected.pageIndex === pageIndex && selected.media.id === m.id) {
+      this.selectedDetectedPdfMedia.set(null);
+    }
+    this.applyReplacesToBase(pageIndex);
+    this.redrawOverlay(pageIndex);
+  }
+
+  private beginEmbeddedMediaReplace(pageIndex: number, m: DetectedPdfMedia) {
+    this.embeddedMediaReplaceTarget = {
+      pageIndex,
+      id: m.id,
+      kind: m.kind,
+      x: m.x,
+      y: m.y,
+      w: m.w,
+      h: m.h
+    };
+    if (m.kind === 'image') {
+      const el = this.widgetImageFile?.nativeElement;
+      if (el) {
+        el.value = '';
+        el.click();
+      }
+      return;
+    }
+    const el = this.widgetVideoFile?.nativeElement;
+    if (el) {
+      el.value = '';
+      el.click();
+    }
+  }
+
+  private async placeReplacementImageInPdfMediaRect(pageIndex: number, dataUrl: string, box: DetectedPdfMedia) {
+    const img = await this.loadHtmlImage(dataUrl);
+    const natW = Math.max(1, img.naturalWidth);
+    const natH = Math.max(1, img.naturalHeight);
+    const target = this.getCappedReplaceRect(box);
+    // Fully cover the detected target region so old background is completely hidden.
+    // (Use center-crop from source image when aspect ratios differ.)
+    const scale = Math.max(target.w / natW, target.h / natH);
+    const srcW = Math.max(1, target.w / scale);
+    const srcH = Math.max(1, target.h / scale);
+    const cropX = Math.max(0, (natW - srcW) / 2);
+    const cropY = Math.max(0, (natH - srcH) / 2);
+    const x = target.x;
+    const y = target.y;
+    const w = target.w;
+    const h = target.h;
+    // Use geometry-based stable id so replace stays bound to the same area
+    // even when detected-media runtime ids change after rerender/zoom.
+    const id = this.replacementImageIdForBox(pageIndex, box);
+    const anno: ImageAnno = {
+      id,
+      x,
+      y,
+      w,
+      h,
+      dataUrl,
+      srcW: natW,
+      srcH: natH,
+      crop: { x: cropX, y: cropY, w: srcW, h: srcH }
+    };
+    if (this.getImageAnno(pageIndex, id)) {
+      this.beginHistoryStep();
+      this.updatePlacedImage(pageIndex, id, () => anno);
+    } else {
+      this.pushImageAnno(pageIndex, anno);
+    }
+    this.selectedPlacedImageId.set(id);
+    this.redrawOverlay(pageIndex);
+  }
+
+  private replacementImageIdForBox(pageIndex: number, box: { x: number; y: number; w: number; h: number }): string {
+    const rx = Math.round(box.x);
+    const ry = Math.round(box.y);
+    const rw = Math.round(box.w);
+    const rh = Math.round(box.h);
+    return `pdfmedia_replace_p${pageIndex}_${rx}_${ry}_${rw}_${rh}`;
+  }
+
+  private getCappedReplaceRect(box: { x: number; y: number; w: number; h: number }) {
+    const w = Math.max(1, Math.min(400, box.w));
+    const h = Math.max(1, Math.min(250, box.h));
+    return {
+      x: box.x + (box.w - w) / 2,
+      y: box.y + (box.h - h) / 2,
+      w,
+      h
+    };
+  }
+
+  private withMaxImageBounds(
+    box: { x: number; y: number; w: number; h: number },
+    natW: number,
+    natH: number
+  ): { x: number; y: number; w: number; h: number } {
+    const safeNatW = Math.max(1, natW);
+    const safeNatH = Math.max(1, natH);
+    const scale = Math.min(400 / safeNatW, 250 / safeNatH, 1);
+    const w = Math.max(10, Math.round(safeNatW * scale));
+    const h = Math.max(10, Math.round(safeNatH * scale));
+    return {
+      x: box.x + (box.w - w) / 2,
+      y: box.y + (box.h - h) / 2,
+      w,
+      h
+    };
+  }
+
+  private hitTestDetectedMedia(pageIndex: number, x: number, y: number): DetectedPdfMedia | null {
+    const items = this.detectedMediaByPage()[pageIndex] ?? [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]!;
+      if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) return it;
+    }
+    return null;
   }
 
   private hitTestDetectedText(pageIndex: number, x: number, y: number): DetectedText | null {
@@ -6578,14 +7301,8 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isImagePlacing.set(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Failed to read image.'));
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsDataURL(file);
-      });
-      if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-        this.errorText.set('Unsupported image (use PNG or JPEG).');
+      const dataUrl = await this.readAndCropImageFile(file);
+      if (!dataUrl) {
         this.pendingPdfImageDrop = null;
         this.pendingImageDataUrl = null;
         this.tool.set('text');
@@ -6628,6 +7345,123 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
+  private async requestImageCrop(dataUrl: string): Promise<string | null> {
+    const existing = this.imageUploadCropResolve;
+    if (existing) existing(null);
+    return new Promise<string | null>((resolve) => {
+      this.imageUploadCropResolve = resolve;
+      this.imageUploadCropModal.set({
+        dataUrl,
+        leftPct: 0,
+        topPct: 0,
+        rightPct: 0,
+        bottomPct: 0
+      });
+    });
+  }
+
+  protected patchUploadCropField(
+    field: 'leftPct' | 'topPct' | 'rightPct' | 'bottomPct',
+    value: number
+  ) {
+    const cur = this.imageUploadCropModal();
+    if (!cur) return;
+    this.imageUploadCropModal.set({
+      ...cur,
+      [field]: clamp(Number.isFinite(value) ? value : 0, 0, 49)
+    });
+  }
+
+  protected uploadCropBoxStyle() {
+    const crop = this.imageUploadCropModal();
+    if (!crop) return {};
+    const width = Math.max(1, 100 - crop.leftPct - crop.rightPct);
+    const height = Math.max(1, 100 - crop.topPct - crop.bottomPct);
+    return {
+      left: `${crop.leftPct}%`,
+      top: `${crop.topPct}%`,
+      width: `${width}%`,
+      height: `${height}%`
+    };
+  }
+
+  protected onUploadCropHandlePointerDown(handle: 'tl' | 'tr' | 'bl' | 'br', ev: PointerEvent) {
+    const crop = this.imageUploadCropModal();
+    if (!crop) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.activeUploadCropHandle = {
+      pointerId: ev.pointerId,
+      handle,
+      startClientX: ev.clientX,
+      startClientY: ev.clientY,
+      start: {
+        leftPct: crop.leftPct,
+        topPct: crop.topPct,
+        rightPct: crop.rightPct,
+        bottomPct: crop.bottomPct
+      }
+    };
+    (ev.target as HTMLElement | null)?.setPointerCapture?.(ev.pointerId);
+  }
+
+  protected cancelImageUploadCrop(ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    this.activeUploadCropHandle = null;
+    const resolve = this.imageUploadCropResolve;
+    this.imageUploadCropResolve = null;
+    this.imageUploadCropModal.set(null);
+    resolve?.(null);
+  }
+
+  protected async applyImageUploadCrop(ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    this.activeUploadCropHandle = null;
+    const cur = this.imageUploadCropModal();
+    if (!cur) return;
+    const resolve = this.imageUploadCropResolve;
+    this.imageUploadCropResolve = null;
+    this.imageUploadCropModal.set(null);
+    try {
+      const img = await this.loadHtmlImage(cur.dataUrl);
+      const sw = Math.max(1, img.naturalWidth);
+      const sh = Math.max(1, img.naturalHeight);
+      let l = clamp(cur.leftPct, 0, 49);
+      let t = clamp(cur.topPct, 0, 49);
+      let r = clamp(cur.rightPct, 0, 49);
+      let b = clamp(cur.bottomPct, 0, 49);
+      if (l + r >= 99.5) r = Math.max(0, 99.5 - l);
+      if (t + b >= 99.5) b = Math.max(0, 99.5 - t);
+      const sx = Math.round((l / 100) * sw);
+      const sy = Math.round((t / 100) * sh);
+      const cw = Math.max(1, Math.round((1 - (l + r) / 100) * sw));
+      const ch = Math.max(1, Math.round((1 - (t + b) / 100) * sh));
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve?.(null);
+        return;
+      }
+      ctx.drawImage(img, sx, sy, cw, ch, 0, 0, cw, ch);
+      resolve?.(canvas.toDataURL('image/png'));
+    } catch {
+      resolve?.(null);
+    }
+  }
+
+  private async readAndCropImageFile(file: File): Promise<string | null> {
+    const dataUrl = await this.readFileAsDataUrl(file);
+    if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
+      this.errorText.set('Unsupported image (use PNG or JPEG).');
+      return null;
+    }
+    return await this.requestImageCrop(dataUrl);
+  }
+
   private async placePendingImage(pageIndex: number, x: number, y: number) {
     const dataUrl = this.pendingImageDataUrl;
     if (!dataUrl) return;
@@ -6651,9 +7485,13 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    const w0 = 180;
-    const w = w0;
-    const h = Math.max(10, Math.round((img.naturalHeight / Math.max(1, img.naturalWidth)) * w0));
+    const maxW = 400;
+    const maxH = 250;
+    const natW = Math.max(1, img.naturalWidth);
+    const natH = Math.max(1, img.naturalHeight);
+    const scale = Math.min(maxW / natW, maxH / natH, 1);
+    const w = Math.max(10, Math.round(natW * scale));
+    const h = Math.max(10, Math.round(natH * scale));
     const cx = x - w / 2;
     const cy = y - h / 2;
     const px = clamp(cx, 0, Math.max(0, rect.width - w));

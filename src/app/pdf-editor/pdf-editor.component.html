@@ -57,6 +57,59 @@
     </div>
   }
 
+  @if (imageUploadCropModal(); as crop) {
+    <div class="deleteSlideModal" (click)="cancelImageUploadCrop($event)">
+      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
+      <div
+        class="deleteSlideModal__panel imageUploadCropModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="imageUploadCropTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <h2 id="imageUploadCropTitle" class="deleteSlideModal__title">Crop image</h2>
+        <div class="imageUploadCropModal__preview imageUploadCropModal__surface" #uploadCropSurface>
+          <img [src]="crop.dataUrl" alt="Crop preview" />
+          <div class="imageUploadCropModal__mask"></div>
+          <div class="imageUploadCropModal__box" [ngStyle]="uploadCropBoxStyle()">
+            <button
+              type="button"
+              class="imageUploadCropModal__handle imageUploadCropModal__handle--tl"
+              (pointerdown)="onUploadCropHandlePointerDown('tl', $event)"
+              aria-label="Resize crop top left"
+            ></button>
+            <button
+              type="button"
+              class="imageUploadCropModal__handle imageUploadCropModal__handle--tr"
+              (pointerdown)="onUploadCropHandlePointerDown('tr', $event)"
+              aria-label="Resize crop top right"
+            ></button>
+            <button
+              type="button"
+              class="imageUploadCropModal__handle imageUploadCropModal__handle--bl"
+              (pointerdown)="onUploadCropHandlePointerDown('bl', $event)"
+              aria-label="Resize crop bottom left"
+            ></button>
+            <button
+              type="button"
+              class="imageUploadCropModal__handle imageUploadCropModal__handle--br"
+              (pointerdown)="onUploadCropHandlePointerDown('br', $event)"
+              aria-label="Resize crop bottom right"
+            ></button>
+          </div>
+        </div>
+        <div class="deleteSlideModal__actions">
+          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="cancelImageUploadCrop($event)">
+            Cancel
+          </button>
+          <button type="button" class="deleteSlideModal__btn" (click)="applyImageUploadCrop($event)">
+            Apply crop
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   @if (sharePanelOpen()) {
     <div class="shareDrawer" (click)="closeSharePanel()">
       <div class="shareDrawer__backdrop" aria-hidden="true"></div>
@@ -427,7 +480,7 @@
     <div class="errorToast" role="alert" aria-live="polite">{{ errorText() }}</div>
   }
 
-  @if (isLoading() || isInserting() || isImagePlacing()) {
+  @if ((isLoading() || isInserting() || isImagePlacing()) && !imageUploadCropModal()) {
     <div class="busyOverlay" role="status" aria-live="polite" aria-busy="true">
       <div class="busyOverlay__panel">
         <div class="busySpinner" aria-hidden="true"></div>
@@ -753,6 +806,7 @@
                       class="widget"
                       [attr.data-widget-id]="w.id"
                       [class.isSelected]="selectedWidgetId() === w.id"
+                      [class.widget--image]="w.kind === 'image'"
                       [ngStyle]="{ left: w.x + 'px', top: w.y + 'px', width: w.w + 'px', height: w.h + 'px' }"
                       (pointerdown)="onWidgetPointerDown(activePageIndex(), w.id, $event)"
                     >
@@ -1265,6 +1319,39 @@
                       Replace
                     </button>
                     <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedWidget($event)">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (selectedDetectedMediaItem(); as selectedDetected) {
+                <div class="rightbarMediaActions" role="group" aria-label="Detected media actions">
+                  <div class="rightbarMediaActions__title">{{ selectedDetectedMediaTitle() }}</div>
+                  <div class="rightbarAssetsHint">Type: {{ selectedDetected.media.kind }} (embedded in PDF)</div>
+                  <div class="rightbarMediaActions__row">
+                    <button type="button" class="rightbarMediaActions__btn" (click)="replaceSelectedDetectedMedia($event)">
+                      Update
+                    </button>
+                    <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedDetectedMedia($event)">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (selectedPlacedImage(); as placedImageSel) {
+                <div class="rightbarMediaActions" role="group" aria-label="Selected placed image actions">
+                  <div class="rightbarMediaActions__title">Selected image</div>
+                  <div class="rightbarAssetsHint">Type: image (editable overlay)</div>
+                  <div class="rightbarMediaActions__row">
+                    <button type="button" class="rightbarMediaActions__btn" (click)="replaceSelectedPlacedImage($event)">
+                      Update
+                    </button>
+                    <button type="button" class="rightbarMediaActions__btn" (click)="openImageCrop()">
+                      Crop
+                    </button>
+                    <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedPlacedImage()">
                       Remove
                     </button>
                   </div>
