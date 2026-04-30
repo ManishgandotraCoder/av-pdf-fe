@@ -542,33 +542,17 @@
 
         <div class="keySlots" aria-label="Key page slots">
           <div class="keySlots__group">
-            <button
-              type="button"
-              class="keySlot"
-              [class.isActive]="activePageIndex() === 0"
-              [disabled]="!isKeySlotPageAvailable(0)"
-              (click)="setActivePage(0)"
-            >
-              W/
-            </button>
-            <button
-              type="button"
-              class="keySlot"
-              [class.isActive]="activePageIndex() === 1"
-              [disabled]="!isKeySlotPageAvailable(1)"
-              (click)="setActivePage(1)"
-            >
-              Project
-            </button>
-            <button
-              type="button"
-              class="keySlot"
-              [class.isActive]="activePageIndex() === 2"
-              [disabled]="!isKeySlotPageAvailable(2)"
-              (click)="setActivePage(2)"
-            >
-              Gut
-            </button>
+            @for (slot of fixedKeySlotsForNav; track slot.id; let idx = $index) {
+              <button
+                type="button"
+                class="keySlot"
+                [class.isActive]="activePageIndex() === idx"
+                [disabled]="!isKeySlotPageAvailable(idx)"
+                (click)="setActivePage(idx)"
+              >
+                {{ slot.title }}
+              </button>
+            }
           </div>
 
           @if (customKeySlots().length > 0) {
@@ -579,9 +563,9 @@
             @for (slot of customKeySlots(); track slot.id; let i = $index) {
               <div
                 class="keySlotRow"
-                [class.isActive]="activePageIndex() === 3 + i"
-                (click)="setActivePage(3 + i)"
-                (keydown.enter)="setActivePage(3 + i)"
+                [class.isActive]="activePageIndex() === fixedKeySlotsForNav.length + i"
+                (click)="setActivePage(fixedKeySlotsForNav.length + i)"
+                (keydown.enter)="setActivePage(fixedKeySlotsForNav.length + i)"
                 role="button"
                 tabindex="0"
                 (dragover)="onCustomKeySlotDragOver($event)"
@@ -590,9 +574,9 @@
                 <button
                   type="button"
                   class="keySlot keySlot--custom"
-                  [disabled]="!isKeySlotPageAvailable(3 + i)"
-                  [class.isActive]="activePageIndex() === 3 + i"
-                  (click)="setActivePage(3 + i); $event.stopPropagation()"
+                  [disabled]="!isKeySlotPageAvailable(fixedKeySlotsForNav.length + i)"
+                  [class.isActive]="activePageIndex() === fixedKeySlotsForNav.length + i"
+                  (click)="setActivePage(fixedKeySlotsForNav.length + i); $event.stopPropagation()"
                 >
                   {{ slot.title }}
                 </button>
@@ -691,7 +675,7 @@
                       <div class="pageItem__thumbHint">No preview</div>
                     }
                     <div class="pageItem__nameOverlay">
-                      <span class="pageItem__nameText">{{ sidebarSectionLabelForPage(pageIndex) }}</span>
+                      <span class="pageItem__nameText">{{ sidebarSectionDisplayLine(pageIndex) }}</span>
                     </div>
                   </div>
                 </div>
@@ -1076,6 +1060,22 @@
               <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="rightbarTabs__btn"
+            [class.rightbarTabs__btnActive]="rightbarTab() === 'history'"
+            [attr.aria-selected]="rightbarTab() === 'history'"
+            aria-label="History"
+            title="History"
+            (click)="setRightbarTab('history')"
+          >
+            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M20 12a8 8 0 1 1-3-6.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
           @if (!isCreateFlow()) {
             <button
               type="button"
@@ -1396,25 +1396,112 @@
                 <div class="pageSettings__hint">Applies across all slides; existing per-block edits are preserved.</div>
 
                 <div class="pageSettings__sectionTitle">Heading</div>
-                <input class="pageSettings__input" [ngModel]="globalTypography().heading.fontFamily" (ngModelChange)="updateGlobalTypography('heading', { fontFamily: $any($event) })" placeholder="Font family" />
-                <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().heading.size" (ngModelChange)="updateGlobalTypography('heading', { size: +$event || 16 })" placeholder="Font size" />
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().heading.bold" (change)="updateGlobalTypography('heading', { bold: $any($event.target).checked })" /> Bold</label>
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().heading.italic" (change)="updateGlobalTypography('heading', { italic: $any($event.target).checked })" /> Italic</label>
-                <input class="pageSettings__input" [ngModel]="globalTypography().heading.color" (ngModelChange)="updateGlobalTypography('heading', { color: $event })" placeholder="Color (#hex)" />
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-heading-font">Font</label>
+                  <select id="global-typo-heading-font" class="pageSettings__select" [ngModel]="globalTypography().heading.fontFamily" (ngModelChange)="updateGlobalTypography('heading', { fontFamily: $event })">
+                    @for (opt of fontFamilyOptions; track opt.value) {
+                      <option [ngValue]="opt.value">{{ opt.label }}</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-heading-size">Size</label>
+                  <select id="global-typo-heading-size" class="pageSettings__select" [ngModel]="globalTypography().heading.size" (ngModelChange)="updateGlobalTypography('heading', { size: $event })">
+                    @for (sz of fontSizeOptionsForGlobalTypography(globalTypography().heading.size); track sz) {
+                      <option [ngValue]="sz">{{ sz }} pt</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-heading-weight">Weight</label>
+                  <select id="global-typo-heading-weight" class="pageSettings__select" [ngModel]="globalTypography().heading.bold" (ngModelChange)="updateGlobalTypography('heading', { bold: $event })">
+                    <option [ngValue]="false">Normal</option>
+                    <option [ngValue]="true">Bold</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-heading-variant">Variant</label>
+                  <select id="global-typo-heading-variant" class="pageSettings__select" [ngModel]="globalTypography().heading.italic" (ngModelChange)="updateGlobalTypography('heading', { italic: $event })">
+                    <option [ngValue]="false">Regular</option>
+                    <option [ngValue]="true">Italic</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-heading-color">Color</label>
+                  <input id="global-typo-heading-color" class="pageSettings__input" [ngModel]="globalTypography().heading.color" (ngModelChange)="updateGlobalTypography('heading', { color: $event })" placeholder="#hex" />
+                </div>
 
                 <div class="pageSettings__sectionTitle">Subheading</div>
-                <input class="pageSettings__input" [ngModel]="globalTypography().subheading.fontFamily" (ngModelChange)="updateGlobalTypography('subheading', { fontFamily: $any($event) })" placeholder="Font family" />
-                <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().subheading.size" (ngModelChange)="updateGlobalTypography('subheading', { size: +$event || 16 })" placeholder="Font size" />
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().subheading.bold" (change)="updateGlobalTypography('subheading', { bold: $any($event.target).checked })" /> Bold</label>
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().subheading.italic" (change)="updateGlobalTypography('subheading', { italic: $any($event.target).checked })" /> Italic</label>
-                <input class="pageSettings__input" [ngModel]="globalTypography().subheading.color" (ngModelChange)="updateGlobalTypography('subheading', { color: $event })" placeholder="Color (#hex)" />
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-subheading-font">Font</label>
+                  <select id="global-typo-subheading-font" class="pageSettings__select" [ngModel]="globalTypography().subheading.fontFamily" (ngModelChange)="updateGlobalTypography('subheading', { fontFamily: $event })">
+                    @for (opt of fontFamilyOptions; track opt.value) {
+                      <option [ngValue]="opt.value">{{ opt.label }}</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-subheading-size">Size</label>
+                  <select id="global-typo-subheading-size" class="pageSettings__select" [ngModel]="globalTypography().subheading.size" (ngModelChange)="updateGlobalTypography('subheading', { size: $event })">
+                    @for (sz of fontSizeOptionsForGlobalTypography(globalTypography().subheading.size); track sz) {
+                      <option [ngValue]="sz">{{ sz }} pt</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-subheading-weight">Weight</label>
+                  <select id="global-typo-subheading-weight" class="pageSettings__select" [ngModel]="globalTypography().subheading.bold" (ngModelChange)="updateGlobalTypography('subheading', { bold: $event })">
+                    <option [ngValue]="false">Normal</option>
+                    <option [ngValue]="true">Bold</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-subheading-variant">Variant</label>
+                  <select id="global-typo-subheading-variant" class="pageSettings__select" [ngModel]="globalTypography().subheading.italic" (ngModelChange)="updateGlobalTypography('subheading', { italic: $event })">
+                    <option [ngValue]="false">Regular</option>
+                    <option [ngValue]="true">Italic</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-subheading-color">Color</label>
+                  <input id="global-typo-subheading-color" class="pageSettings__input" [ngModel]="globalTypography().subheading.color" (ngModelChange)="updateGlobalTypography('subheading', { color: $event })" placeholder="#hex" />
+                </div>
 
                 <div class="pageSettings__sectionTitle">Body</div>
-                <input class="pageSettings__input" [ngModel]="globalTypography().body.fontFamily" (ngModelChange)="updateGlobalTypography('body', { fontFamily: $any($event) })" placeholder="Font family" />
-                <input class="pageSettings__input" type="number" min="8" [ngModel]="globalTypography().body.size" (ngModelChange)="updateGlobalTypography('body', { size: +$event || 16 })" placeholder="Font size" />
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().body.bold" (change)="updateGlobalTypography('body', { bold: $any($event.target).checked })" /> Bold</label>
-                <label class="pageSettings__check"><input type="checkbox" [checked]="globalTypography().body.italic" (change)="updateGlobalTypography('body', { italic: $any($event.target).checked })" /> Italic</label>
-                <input class="pageSettings__input" [ngModel]="globalTypography().body.color" (ngModelChange)="updateGlobalTypography('body', { color: $event })" placeholder="Color (#hex)" />
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-body-font">Font</label>
+                  <select id="global-typo-body-font" class="pageSettings__select" [ngModel]="globalTypography().body.fontFamily" (ngModelChange)="updateGlobalTypography('body', { fontFamily: $event })">
+                    @for (opt of fontFamilyOptions; track opt.value) {
+                      <option [ngValue]="opt.value">{{ opt.label }}</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-body-size">Size</label>
+                  <select id="global-typo-body-size" class="pageSettings__select" [ngModel]="globalTypography().body.size" (ngModelChange)="updateGlobalTypography('body', { size: $event })">
+                    @for (sz of fontSizeOptionsForGlobalTypography(globalTypography().body.size); track sz) {
+                      <option [ngValue]="sz">{{ sz }} pt</option>
+                    }
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-body-weight">Weight</label>
+                  <select id="global-typo-body-weight" class="pageSettings__select" [ngModel]="globalTypography().body.bold" (ngModelChange)="updateGlobalTypography('body', { bold: $event })">
+                    <option [ngValue]="false">Normal</option>
+                    <option [ngValue]="true">Bold</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-body-variant">Variant</label>
+                  <select id="global-typo-body-variant" class="pageSettings__select" [ngModel]="globalTypography().body.italic" (ngModelChange)="updateGlobalTypography('body', { italic: $event })">
+                    <option [ngValue]="false">Regular</option>
+                    <option [ngValue]="true">Italic</option>
+                  </select>
+                </div>
+                <div class="pageSettings__field">
+                  <label class="pageSettings__label" for="global-typo-body-color">Color</label>
+                  <input id="global-typo-body-color" class="pageSettings__input" [ngModel]="globalTypography().body.color" (ngModelChange)="updateGlobalTypography('body', { color: $event })" placeholder="#hex" />
+                </div>
               </div>
 
               <div class="pageSettings__section">
@@ -1480,6 +1567,36 @@
                         Restore (disabled)
                       </button>
                     </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        @if (rightbarTab() === 'history') {
+          <div class="rightbar__panel rightbar__panelHistory" role="tabpanel" aria-label="Edit history">
+            <div class="historyPanelActions">
+              <button type="button" class="versionHistoryCard__btn" [disabled]="!canUndo()" (click)="undo()">Undo</button>
+              <button type="button" class="versionHistoryCard__btn" [disabled]="!canRedo()" (click)="redo()">Redo</button>
+            </div>
+            <button
+              type="button"
+              class="versionHistoryCard__btn historyPanel__clearBtn"
+              [disabled]="pageCount() === 0 || isLoading() || isSaving()"
+              (click)="clearAllEditsFromHistoryPanel($event)"
+            >
+              Clear All Edits
+            </button>
+
+            @if (editHistoryView().length === 0) {
+              <p class="rightbarAssetsHint">No edit actions yet. Your canvas changes will appear here.</p>
+            } @else {
+              <div class="historyEventList">
+                @for (item of editHistoryView(); track item.id) {
+                  <div class="historyEventCard">
+                    <div class="historyEventCard__label">{{ item.label }}</div>
+                    <div class="historyEventCard__meta">{{ formatHistoryTime(item.at) }}</div>
                   </div>
                 }
               </div>

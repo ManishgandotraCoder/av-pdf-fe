@@ -836,6 +836,47 @@
   padding: 4px 2px 8px;
 }
 
+.rightbar__panelHistory {
+  padding: 4px 2px 8px;
+}
+
+.historyPanelActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.historyPanel__clearBtn {
+  width: 100%;
+  margin-bottom: 10px;
+  border-color: rgba(185, 28, 28, 0.25);
+  color: rgba(127, 29, 29, 0.9);
+}
+
+.historyEventList {
+  display: grid;
+  gap: 8px;
+}
+
+.historyEventCard {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 8px;
+}
+
+.historyEventCard__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.9);
+}
+
+.historyEventCard__meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
 .versionHistoryList {
   display: grid;
   gap: 8px;
@@ -1927,10 +1968,13 @@
   font-size: 11px;
   font-weight: 650;
   line-height: 1.25;
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .pageItem__thumb.isPlaceholder {
@@ -2280,6 +2324,17 @@
   font-size: 12px;
   font-weight: 700;
   color: rgba(15, 23, 42, 0.82);
+}
+
+.pageSettings__field {
+  display: grid;
+  gap: 4px;
+}
+
+.pageSettings__label {
+  font-size: 11px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.58);
 }
 
 .pageSettings__check {

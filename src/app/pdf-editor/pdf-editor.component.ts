@@ -320,6 +320,13 @@ type DetectedBlock = {
 };
 
 type SidebarSectionType = 'section' | 'imageHeader';
+type EditHistoryEventKind = 'apply' | 'undo' | 'redo' | 'clear';
+type EditHistoryEvent = {
+  id: string;
+  kind: EditHistoryEventKind;
+  label: string;
+  at: number;
+};
 
 type KeySlotKind = 'fixed' | 'custom';
 type KeySlot = { id: string; title: string; kind: KeySlotKind };
@@ -480,9 +487,24 @@ export class PdfEditorComponent implements AfterViewInit {
   private renderAllPagesEpoch = 0;
   private readonly renderTaskByPage = new Map<number, any>();
 
+  /** Cancel every tracked pdf.js render before swapping bytes/doc so stale tasks cannot paint wrong pixels. */
+  private cancelAllPdfRenderTasks(): void {
+    for (const task of this.renderTaskByPage.values()) {
+      try {
+        task?.cancel?.();
+      } catch {
+        // ignore
+      }
+    }
+    this.renderTaskByPage.clear();
+  }
+
   private readonly undoStack: Record<number, PageEdits>[] = [];
   private readonly redoStack: Record<number, PageEdits>[] = [];
+  private readonly undoLabels: string[] = [];
+  private readonly redoLabels: string[] = [];
   private readonly maxHistoryEntries = 200;
+  protected readonly editHistoryEvents = signal<EditHistoryEvent[]>([]);
 
   @ViewChildren('pageCanvas') private readonly pageCanvases?: QueryList<
     ElementRef<HTMLCanvasElement>
@@ -515,10 +537,15 @@ export class PdfEditorComponent implements AfterViewInit {
 
   /** Fixed key-page slots always present in the left navigation. */
   private static readonly fixedKeySlots = [
-    { id: 'with', title: 'W/', kind: 'fixed' as const },
-    { id: 'project', title: 'Project', kind: 'fixed' as const },
-    { id: 'gut', title: 'Gut', kind: 'fixed' as const }
+    // { id: 'with', title: 'W/', kind: 'fixed' as const },
+    // { id: 'project', title: 'Project', kind: 'fixed' as const },
+    // { id: 'gut', title: 'Gut', kind: 'fixed' as const },
+    // { id: 'cover_letter', title: 'Cover Letter', kind: 'fixed' as const },
+    // { id: 'acceptance', title: 'Acceptance', kind: 'fixed' as const }
   ];
+
+  /** Instance alias for templates (section pills + custom slot index base). */
+  protected readonly fixedKeySlotsForNav = PdfEditorComponent.fixedKeySlots;
 
   protected readonly customKeySlots = signal<KeySlot[]>([]);
   protected readonly keySlotDragFromCustomIndex = signal<number | null>(null);
@@ -526,7 +553,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   /** Right inspector: tooling vs library (250px rail). */
 
-  protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions'>('options');
+  protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions' | 'history'>('options');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
   protected readonly rightbarLibraryCollapsed = signal(false);
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
@@ -768,6 +795,10 @@ export class PdfEditorComponent implements AfterViewInit {
       this.docId.set(id);
       this.autoVersionSnapshotReady = false;
       this.lastAutoVersionSnapshot = '';
+      this.shareUrl.set('');
+      this.shareUsers.set([]);
+      this.shareAccessType.set('restricted');
+      this.lastShareRecord.set(null);
       if (id) {
         void this.loadFromApi(id);
         void this.loadProposalVersions(id);
@@ -776,13 +807,12 @@ export class PdfEditorComponent implements AfterViewInit {
       } else {
         this.proposalDetails.set(null);
         this.rejection.set(null);
-        this.lastShareRecord.set(null);
       }
     });
 
     effect(() => {
       const currentTab = this.rightbarTab();
-      const allowed = ['options', 'settings', 'typography', 'assets', 'versions'] as const;
+      const allowed = ['options', 'settings', 'typography', 'assets', 'versions', 'history'] as const;
       if (!allowed.includes(currentTab as any)) {
         this.rightbarTab.set('options');
       }
@@ -843,7 +873,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly zoomOptions = [0.25, 0.5, 0.75, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4] as const;
   protected readonly fontSizeOptions = [
-    8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48, 56, 64, 72
+    8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 56, 64, 72
   ] as const;
   protected readonly fontFamilyOptions: { label: string; value: FontFamily }[] = [
     { label: 'Helvetica', value: 'helvetica' },
@@ -853,6 +883,13 @@ export class PdfEditorComponent implements AfterViewInit {
     { label: 'Montserrat', value: 'montserrat' },
     { label: 'Helvetica Bold (subset)', value: 'abcdee_helvetica_bold' }
   ];
+
+  /** Preset sizes plus current value when it is not in the list (e.g. legacy documents). */
+  protected fontSizeOptionsForGlobalTypography(size: number): number[] {
+    const base = this.fontSizeOptions as readonly number[];
+    if (base.includes(size)) return [...base];
+    return [...base, size].sort((a, b) => a - b);
+  }
 
   private normalizeZoom(value: number): number {
     // Round to avoid precision artifacts from repeated +/- step operations.
@@ -1059,6 +1096,14 @@ export class PdfEditorComponent implements AfterViewInit {
     return meta ? meta.title : `Page ${pageIndex + 1}`;
   }
 
+  /** Slide thumbnail overlay: slide index plus section name (or `Page n` when unknown). */
+  protected sidebarSectionDisplayLine(pageIndex: number): string {
+    const n = pageIndex + 1;
+    const label = this.sidebarSectionLabelForPage(pageIndex);
+    if (label === `Page ${n}`) return label;
+    return `${n}. ${label}`;
+  }
+
   protected sidebarSectionTypeForPage(pageIndex: number): SidebarSectionType | null {
     return this.sidebarSectionByPage()[pageIndex]?.type ?? null;
   }
@@ -1073,16 +1118,56 @@ export class PdfEditorComponent implements AfterViewInit {
     return previous.title !== current.title || previous.type !== current.type;
   }
 
-  protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions') {
+  protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions' | 'history') {
     this.rightbarTab.set(tab);
+  }
+
+  protected editHistoryView() {
+    return this.editHistoryEvents().slice().reverse();
+  }
+
+  protected clearAllEditsFromHistoryPanel(ev?: Event) {
+    ev?.stopPropagation();
+    this.clearEdits();
+  }
+
+  protected formatHistoryTime(ts: number): string {
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return '';
+    }
   }
 
   protected formatVersionTimestamp(ts: number): string {
     return new Date(ts).toLocaleString();
   }
 
-  protected openSharePanel() {
+  protected async openSharePanel() {
     this.sharePanelOpen.set(true);
+    this.shareEmailInput.set('');
+    const id = this.docId();
+    if (!id) return;
+    this.errorText.set(null);
+    try {
+      const rec = await this.api.getShareForProposal(id);
+      if (rec?.linkToken) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        this.shareAccessType.set(rec.accessType);
+        this.shareUsers.set(rec.users ?? []);
+        this.shareUrl.set(`${origin}/edit/${encodeURIComponent(id)}?share=${encodeURIComponent(rec.linkToken)}`);
+        this.lastShareRecord.set({
+          sharedBy: rec.sharedBy ?? '',
+          sharedAt: Number(rec.updatedAt ?? rec.createdAt ?? Date.now())
+        });
+      } else {
+        this.shareUrl.set('');
+        this.shareUsers.set([]);
+        this.lastShareRecord.set(null);
+      }
+    } catch {
+      // Panel stays usable; link generation and add-user still attempt API calls.
+    }
   }
 
   protected closeSharePanel() {
@@ -1134,6 +1219,11 @@ export class PdfEditorComponent implements AfterViewInit {
       });
       this.shareUsers.set(updated.users ?? []);
       this.shareEmailInput.set('');
+      if (updated.linkToken && typeof window !== 'undefined') {
+        this.shareUrl.set(
+          `${window.location.origin}/edit/${encodeURIComponent(proposalId)}?share=${encodeURIComponent(updated.linkToken)}`
+        );
+      }
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to add share user.');
     } finally {
@@ -2543,6 +2633,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.pageFurniture.set(clonePageFurniture(DEFAULT_PAGE_FURNITURE));
       this.syncDynamicFieldDrafts(this.pageFurniture());
       this.resetHistory();
+      this.ensureKeySlotSectionOverrides();
       await this.waitForActiveCanvasReady(1200);
       await this.renderActivePage();
       this.generateNearThumbnailsThenRest(5);
@@ -2701,8 +2792,21 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected clearEdits() {
-    this.beginHistoryStep();
+    this.beginHistoryStep('Clear all edits');
+    for (const url of this.videoObjectUrlByWidgetId.values()) {
+      if (!url.startsWith('blob:')) continue;
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // ignore
+      }
+    }
+    this.videoObjectUrlByWidgetId.clear();
     this.editsByPage.set({});
+    this.widgetsByPage.set({});
+    this.selectedWidgetId.set(null);
+    this.editingWidgetId.set(null);
+    this.replaceMediaTarget.set(null);
     this.pendingVideoWidgetDrop = null;
     this.selectedPlacedImageId.set(null);
     this.imageCropSession.set(null);
@@ -2712,6 +2816,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.restoreBaseFromSnapshot(pageIndex);
     }
     this.redrawAllOverlays();
+    this.pushEditHistoryEvent('clear', 'Cleared all edits');
   }
 
   protected canUndo() {
@@ -2745,18 +2850,24 @@ export class PdfEditorComponent implements AfterViewInit {
   protected undo() {
     const prev = this.undoStack.pop();
     if (!prev) return;
+    const action = this.undoLabels.pop() ?? 'Canvas edit';
     const cur = this.cloneEdits(this.editsByPage());
     this.redoStack.push(cur);
+    this.redoLabels.push(action);
     this.editsByPage.set(prev);
+    this.pushEditHistoryEvent('undo', `Undo: ${action}`);
     this.afterHistoryRestore();
   }
 
   protected redo() {
     const next = this.redoStack.pop();
     if (!next) return;
+    const action = this.redoLabels.pop() ?? 'Canvas edit';
     const cur = this.cloneEdits(this.editsByPage());
     this.undoStack.push(cur);
+    this.undoLabels.push(action);
     this.editsByPage.set(next);
+    this.pushEditHistoryEvent('redo', `Redo: ${action}`);
     this.afterHistoryRestore();
   }
 
@@ -2820,6 +2931,9 @@ export class PdfEditorComponent implements AfterViewInit {
   private resetHistory() {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
+    this.undoLabels.length = 0;
+    this.redoLabels.length = 0;
+    this.editHistoryEvents.set([]);
   }
 
   protected setActivePage(pageIndex: number) {
@@ -2947,14 +3061,40 @@ export class PdfEditorComponent implements AfterViewInit {
     // Single-page mode: nothing to scroll; page switching is handled via `activePageIndex`.
   }
 
-  private beginHistoryStep() {
+  private beginHistoryStep(label?: string) {
+    const action =
+      label ??
+      (this.tool() === 'pen'
+        ? 'Pen stroke'
+        : this.tool() === 'text'
+        ? 'Text edit'
+        : this.tool() === 'image'
+        ? 'Image edit'
+        : 'Canvas edit');
     // Save the current state so Undo can restore it.
     const snap = this.cloneEdits(this.editsByPage());
     this.undoStack.push(snap);
+    this.undoLabels.push(action);
     if (this.undoStack.length > this.maxHistoryEntries) {
       this.undoStack.splice(0, this.undoStack.length - this.maxHistoryEntries);
+      this.undoLabels.splice(0, this.undoLabels.length - this.maxHistoryEntries);
     }
     this.redoStack.length = 0;
+    this.redoLabels.length = 0;
+    this.pushEditHistoryEvent('apply', action);
+  }
+
+  private pushEditHistoryEvent(kind: EditHistoryEventKind, label: string) {
+    const event: EditHistoryEvent = {
+      id: `he_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`,
+      kind,
+      label,
+      at: Date.now()
+    };
+    this.editHistoryEvents.update((prev) => {
+      const next = [...prev, event];
+      return next.length > this.maxHistoryEntries ? next.slice(next.length - this.maxHistoryEntries) : next;
+    });
   }
 
   private cloneEdits(edits: Record<number, PageEdits>) {
@@ -3831,7 +3971,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (epoch !== this.renderAllPagesEpoch) return;
     this.isPageRendering.set(true);
     try {
-      await this.renderPage(pageIndex);
+      await this.renderPage(pageIndex, epoch);
       this.redrawOverlay(pageIndex);
     } catch (e) {
       // pdf.js throws cancellation exceptions when a render is superseded by a newer one.
@@ -3855,7 +3995,7 @@ export class PdfEditorComponent implements AfterViewInit {
     );
   }
 
-  private async renderPage(pageIndex: number) {
+  private async renderPage(pageIndex: number, renderEpoch: number) {
     if (!this.pdfDoc) return;
 
     const { base, overlay } = this.getCanvasPair(pageIndex);
@@ -3910,6 +4050,8 @@ export class PdfEditorComponent implements AfterViewInit {
         this.renderTaskByPage.delete(pageIndex);
       }
     }
+
+    if (renderEpoch !== this.renderAllPagesEpoch) return;
 
     // Snapshot the freshly rendered base (for scanned-PDF inpainting, we must start from original pixels).
     // Use device-pixel coordinates (putImageData ignores transforms).
@@ -4626,6 +4768,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
+      this.cancelAllPdfRenderTasks();
+      ++this.renderAllPagesEpoch;
       const srcPdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
       const outPdf = await PDFDocument.create();
       const copied = await outPdf.copyPages(srcPdf, reorder);
@@ -4671,7 +4815,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
       this.baseSnapshotByPage.clear();
-      this.renderTaskByPage.clear();
+      this.cancelAllPdfRenderTasks();
       this.resetHistory();
 
       this.activePageIndex.set(this.activePageIndexAfterSlideReorder(prevActive, reorder));
@@ -4734,6 +4878,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
+      this.cancelAllPdfRenderTasks();
+      ++this.renderAllPagesEpoch;
       const srcPdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
       const outPdf = await PDFDocument.create();
       const copied = await outPdf.copyPages(srcPdf, reorder);
@@ -4777,7 +4923,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
       this.baseSnapshotByPage.clear();
-      this.renderTaskByPage.clear();
+      this.cancelAllPdfRenderTasks();
       this.resetHistory();
 
       this.activePageIndex.set(this.activePageIndexAfterSlideReorder(prevActive, reorder));
@@ -5035,6 +5181,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
     try {
       this.assertReadablePdfHeader(this.pdfBytes);
+      this.cancelAllPdfRenderTasks();
+      ++this.renderAllPagesEpoch;
       // pdf.lib should always load from a clean copy; avoid any detached/aliased buffer edge cases.
       const pdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
       await mutate(pdf);
@@ -5083,7 +5231,7 @@ export class PdfEditorComponent implements AfterViewInit {
         if (fromRot !== undefined) this.pageRotateByPage.set(remap.to, fromRot);
       }
 
-      this.renderTaskByPage.clear();
+      this.cancelAllPdfRenderTasks();
       this.resetHistory();
 
       try {
@@ -5196,6 +5344,44 @@ export class PdfEditorComponent implements AfterViewInit {
     return compact.length <= 72 ? compact : `${compact.slice(0, 69).trimEnd()}...`;
   }
 
+  /** True when the string is only an outline index (no real title words). */
+  private isSidebarTitleTrivial(text: string): boolean {
+    const t = text.replace(/\s+/g, ' ').trim();
+    if (!t) return true;
+    if (/^\d+([.)]\d+)*\.?$/.test(t)) return true;
+    if (/^[ivxlcdm]{1,8}\.?$/i.test(t)) return true;
+    return /^[\d.)\s]+$/.test(t) && /\d/.test(t);
+  }
+
+  /** Remove leading "1.", "Section 2", bullets, or a lone outline token so we can read the real title. */
+  private stripSidebarEnumeratingPrefix(text: string): string {
+    let t = text.replace(/\s+/g, ' ').trim();
+    const before = t;
+    t = t
+      .replace(/^\s*(?:section|part|chapter)\s+\d+(?:[.:)]\d+)*\s*/i, '')
+      .replace(/^\s*\d+(?:[.)]\d+)*[.)]\s+/, '')
+      .replace(/^\s*[-•]\s+/, '')
+      .trim();
+    if (t !== before) return t;
+    if (/^\s*\d+(?:[.)]\d+)*[.)]?\s*$/.test(t)) return '';
+    return t;
+  }
+
+  private coalesceSidebarTitleFromBlockText(raw: string): string {
+    const t = this.sanitizeSidebarTitle(raw);
+    if (!t) return '';
+
+    const stripped = this.stripSidebarEnumeratingPrefix(t);
+    let body: string;
+    if (stripped !== t) {
+      body = stripped ? this.sanitizeSidebarTitle(stripped) : '';
+    } else {
+      body = t;
+    }
+    if (!body || this.isSidebarTitleTrivial(body)) return '';
+    return body;
+  }
+
   private resolveSidebarSectionMeta(blocks: DetectedBlock[]): { title: string; type: SidebarSectionType } | null {
     if (blocks.length === 0) return null;
 
@@ -5203,19 +5389,24 @@ export class PdfEditorComponent implements AfterViewInit {
       .filter((b) => !!this.sanitizeSidebarTitle(b.text))
       .sort((a, b) => (a.y - b.y) || (b.fontSize - a.fontSize));
 
-    const heading = headingLike.find((b) => b.kind === 'heading') ?? headingLike[0] ?? null;
-    if (!heading) return null;
+    const preferHeadings = [
+      ...headingLike.filter((b) => b.kind === 'heading'),
+      ...headingLike.filter((b) => b.kind !== 'heading')
+    ];
 
-    const title = this.sanitizeSidebarTitle(heading.text);
-    if (!title) return null;
+    for (const cand of preferHeadings) {
+      const title = this.coalesceSidebarTitleFromBlockText(cand.text);
+      if (!title) continue;
 
-    const nearTop = heading.y < 180;
-    const hasOnlyFewTextBlocks = headingLike.length <= 2;
-    const shortHeadline = title.length <= 60;
-    const type: SidebarSectionType =
-      nearTop && hasOnlyFewTextBlocks && shortHeadline ? 'imageHeader' : 'section';
+      const nearTop = cand.y < 180;
+      const hasOnlyFewTextBlocks = headingLike.length <= 2;
+      const shortHeadline = title.length <= 60;
+      const type: SidebarSectionType =
+        nearTop && hasOnlyFewTextBlocks && shortHeadline ? 'imageHeader' : 'section';
 
-    return { title, type };
+      return { title, type };
+    }
+    return null;
   }
 
   private async primeSidebarSectionDetection() {

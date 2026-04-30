@@ -72,6 +72,8 @@ export type GenerateShareLinkBody = {
     id: string;
     name: string;
   } | null;
+  /** Origin for absolute share URLs (e.g. https://app.example.com). */
+  linkBaseUrl?: string;
 };
 
 export type RejectProposalBody = {
@@ -290,16 +292,32 @@ export class PdfApiService {
   }
 
   async generateShareLink(body: GenerateShareLinkBody): Promise<ShareRecord & { url: string }> {
+    const payload: GenerateShareLinkBody = {
+      ...body,
+      ...(typeof window !== 'undefined' && window.location?.origin
+        ? { linkBaseUrl: window.location.origin }
+        : {})
+    };
     const res = await fetch(this.apiUrl('/api/share/generate-link'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const msg = (await this.readErrorMessage(res)) ?? 'Failed to generate share link.';
       throw new Error(msg);
     }
     return (await res.json()) as ShareRecord & { url: string };
+  }
+
+  async getShareForProposal(proposalId: string): Promise<ShareRecord | null> {
+    const res = await fetch(this.apiUrl(`/api/share/by-proposal/${encodeURIComponent(proposalId)}`));
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load share settings.';
+      throw new Error(msg);
+    }
+    const data = (await res.json()) as ShareRecord | null;
+    return data;
   }
 
   async addShareUser(body: AddShareUserBody): Promise<ShareRecord> {
