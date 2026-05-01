@@ -88,6 +88,26 @@ export type AddShareUserBody = {
   role: ShareRole;
 };
 
+/** Categories returned by GET /api/crm/asset-library (proxied from CRM when configured). */
+export type CrmAssetLibraryCategory = { id: string; name: string };
+
+/** Normalized row for the editor Assets Library panel. */
+export type CrmAssetLibraryItem = {
+  id: string;
+  name: string;
+  kind: 'image' | 'video' | 'template' | 'other';
+  categoryId?: string;
+  url?: string;
+  previewUrl?: string;
+  mimeType?: string;
+};
+
+export type CrmAssetLibraryResponse = {
+  crmConfigured: boolean;
+  categories: CrmAssetLibraryCategory[];
+  assets: CrmAssetLibraryItem[];
+};
+
 export type PageFurniture = {
   proposalTitle: string;
   clientName: string;
@@ -399,6 +419,16 @@ export class PdfApiService {
       const msg = (await this.readErrorMessage(res)) ?? 'Failed to save page furniture.';
       throw new Error(msg);
     }
+  }
+
+  /** Loads CRM-backed asset library metadata (empty when CRM is not configured on the backend). */
+  async getCrmAssetLibrary(): Promise<CrmAssetLibraryResponse> {
+    const res = await fetch(this.apiUrl('/api/crm/asset-library'));
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load asset library.';
+      throw new Error(msg);
+    }
+    return (await res.json()) as CrmAssetLibraryResponse;
   }
 }
 

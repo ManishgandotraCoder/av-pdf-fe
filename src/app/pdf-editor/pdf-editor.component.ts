@@ -29,6 +29,8 @@ import {
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import {
   PdfApiService,
+  type CrmAssetLibraryCategory,
+  type CrmAssetLibraryItem,
   type ProposalDetails,
   type ProposalRejection,
   type ProposalVersion,
@@ -93,14 +95,21 @@ type InsertWidgetPending = {
 
 type ReusableAsset = {
   id: string;
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'template';
   label: string;
-  source: 'upload' | 'url';
+  source: 'upload' | 'url' | 'crm';
   imageSrc?: string;
   videoUrl?: string;
   videoFile?: File;
   createdAt: number;
+  categoryId?: string;
+  categoryLabel?: string;
+  crmAssetId?: string;
 };
+
+type AssetLibraryRow =
+  | { rowKind: 'local'; asset: ReusableAsset }
+  | { rowKind: 'crm'; item: CrmAssetLibraryItem };
 
 type PersistedMediaWidget = {
   id: string;
@@ -579,11 +588,44 @@ export class PdfEditorComponent implements AfterViewInit {
 
   /** Right inspector: tooling vs library (250px rail). */
 
-  protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions' | 'history'>('options');
+  protected readonly rightbarTab = signal<'options' | 'settings' | 'typography' | 'assets' | 'versions'>('options');
+  /** Top-level panel: insert tools vs CRM asset library (matches studio sidebar mockup). */
+  protected readonly rightbarPrimaryTab = signal<'elements' | 'assets'>('elements');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
-  protected readonly rightbarLibraryCollapsed = signal(false);
+  protected readonly rightbarFrequentCollapsed = signal(false);
+  protected readonly rightbarLayoutCollapsed = signal(false);
+  protected readonly rightbarBaseCollapsed = signal(false);
   protected readonly reusableAssets = signal<ReusableAsset[]>([]);
+  protected readonly assetLibrarySearch = signal('');
+  protected readonly assetLibraryCategoryId = signal<string | null>(null);
+  protected readonly crmAssetCategories = signal<CrmAssetLibraryCategory[]>([]);
+  protected readonly crmAssetItems = signal<CrmAssetLibraryItem[]>([]);
+  protected readonly assetLibraryLoading = signal(false);
+  protected readonly assetLibraryError = signal<string | null>(null);
+  protected readonly crmLibraryConfigured = signal(false);
   protected readonly replaceMediaTarget = signal<{ pageIndex: number; widgetId: string; kind: 'image' | 'video' } | null>(null);
+
+  private static readonly reusableAssetsStorageKey = 'avyro-editor-reusable-assets:v1';
+  private static readonly maxPersistedReusableAssets = 64;
+  private crmAssetFetchSeq = 0;
+
+  protected readonly assetLibraryRows = computed(() => {
+    const q = this.assetLibrarySearch().trim().toLowerCase();
+    const cat = this.assetLibraryCategoryId();
+    const crmItems = this.crmAssetItems();
+    const locals = this.reusableAssets();
+    const rows: AssetLibraryRow[] = [];
+    for (const asset of locals) {
+      if (q && !asset.label.toLowerCase().includes(q)) continue;
+      rows.push({ rowKind: 'local', asset });
+    }
+    for (const item of crmItems) {
+      if (cat && item.categoryId !== cat) continue;
+      if (q && !item.name.toLowerCase().includes(q)) continue;
+      rows.push({ rowKind: 'crm', item });
+    }
+    return rows;
+  });
 
   /**
    * After picking a file, erase the embedded PDF region then place the new asset (Shift+click on detected media).
@@ -849,6 +891,8 @@ export class PdfEditorComponent implements AfterViewInit {
     // new URL(import.meta.url) resolves to /pdfjs-dist/... which is covered by SPA rewrites unless the file exists in dist.
     GlobalWorkerOptions.workerSrc = '/pdfjs-dist/build/pdf.worker.min.mjs';
 
+    this.hydrateReusableAssetsFromStorage();
+
     effect(() => {
       // Re-render pages when zoom changes.
       const _ = this.scale();
@@ -891,8 +935,20 @@ export class PdfEditorComponent implements AfterViewInit {
 
     effect(() => {
       const currentTab = this.rightbarTab();
-      const allowed = ['options', 'settings', 'typography', 'assets', 'versions', 'history'] as const;
+      const allowed = ['options', 'settings', 'typography', 'assets', 'versions'] as const;
       if (!allowed.includes(currentTab as any)) {
+        this.rightbarTab.set('options');
+      }
+    });
+
+    effect(() => {
+      const primary = this.rightbarPrimaryTab();
+      const create = this.isCreateFlow();
+      if (primary === 'assets' && !create) {
+        void this.refreshCrmAssetLibrary();
+      }
+      if (create && primary === 'assets') {
+        this.rightbarPrimaryTab.set('elements');
         this.rightbarTab.set('options');
       }
     });
@@ -1033,8 +1089,33 @@ export class PdfEditorComponent implements AfterViewInit {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
   }
 
-  protected toggleRightbarLibraryCollapsed() {
-    this.rightbarLibraryCollapsed.set(!this.rightbarLibraryCollapsed());
+  protected toggleRightbarSection(which: 'frequent' | 'layout' | 'base') {
+    if (which === 'frequent') this.rightbarFrequentCollapsed.update((v) => !v);
+    else if (which === 'layout') this.rightbarLayoutCollapsed.update((v) => !v);
+    else this.rightbarBaseCollapsed.update((v) => !v);
+  }
+
+  protected setRightbarPrimaryTab(mode: 'elements' | 'assets') {
+    if (mode === 'elements') {
+      this.rightbarPrimaryTab.set('elements');
+      this.rightbarTab.set('options');
+      return;
+    }
+    if (!this.isCreateFlow()) {
+      this.rightbarPrimaryTab.set('assets');
+      this.rightbarTab.set('assets');
+    }
+  }
+
+  protected openRightbarDocumentPanel(panel: 'settings' | 'typography' | 'versions') {
+    this.rightbarPrimaryTab.set('elements');
+    this.rightbarTab.set(panel);
+  }
+
+  /** After choosing an insert target, show the Elements insert column. */
+  protected focusRightbarInsertPanel() {
+    this.rightbarPrimaryTab.set('elements');
+    this.rightbarTab.set('options');
   }
 
   protected isKeySlotPageIndex(pageIndex: number): boolean {
@@ -1197,25 +1278,115 @@ export class PdfEditorComponent implements AfterViewInit {
     return previous.title !== current.title || previous.type !== current.type;
   }
 
-  protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions' | 'history') {
+  protected setRightbarTab(tab: 'options' | 'settings' | 'typography' | 'assets' | 'versions') {
     this.rightbarTab.set(tab);
   }
 
-  protected editHistoryView() {
-    return this.editHistoryEvents().slice().reverse();
-  }
-
-  protected clearAllEditsFromHistoryPanel(ev?: Event) {
-    ev?.stopPropagation();
-    this.clearEdits();
-  }
-
-  protected formatHistoryTime(ts: number): string {
+  private hydrateReusableAssetsFromStorage() {
+    if (typeof localStorage === 'undefined') return;
     try {
-      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const raw = localStorage.getItem(PdfEditorComponent.reusableAssetsStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as ReusableAsset[];
+      if (!Array.isArray(parsed)) return;
+      const next = parsed
+        .filter(
+          (a) =>
+            a &&
+            typeof a.id === 'string' &&
+            (a.kind === 'image' || a.kind === 'video' || a.kind === 'template') &&
+            (a.imageSrc || a.videoUrl)
+        )
+        .slice(0, PdfEditorComponent.maxPersistedReusableAssets);
+      if (next.length) this.reusableAssets.set(next);
     } catch {
-      return '';
+      // ignore
     }
+  }
+
+  private persistReusableAssetsToStorage() {
+    if (typeof localStorage === 'undefined') return;
+    const list = this.reusableAssets();
+    const serializable = list
+      .filter((a) => a.imageSrc || (typeof a.videoUrl === 'string' && a.videoUrl.length > 0))
+      .map((a) => {
+        const { videoFile: _omit, ...rest } = a;
+        return rest;
+      })
+      .slice(0, PdfEditorComponent.maxPersistedReusableAssets);
+    try {
+      localStorage.setItem(PdfEditorComponent.reusableAssetsStorageKey, JSON.stringify(serializable));
+    } catch {
+      // ignore
+    }
+  }
+
+  protected async refreshCrmAssetLibrary() {
+    const seq = ++this.crmAssetFetchSeq;
+    this.assetLibraryLoading.set(true);
+    this.assetLibraryError.set(null);
+    try {
+      const data = await this.api.getCrmAssetLibrary();
+      if (seq !== this.crmAssetFetchSeq) return;
+      this.crmLibraryConfigured.set(data.crmConfigured);
+      this.crmAssetCategories.set(data.categories);
+      this.crmAssetItems.set(data.assets);
+    } catch (e) {
+      if (seq !== this.crmAssetFetchSeq) return;
+      this.assetLibraryError.set(e instanceof Error ? e.message : 'Failed to load asset library.');
+    } finally {
+      if (seq === this.crmAssetFetchSeq) this.assetLibraryLoading.set(false);
+    }
+  }
+
+  protected setAssetLibraryCategory(categoryId: string | null) {
+    this.assetLibraryCategoryId.set(categoryId);
+  }
+
+  protected assetKindDisplay(kind: string): string {
+    if (kind === 'image') return 'Image';
+    if (kind === 'video') return 'Video';
+    if (kind === 'template') return 'Template';
+    return 'Other';
+  }
+
+  protected insertFromAssetLibraryRow(row: AssetLibraryRow, ev?: Event) {
+    if (row.rowKind === 'local') {
+      this.placeReusableAsset(row.asset.id, ev);
+      return;
+    }
+    this.insertCrmLibraryItem(row.item, ev);
+  }
+
+  private insertCrmLibraryItem(item: CrmAssetLibraryItem, ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    this.errorText.set(null);
+    this.tool.set('text');
+    if (item.kind === 'video') {
+      const src = item.url || item.previewUrl;
+      if (
+        !src ||
+        (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('blob:'))
+      ) {
+        this.errorText.set('Video asset is missing a playable URL.');
+        return;
+      }
+      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: src });
+      this.focusRightbarInsertPanel();
+      return;
+    }
+    if (item.kind === 'image' || item.kind === 'template') {
+      const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
+      if (!src) {
+        this.errorText.set('Asset is missing a file or preview URL.');
+        return;
+      }
+      this.insertWidgetPending.set({ kind: 'image', imageDataUrl: src });
+      this.focusRightbarInsertPanel();
+      return;
+    }
+    this.errorText.set('This asset type cannot be placed on the canvas.');
   }
 
   protected formatVersionTimestamp(ts: number): string {
@@ -1734,6 +1905,11 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
+    if (kind === 'text' && !this.textFeatureEnabled()) {
+      this.errorText.set('Turn on Text (PDF text editing) in the sidebar first.');
+      return;
+    }
+
     this.insertWidgetPending.set({ kind });
   }
 
@@ -1764,10 +1940,11 @@ export class PdfEditorComponent implements AfterViewInit {
     ev?.stopPropagation();
     const asset = this.reusableAssets().find((a) => a.id === assetId);
     if (!asset) return;
+    this.errorText.set(null);
     this.tool.set('text');
-    if (asset.kind === 'image' && asset.imageSrc) {
+    if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
       this.insertWidgetPending.set({ kind: 'image', imageDataUrl: asset.imageSrc });
-      this.rightbarTab.set('options');
+      this.focusRightbarInsertPanel();
       return;
     }
     if (asset.kind === 'video') {
@@ -1777,7 +1954,7 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       if (src) {
         this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: src });
-        this.rightbarTab.set('options');
+        this.focusRightbarInsertPanel();
       }
     }
   }
@@ -2076,6 +2253,10 @@ export class PdfEditorComponent implements AfterViewInit {
   ) {
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
+    if (kind === 'text' && !this.textFeatureEnabled()) {
+      this.errorText.set('Turn on Text (PDF text editing) in the sidebar to add text boxes.');
+      return;
+    }
 
     const defaults: Record<WidgetKind, { w: number; h: number }> = {
       table: { w: 400, h: 220 },
@@ -2136,7 +2317,12 @@ export class PdfEditorComponent implements AfterViewInit {
       this.editingWidgetId.set(id);
       queueMicrotask(() => this.focusWidgetEditor(id));
     }
-    if (kind === 'text' || kind === 'textOverImage' || kind === 'imageBackgroundText') {
+    // Text widgets only mount `.widget__editor` while `editingWidgetId` matches; enter edit mode immediately.
+    if (kind === 'text' && this.textFeatureEnabled()) {
+      this.editingWidgetId.set(id);
+      queueMicrotask(() => this.focusWidgetEditor(id));
+    }
+    if (kind === 'textOverImage' || kind === 'imageBackgroundText') {
       queueMicrotask(() => {
         const el = document.querySelector<HTMLElement>(`[data-widget-id="${id}"] .widget__editor`);
         el?.focus?.();
@@ -2468,7 +2654,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
-    this.rightbarTab.set('options');
+    this.focusRightbarInsertPanel();
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -2477,7 +2663,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
-    this.rightbarTab.set('options');
+    this.focusRightbarInsertPanel();
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -2491,7 +2677,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
-    this.rightbarTab.set('options');
+    this.focusRightbarInsertPanel();
 
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
@@ -2550,6 +2736,13 @@ export class PdfEditorComponent implements AfterViewInit {
     const target = this.replaceMediaTarget();
     if (target?.widgetId === widgetId) this.replaceMediaTarget.set(null);
     if (this.layeredImagePickTargetWidgetId === widgetId) this.layeredImagePickTargetWidgetId = null;
+    if (this.activeWidgetOp?.pageIndex === pageIndex && this.activeWidgetOp.id === widgetId) {
+      this.activeWidgetOp = null;
+    }
+    const crop = this.imageCropSession();
+    if (crop?.mode === 'widget' && crop.pageIndex === pageIndex && crop.widgetId === widgetId) {
+      this.imageCropSession.set(null);
+    }
   }
 
   protected readonly toolbarItems: ToolbarItem[] = [
@@ -4745,17 +4938,21 @@ export class PdfEditorComponent implements AfterViewInit {
   private rememberReusableAsset(next: ReusableAsset) {
     this.reusableAssets.update((prev) => {
       const duplicateIdx = prev.findIndex((a) => {
+        if (next.source === 'crm' && a.source === 'crm' && next.crmAssetId && a.crmAssetId) {
+          return a.crmAssetId === next.crmAssetId;
+        }
         if (a.kind !== next.kind || a.source !== next.source) return false;
-        if (next.kind === 'image') return a.imageSrc === next.imageSrc;
+        if (next.kind === 'image' || next.kind === 'template') return a.imageSrc === next.imageSrc;
         if (next.source === 'url') return a.videoUrl === next.videoUrl;
         return a.label === next.label;
       });
-      if (duplicateIdx === -1) return [next, ...prev].slice(0, 24);
+      if (duplicateIdx === -1) return [next, ...prev].slice(0, PdfEditorComponent.maxPersistedReusableAssets);
       const existing = prev[duplicateIdx]!;
       const merged = { ...existing, ...next, id: existing.id, createdAt: Date.now() };
       const without = prev.filter((_, i) => i !== duplicateIdx);
-      return [merged, ...without].slice(0, 24);
+      return [merged, ...without].slice(0, PdfEditorComponent.maxPersistedReusableAssets);
     });
+    this.persistReusableAssetsToStorage();
   }
 
   @HostListener('document:pointermove', ['$event'])
@@ -6015,7 +6212,7 @@ export class PdfEditorComponent implements AfterViewInit {
           this.selectedWidgetId.set(null);
           this.selectedPlacedImageId.set(null);
           this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
-          this.rightbarTab.set('options');
+          this.focusRightbarInsertPanel();
           ev.preventDefault();
           ev.stopPropagation();
           return;
@@ -6051,7 +6248,7 @@ export class PdfEditorComponent implements AfterViewInit {
         this.selectedWidgetId.set(null);
         this.selectedPlacedImageId.set(null);
         this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
-        this.rightbarTab.set('options');
+        this.focusRightbarInsertPanel();
         return;
       }
       this.selectedDetectedPdfMedia.set(null);
@@ -6615,11 +6812,13 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
+    // Clear in untransformed device pixels so dashed selection strokes / handles never leave fringe pixels.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const w = overlay.width / dpr;
     const h = overlay.height / dpr;
-    ctx.clearRect(0, 0, w, h);
 
     // If we're editing existing text, temporarily cover the old region on the overlay.
     // Match the selected background so preview and commit are visually consistent.
@@ -6977,35 +7176,6 @@ export class PdfEditorComponent implements AfterViewInit {
     return (wRatio >= 0.95 && hRatio >= 0.95) || areaRatio >= 0.9;
   }
 
-  private pushPdfMediaEraseReplace(
-    pageIndex: number,
-    box: { x: number; y: number; w: number; h: number },
-    opts?: { maskMode?: 'color' | 'inpaint'; insetPx?: number }
-  ) {
-    const inset = Math.max(0, Number(opts?.insetPx ?? 0));
-    const w = Math.max(1, box.w - inset * 2);
-    const h = Math.max(1, box.h - inset * 2);
-    const x = box.x + (box.w - w) / 2;
-    const y = box.y + (box.h - h) / 2;
-    const maskMode = opts?.maskMode ?? 'color';
-    const sample = this.sampleTextAndBgColors(pageIndex, { x, y, w, h });
-    this.pushTextReplace(pageIndex, {
-      x,
-      y,
-      w,
-      h,
-      oldText: '',
-      newText: '',
-      maskMode,
-      bgColor: maskMode === 'inpaint' ? sample.bg : '#ffffff',
-      color: '#000000',
-      fontSize: 12,
-      fontStyle: 'regular',
-      fontFamily: 'helvetica',
-      source: 'mediaErase'
-    });
-  }
-
   private dropDetectedMediaEntry(pageIndex: number, id: string) {
     this.detectedMediaByPage.update((prev) => ({
       ...prev,
@@ -7016,7 +7186,67 @@ export class PdfEditorComponent implements AfterViewInit {
   private eraseDetectedPdfMedia(pageIndex: number, m: DetectedPdfMedia) {
     // "Remove detected image/video" should affect only the selected media area:
     // fill that full area with white, leave everything else untouched.
-    this.pushPdfMediaEraseReplace(pageIndex, m, { maskMode: 'color', insetPx: 0 });
+    // Also drop any user replacement overlay tied to this detection, or dashed handles / image chrome stay behind.
+    const replacementAnno = this.findReplacementImageAnnoForDetected(pageIndex, m);
+    const linkKey = this.detectedMediaLinkKey(pageIndex, m.id);
+    const mappedId = this.embeddedImageReplacementByDetectedId.get(linkKey);
+    this.embeddedImageReplacementByDetectedId.delete(linkKey);
+    const replaceId = replacementAnno?.id ?? mappedId ?? null;
+
+    if (replaceId) {
+      if (this.selectedPlacedImageId() === replaceId) this.selectedPlacedImageId.set(null);
+      if (this.activePlacedImageOp?.pageIndex === pageIndex && this.activePlacedImageOp.id === replaceId) {
+        this.activePlacedImageOp = null;
+      }
+      const c = this.imageCropSession();
+      if (c?.mode === 'placed' && c.pageIndex === pageIndex && c.id === replaceId) {
+        this.imageCropSession.set(null);
+      }
+    }
+
+    const inset = 0;
+    const rw = Math.max(1, m.w - inset * 2);
+    const rh = Math.max(1, m.h - inset * 2);
+    const rx = m.x + (m.w - rw) / 2;
+    const ry = m.y + (m.h - rh) / 2;
+    const rep: TextReplace = {
+      x: rx,
+      y: ry,
+      w: rw,
+      h: rh,
+      oldText: '',
+      newText: '',
+      maskMode: 'color',
+      bgColor: '#ffffff',
+      color: '#000000',
+      fontSize: 12,
+      fontStyle: 'regular',
+      fontFamily: 'helvetica',
+      source: 'mediaErase'
+    };
+
+    this.beginHistoryStep();
+    this.editsByPage.update((prev) => {
+      const existing = prev[pageIndex] ?? {
+        viewportWidth: 1,
+        viewportHeight: 1,
+        ink: [],
+        text: [],
+        images: [],
+        replaces: []
+      };
+      let images = existing.images ?? [];
+      if (replaceId) images = images.filter((im) => im.id !== replaceId);
+      const replaces =
+        rep.source === 'mediaErase'
+          ? existing.replaces.filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, rep)))
+          : existing.replaces;
+      return {
+        ...prev,
+        [pageIndex]: { ...existing, images, replaces: [...replaces, rep] }
+      };
+    });
+
     this.dropDetectedMediaEntry(pageIndex, m.id);
     const selected = this.selectedDetectedPdfMedia();
     if (selected && selected.pageIndex === pageIndex && selected.media.id === m.id) {
@@ -7921,6 +8151,9 @@ export class PdfEditorComponent implements AfterViewInit {
     const id = this.selectedPlacedImageId();
     if (!id) return;
     const pageIndex = this.activePageIndex();
+    if (this.activePlacedImageOp?.pageIndex === pageIndex && this.activePlacedImageOp.id === id) {
+      this.activePlacedImageOp = null;
+    }
     this.beginHistoryStep();
     this.editsByPage.update((prev) => {
       const ex = prev[pageIndex];

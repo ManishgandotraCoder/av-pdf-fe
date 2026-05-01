@@ -1105,116 +1105,87 @@
         }
       </section>
 
-      <aside class="rightbar" aria-label="Editor tools">
-        <nav class="rightbarTabs" role="tablist" aria-label="Right panel sections">
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'options'"
-            [attr.aria-selected]="rightbarTab() === 'options'"
-            aria-label="Options"
-            title="Options"
-            (click)="setRightbarTab('options')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M4 12h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'settings'"
-            [attr.aria-selected]="rightbarTab() === 'settings'"
-            aria-label="Settings"
-            title="Settings"
-            (click)="setRightbarTab('settings')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-          @if (!isCreateFlow()) {
+      <aside class="rightbar rightbar--studio" aria-label="Editor tools">
+        <header class="rightbarStudio__header">
+          <nav class="rightbarStudio__primaryTabs" role="tablist" aria-label="Sidebar panels">
             <button
               type="button"
               role="tab"
-              class="rightbarTabs__btn"
-              [class.rightbarTabs__btnActive]="rightbarTab() === 'assets'"
-              [attr.aria-selected]="rightbarTab() === 'assets'"
-              aria-label="Assets"
-              title="Assets"
-              (click)="setRightbarTab('assets')"
+              class="rightbarStudio__primaryTab"
+              [class.rightbarStudio__primaryTab--active]="rightbarPrimaryTab() === 'elements'"
+              [attr.aria-selected]="rightbarPrimaryTab() === 'elements'"
+              (click)="setRightbarPrimaryTab('elements')"
             >
-              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                <path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
-                <path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
+              Elements
             </button>
-          }
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'typography'"
-            [attr.aria-selected]="rightbarTab() === 'typography'"
-            aria-label="Typography"
-            title="Typography"
-            (click)="setRightbarTab('typography')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="rightbarTabs__btn"
-            [class.rightbarTabs__btnActive]="rightbarTab() === 'history'"
-            [attr.aria-selected]="rightbarTab() === 'history'"
-            aria-label="History"
-            title="History"
-            (click)="setRightbarTab('history')"
-          >
-            <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M20 12a8 8 0 1 1-3-6.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          @if (!isCreateFlow()) {
+            @if (!isCreateFlow()) {
+              <button
+                type="button"
+                role="tab"
+                class="rightbarStudio__primaryTab"
+                [class.rightbarStudio__primaryTab--active]="rightbarPrimaryTab() === 'assets'"
+                [attr.aria-selected]="rightbarPrimaryTab() === 'assets'"
+                (click)="setRightbarPrimaryTab('assets')"
+              >
+                Assets Library
+              </button>
+            }
+          </nav>
+          <div class="rightbarStudio__docTools" role="toolbar" aria-label="Page and document tools">
             <button
               type="button"
-              role="tab"
-              class="rightbarTabs__btn"
-              [class.rightbarTabs__btnActive]="rightbarTab() === 'versions'"
-              [attr.aria-selected]="rightbarTab() === 'versions'"
-              aria-label="Versions"
-              title="Versions"
-              (click)="setRightbarTab('versions')"
+              class="rightbarStudio__docTool"
+              [class.rightbarStudio__docTool--active]="rightbarPrimaryTab() === 'elements' && rightbarTab() === 'settings'"
+              (click)="openRightbarDocumentPanel('settings')"
+              title="Page settings"
+              aria-label="Page settings"
             >
-              <svg class="rightbarTabs__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <svg class="rightbarStudio__docToolIcon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 9.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5Zm8.5 2.75l-1.66-.55c-.12-.44-.3-.86-.52-1.25l.8-1.56-1.9-1.9-1.56.8c-.39-.22-.81-.4-1.25-.52L13.75 3.5h-3.5l-.55 1.66c-.44.12-.86.3-1.25.52l-1.56-.8-1.9 1.9.8 1.56c-.22.39-.4.81-.52 1.25L3.5 10.25v3.5l1.66.55c.12.44.3.86.52 1.25l-.8 1.56 1.9 1.9 1.56-.8c.39.22.81.4 1.25.52l.55 1.66h3.5l.55-1.66c.44-.12.86-.3 1.25-.52l1.56.8 1.9-1.9-.8-1.56c.22-.39.4-.81.52-1.25l1.66-.55v-3.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </button>
-          }
-        </nav>
+            <button
+              type="button"
+              class="rightbarStudio__docTool"
+              [class.rightbarStudio__docTool--active]="rightbarPrimaryTab() === 'elements' && rightbarTab() === 'typography'"
+              (click)="openRightbarDocumentPanel('typography')"
+              title="Typography"
+              aria-label="Typography"
+            >
+              <svg class="rightbarStudio__docToolIcon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M12 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M8 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+            @if (!isCreateFlow()) {
+              <button
+                type="button"
+                class="rightbarStudio__docTool"
+                [class.rightbarStudio__docTool--active]="rightbarPrimaryTab() === 'elements' && rightbarTab() === 'versions'"
+                (click)="openRightbarDocumentPanel('versions')"
+                title="Version history"
+                aria-label="Version history"
+              >
+                <svg class="rightbarStudio__docToolIcon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 8v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            }
+          </div>
+        </header>
 
-        @if (rightbarTab() === 'options') {
+        <div class="rightbarStudio__body">
+        @if (rightbarPrimaryTab() === 'elements' && rightbarTab() === 'options') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel">
             <div class="rightbar__row">
               <div class="rightbarTextGate" role="group" aria-label="PDF text editing">
@@ -1232,139 +1203,168 @@
                 </button>
               </div>
 
-              <section class="rightbarLibrary" aria-label="Library and elements">
-                <button
-                  type="button"
-                  class="rightbarLibrary__toggle"
-                  [attr.aria-expanded]="!rightbarLibraryCollapsed()"
-                  (click)="toggleRightbarLibraryCollapsed()"
-                >
-                  <span class="rightbarLibrary__title">Library & Elements</span>
-                  <span class="rightbarLibrary__chevron" [class.rightbarLibrary__chevronCollapsed]="rightbarLibraryCollapsed()">▾</span>
-                </button>
+              <div class="rightbarStudio__sections" aria-label="Element categories">
+                <section class="rightbarStudio__section">
+                  <button
+                    type="button"
+                    class="rightbarStudio__sectionHead"
+                    [attr.aria-expanded]="!rightbarFrequentCollapsed()"
+                    (click)="toggleRightbarSection('frequent')"
+                  >
+                    <span class="rightbarStudio__sectionTitle">Most frequently used</span>
+                    <span class="rightbarStudio__sectionChevron" [class.rightbarStudio__sectionChevron--collapsed]="rightbarFrequentCollapsed()">▾</span>
+                  </button>
+                  @if (!rightbarFrequentCollapsed()) {
+                    <div class="rightbarStudio__grid" aria-label="Frequent elements">
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        title="Insert image"
+                        (dragstart)="onPdfImageDragStart($event)"
+                        (click)="onInsertWidgetClick('image', $event)"
+                        [disabled]="pageCount() === 0 || isLoading()"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                          <path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                        <span class="rightbar__iconLabel">Image</span>
+                      </button>
 
-                @if (!rightbarLibraryCollapsed()) {
-                  <div class="rightbarLibrary__content">
-                    <div class="rightbarLibraryGroup">
-                      <div class="rightbarLibraryGroup__label">Media</div>
-                      <div class="rightbar__iconRow rightbar__iconRow--media" aria-label="Insert media elements">
+                      <div class="insertSourceMenu rightbarStudio__cell">
                         <button
                           type="button"
                           class="rightbar__icon rightbar__iconLabeled"
                           draggable="true"
-                          title="Insert image"
-                          (dragstart)="onPdfImageDragStart($event)"
-                          (click)="onInsertWidgetClick('image', $event)"
+                          title="Insert video"
+                          (dragstart)="onPdfVideoDragStart($event)"
+                          (click)="toggleInsertSourceMenu('video', $event)"
                           [disabled]="pageCount() === 0 || isLoading()"
                         >
                           <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path
-                              d="M8 14l2-2 4 4 2-2 2 2"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linejoin="round"
-                            />
-                            <path
-                              d="M10 9a1.5 1.5 0 1 0 0 .01"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                            />
+                            <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M15 10l5-3v10l-5-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
                           </svg>
-                          <span class="rightbar__iconLabel">Image</span>
+                          <span class="rightbar__iconLabel">Video</span>
                         </button>
-
-                        <div class="insertSourceMenu">
-                          <button
-                            type="button"
-                            class="rightbar__icon rightbar__iconLabeled"
-                            draggable="true"
-                            title="Insert video"
-                            (dragstart)="onPdfVideoDragStart($event)"
-                            (click)="toggleInsertSourceMenu('video', $event)"
-                            [disabled]="pageCount() === 0 || isLoading()"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                              <path
-                                d="M15 10l5-3v10l-5-3z"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linejoin="round"
-                              />
-                            </svg>
-                            <span class="rightbar__iconLabel">Video</span>
-                          </button>
-                          @if (insertSourceMenu() === 'video') {
-                            <div class="insertSourceMenu__panel" role="menu">
-                              <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
-                                URL
-                              </button>
-                              <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
-                                Upload
-                              </button>
-                            </div>
-                          }
-                        </div>
+                        @if (insertSourceMenu() === 'video') {
+                          <div class="insertSourceMenu__panel" role="menu">
+                            <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
+                              URL
+                            </button>
+                            <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
+                              Upload
+                            </button>
+                          </div>
+                        }
                       </div>
+
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        [title]="textFeatureEnabled() ? 'Insert text box' : 'Turn on Text (PDF text editing) above first'"
+                        (dragstart)="onWidgetDragStart('text', $event)"
+                        (click)="onInsertWidgetClick('text', $event)"
+                        [disabled]="pageCount() === 0 || isLoading() || !textFeatureEnabled()"
+                      >
+                        <span class="rightbar__iconTextLite">T</span>
+                        <span class="rightbar__iconLabel">Text</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        title="Insert table"
+                        (dragstart)="onWidgetDragStart('table', $event)"
+                        (click)="onInsertWidgetClick('table', $event)"
+                        [disabled]="pageCount() === 0 || isLoading()"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
+                        </svg>
+                        <span class="rightbar__iconLabel">Table</span>
+                      </button>
                     </div>
+                  }
+                </section>
 
-                    <div class="rightbarLibraryGroup">
-                      <div class="rightbarLibraryGroup__label">Layouts</div>
-                      <div class="rightbar__iconRow rightbar__iconRow--layouts" aria-label="Insert layout elements">
-                        <button
-                          type="button"
-                          class="rightbar__icon rightbar__iconLabeled"
-                          draggable="true"
-                          title="Insert table"
-                          (dragstart)="onWidgetDragStart('table', $event)"
-                          (click)="onInsertWidgetClick('table', $event)"
-                          [disabled]="pageCount() === 0 || isLoading()"
-                        >
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path d="M4 14h16" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path d="M9 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path d="M15 6v12" fill="none" stroke="currentColor" stroke-width="2" />
-                          </svg>
-                          <span class="rightbar__iconLabel">Table</span>
-                        </button>
+                <section class="rightbarStudio__section">
+                  <button
+                    type="button"
+                    class="rightbarStudio__sectionHead"
+                    [attr.aria-expanded]="!rightbarLayoutCollapsed()"
+                    (click)="toggleRightbarSection('layout')"
+                  >
+                    <span class="rightbarStudio__sectionTitle">Layout elements</span>
+                    <span class="rightbarStudio__sectionChevron" [class.rightbarStudio__sectionChevron--collapsed]="rightbarLayoutCollapsed()">▾</span>
+                  </button>
+                  @if (!rightbarLayoutCollapsed()) {
+                    <div class="rightbarStudio__grid rightbarStudio__grid--narrow" aria-label="Layout elements">
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        title="Insert text over image"
+                        (dragstart)="onWidgetDragStart('textOverImage', $event)"
+                        (click)="onInsertWidgetClick('textOverImage', $event)"
+                        [disabled]="pageCount() === 0 || isLoading()"
+                      >
+                        <span class="rightbar__iconTextLite">T/I</span>
+                        <span class="rightbar__iconLabel">Text over image</span>
+                      </button>
 
-                        <button
-                          type="button"
-                          class="rightbar__icon rightbar__iconLabeled"
-                          draggable="true"
-                          title="Insert text over image"
-                          (dragstart)="onWidgetDragStart('textOverImage', $event)"
-                          (click)="onInsertWidgetClick('textOverImage', $event)"
-                          [disabled]="pageCount() === 0 || isLoading()"
-                        >
-                          <span class="rightbar__iconTextLite">T/I</span>
-                          <span class="rightbar__iconLabel">Text over image</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          class="rightbar__icon rightbar__iconLabeled"
-                          draggable="true"
-                          title="Insert image as background of text"
-                          (dragstart)="onWidgetDragStart('imageBackgroundText', $event)"
-                          (click)="onInsertWidgetClick('imageBackgroundText', $event)"
-                          [disabled]="pageCount() === 0 || isLoading()"
-                        >
-                          <span class="rightbar__iconTextLite">I/T</span>
-                          <span class="rightbar__iconLabel">Image behind text</span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        title="Insert image as background of text"
+                        (dragstart)="onWidgetDragStart('imageBackgroundText', $event)"
+                        (click)="onInsertWidgetClick('imageBackgroundText', $event)"
+                        [disabled]="pageCount() === 0 || isLoading()"
+                      >
+                        <span class="rightbar__iconTextLite">I/T</span>
+                        <span class="rightbar__iconLabel">Image behind text</span>
+                      </button>
                     </div>
-                  </div>
-                }
-              </section>
+                  }
+                </section>
+
+                <section class="rightbarStudio__section">
+                  <button
+                    type="button"
+                    class="rightbarStudio__sectionHead"
+                    [attr.aria-expanded]="!rightbarBaseCollapsed()"
+                    (click)="toggleRightbarSection('base')"
+                  >
+                    <span class="rightbarStudio__sectionTitle">Base elements</span>
+                    <span class="rightbarStudio__sectionChevron" [class.rightbarStudio__sectionChevron--collapsed]="rightbarBaseCollapsed()">▾</span>
+                  </button>
+                  @if (!rightbarBaseCollapsed()) {
+                    <div class="rightbarStudio__grid" aria-label="Base elements">
+                      <button
+                        type="button"
+                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
+                        draggable="true"
+                        title="Insert signature"
+                        (dragstart)="onWidgetDragStart('signature', $event)"
+                        (click)="onInsertWidgetClick('signature', $event)"
+                        [disabled]="pageCount() === 0 || isLoading()"
+                      >
+                        <span class="rightbar__iconTextLite">S</span>
+                        <span class="rightbar__iconLabel">Signature</span>
+                      </button>
+                    </div>
+                  }
+                </section>
+              </div>
 
               @if (selectedItemWidget(); as selectedItem) {
                 <div
@@ -1526,7 +1526,7 @@
           </div>
         }
 
-        @if (rightbarTab() === 'settings') {
+        @if (rightbarPrimaryTab() === 'elements' && rightbarTab() === 'settings') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Page settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Page Settings</div>
@@ -1563,27 +1563,104 @@
           </div>
         }
 
-        @if (!isCreateFlow() && rightbarTab() === 'assets') {
-          <div class="rightbar__panel rightbar__panelAssets" role="tabpanel" aria-label="Assets">
-            @if (reusableAssets().length === 0) {
-              <p class="rightbarAssetsHint">No assets yet. Upload image/video once and it will appear here for reuse.</p>
-            } @else {
-              <div class="rightbarAssetsList">
-                @for (asset of reusableAssets(); track asset.id) {
-                  <button type="button" class="rightbarAssetCard" (click)="placeReusableAsset(asset.id, $event)">
-                    <div class="rightbarAssetCard__meta">
-                      <span class="rightbarAssetCard__kind">{{ asset.kind === 'image' ? 'Image' : 'Video' }}</span>
-                      <span class="rightbarAssetCard__src">{{ asset.source === 'upload' ? 'Upload' : 'URL' }}</span>
-                    </div>
-                    <div class="rightbarAssetCard__name">{{ asset.label }}</div>
+        @if (!isCreateFlow() && rightbarPrimaryTab() === 'assets') {
+          <div class="rightbar__panel rightbar__panelAssets" role="tabpanel" aria-label="Assets library">
+            <div class="assetLibraryPanel__head">
+              <div class="assetLibraryPanel__title">Assets Library</div>
+              <p class="assetLibraryPanel__hint">
+                Pick an asset, then click the page to place it. Saved uploads work across proposals on this browser.
+              </p>
+            </div>
+            <input
+              type="search"
+              class="assetLibraryPanel__search"
+              placeholder="Search…"
+              [ngModel]="assetLibrarySearch()"
+              (ngModelChange)="assetLibrarySearch.set($event)"
+              aria-label="Search assets"
+            />
+            @if (crmAssetCategories().length > 0) {
+              <div class="assetLibraryPanel__chips" role="tablist" aria-label="Asset categories">
+                <button
+                  type="button"
+                  role="tab"
+                  class="assetLibraryChip"
+                  [class.assetLibraryChip--active]="assetLibraryCategoryId() === null"
+                  [attr.aria-selected]="assetLibraryCategoryId() === null"
+                  (click)="setAssetLibraryCategory(null)"
+                >
+                  All
+                </button>
+                @for (c of crmAssetCategories(); track c.id) {
+                  <button
+                    type="button"
+                    role="tab"
+                    class="assetLibraryChip"
+                    [class.assetLibraryChip--active]="assetLibraryCategoryId() === c.id"
+                    [attr.aria-selected]="assetLibraryCategoryId() === c.id"
+                    (click)="setAssetLibraryCategory(c.id)"
+                  >
+                    {{ c.name }}
                   </button>
                 }
               </div>
             }
+
+            @if (assetLibraryError(); as libErr) {
+              <p class="rightbarAssetsHint rightbarAssetsHint--error">{{ libErr }}</p>
+              <button type="button" class="assetLibraryPanel__retry" (click)="refreshCrmAssetLibrary()">Retry</button>
+            }
+            @if (assetLibraryLoading() && assetLibraryRows().length === 0) {
+              <p class="rightbarAssetsHint">Loading assets…</p>
+            }
+            @if (assetLibraryRows().length > 0) {
+              <div class="rightbarAssetsList">
+                @for (row of assetLibraryRows(); track row.rowKind === 'local' ? row.asset.id : 'crm:' + row.item.id) {
+                  <button
+                    type="button"
+                    class="rightbarAssetCard"
+                    [disabled]="pageCount() === 0 || isLoading()"
+                    (click)="insertFromAssetLibraryRow(row, $event)"
+                  >
+                    <div class="rightbarAssetCard__meta">
+                      <span class="rightbarAssetCard__kind">{{
+                        row.rowKind === 'crm' ? assetKindDisplay(row.item.kind) : assetKindDisplay(row.asset.kind)
+                      }}</span>
+                      <span class="rightbarAssetCard__src">{{
+                        row.rowKind === 'crm'
+                          ? 'CRM'
+                          : row.asset.source === 'crm'
+                            ? 'CRM'
+                            : row.asset.source === 'upload'
+                              ? 'Upload'
+                              : 'URL'
+                      }}</span>
+                    </div>
+                    <div class="rightbarAssetCard__name">
+                      {{ row.rowKind === 'crm' ? row.item.name : row.asset.label }}
+                    </div>
+                  </button>
+                }
+              </div>
+            } @else if (!assetLibraryLoading() && !assetLibraryError()) {
+              <p class="rightbarAssetsHint">
+                @if (!crmLibraryConfigured() && reusableAssets().length === 0) {
+                  No assets yet. Add images or videos from Elements, or connect your CRM (set CRM_API_BASE_URL on the
+                  editor backend) to load shared library items.
+                } @else if (!crmLibraryConfigured() && reusableAssets().length > 0) {
+                  No saved uploads match this search.
+                } @else if (crmLibraryConfigured() && reusableAssets().length > 0) {
+                  No CRM items match this filter; try another category or clear search. Your saved uploads are listed
+                  when they match search.
+                } @else {
+                  No assets match this search or category.
+                }
+              </p>
+            }
           </div>
         }
 
-        @if (rightbarTab() === 'typography') {
+        @if (rightbarPrimaryTab() === 'elements' && rightbarTab() === 'typography') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel" aria-label="Typography settings">
             <div class="pageSettings">
               <div class="pageSettings__title">Typography</div>
@@ -1742,7 +1819,7 @@
           </div>
         }
 
-        @if (!isCreateFlow() && rightbarTab() === 'versions') {
+        @if (!isCreateFlow() && rightbarPrimaryTab() === 'elements' && rightbarTab() === 'versions') {
           <div class="rightbar__panel rightbar__panelVersions" role="tabpanel" aria-label="Version history">
             @if (isVersionHistoryLoading()) {
               <p class="rightbarAssetsHint">Loading version history...</p>
@@ -1770,35 +1847,8 @@
           </div>
         }
 
-        @if (rightbarTab() === 'history') {
-          <div class="rightbar__panel rightbar__panelHistory" role="tabpanel" aria-label="Edit history">
-            <div class="historyPanelActions">
-              <button type="button" class="versionHistoryCard__btn" [disabled]="!canUndo()" (click)="undo()">Undo</button>
-              <button type="button" class="versionHistoryCard__btn" [disabled]="!canRedo()" (click)="redo()">Redo</button>
-            </div>
-            <button
-              type="button"
-              class="versionHistoryCard__btn historyPanel__clearBtn"
-              [disabled]="pageCount() === 0 || isLoading() || isSaving()"
-              (click)="clearAllEditsFromHistoryPanel($event)"
-            >
-              Clear All Edits
-            </button>
+        </div>
 
-            @if (editHistoryView().length === 0) {
-              <p class="rightbarAssetsHint">No edit actions yet. Your canvas changes will appear here.</p>
-            } @else {
-              <div class="historyEventList">
-                @for (item of editHistoryView(); track item.id) {
-                  <div class="historyEventCard">
-                    <div class="historyEventCard__label">{{ item.label }}</div>
-                    <div class="historyEventCard__meta">{{ formatHistoryTime(item.at) }}</div>
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        }
       </aside>
     </main>
   }
