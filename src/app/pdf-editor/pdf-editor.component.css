@@ -950,6 +950,18 @@
   min-width: 0;
 }
 
+/* 280px sidebar × 3 columns ≈ 80px/track; labeled tiles were 92px fixed and overlapped. */
+.rightbarStudio__grid .rightbar__iconLabeled {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.rightbarStudio__grid .rightbarStudio__cell.insertSourceMenu {
+  min-width: 0;
+}
+
 .rightbarTabs {
   display: flex;
   gap: 4px;
