@@ -865,6 +865,7 @@
                       [attr.data-widget-id]="w.id"
                       [class.isSelected]="selectedWidgetId() === w.id"
                       [class.widget--image]="w.kind === 'image'"
+                      [class.widget--text]="w.kind === 'text'"
                       [ngStyle]="{ left: w.x + 'px', top: w.y + 'px', width: w.w + 'px', height: w.h + 'px' }"
                       (pointerdown)="onWidgetPointerDown(activePageIndex(), w.id, $event)"
                     >
@@ -963,19 +964,32 @@
                                 (ngModelChange)="updateTextWidget(activePageIndex(), w.id, $event)"
                                 placeholder="Type…"
                                 (pointerdown)="$event.stopPropagation()"
-                                (keydown.escape)="stopEditingWidget(w.id)"
-                                (blur)="stopEditingWidget(w.id)"
+                                (keydown.escape)="onTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
+                                (keydown.enter)="onTextWidgetEditorEnter(activePageIndex(), w.id, $event)"
+                                (blur)="onTextWidgetEditorBlur(activePageIndex(), w.id, $event)"
                                 autofocus
                               ></textarea>
-                            } @else {
+                            } @else if ((w.textValue ?? '').trim().length > 0) {
                               <button
                                 type="button"
-                                class="widget__labelBtn"
+                                class="widget__textPreview"
                                 [disabled]="!textFeatureEnabled()"
                                 (click)="startEditingWidget(w.id, $event)"
                               >
-                                Add text
+                                {{ w.textValue }}
                               </button>
+                            } @else {
+                              <div
+                                class="widget__textEmpty"
+                                tabindex="0"
+                                [attr.aria-label]="'Add text'"
+                                [attr.aria-disabled]="textFeatureEnabled() ? null : 'true'"
+                                (pointerdown)="$event.stopPropagation()"
+                                (click)="onTextWidgetEmptyActivate(w.id, $event)"
+                                (keydown.enter)="onTextWidgetEmptyActivate(w.id, $event)"
+                              >
+                                <span class="widget__labelBtn widget__textAddBtn" aria-hidden="true">+ Add text</span>
+                              </div>
                             }
                           }
                           @case ('video') {
@@ -1203,7 +1217,27 @@
                 </button>
               </div>
 
-              <div class="rightbarStudio__sections" aria-label="Element categories">
+              <div class="rightbarStudio__libraryBlock">
+                <button
+                  type="button"
+                  class="rightbarStudio__sectionHead rightbarStudio__libraryMasterHead"
+                  [attr.aria-expanded]="!rightbarInsertLibraryCollapsed()"
+                  aria-controls="rightbar-insert-library-sections"
+                  (click)="toggleRightbarInsertLibrary()"
+                >
+                  <span class="rightbarStudio__sectionTitle">Insert elements</span>
+                  <span
+                    class="rightbarStudio__sectionChevron"
+                    [class.rightbarStudio__sectionChevron--collapsed]="rightbarInsertLibraryCollapsed()"
+                    aria-hidden="true"
+                  >▾</span>
+                </button>
+                @if (!rightbarInsertLibraryCollapsed()) {
+                  <div
+                    id="rightbar-insert-library-sections"
+                    class="rightbarStudio__sections"
+                    aria-label="Element categories"
+                  >
                 <section class="rightbarStudio__section">
                   <button
                     type="button"
@@ -1364,6 +1398,8 @@
                     </div>
                   }
                 </section>
+                  </div>
+                }
               </div>
 
               @if (selectedItemWidget(); as selectedItem) {
@@ -1568,9 +1604,27 @@
             <div class="assetLibraryPanel__head">
               <div class="assetLibraryPanel__title">Assets Library</div>
               <p class="assetLibraryPanel__hint">
-                Pick an asset, then click the page to place it. Saved uploads work across proposals on this browser.
+                Drag an asset onto the page, or pick one and click the page to place it. Saved uploads work across
+                proposals on this browser.
               </p>
             </div>
+            <div class="rightbarStudio__libraryBlock rightbarStudio__libraryBlock--assets">
+              <button
+                type="button"
+                class="rightbarStudio__sectionHead rightbarStudio__libraryMasterHead"
+                [attr.aria-expanded]="!rightbarAssetLibraryBrowserCollapsed()"
+                aria-controls="rightbar-asset-library-browser"
+                (click)="toggleRightbarAssetLibraryBrowser()"
+              >
+                <span class="rightbarStudio__sectionTitle">Browse library</span>
+                <span
+                  class="rightbarStudio__sectionChevron"
+                  [class.rightbarStudio__sectionChevron--collapsed]="rightbarAssetLibraryBrowserCollapsed()"
+                  aria-hidden="true"
+                >▾</span>
+              </button>
+              @if (!rightbarAssetLibraryBrowserCollapsed()) {
+                <div id="rightbar-asset-library-browser" class="assetLibraryPanel__browser">
             <input
               type="search"
               class="assetLibraryPanel__search"
@@ -1620,6 +1674,8 @@
                     type="button"
                     class="rightbarAssetCard"
                     [disabled]="pageCount() === 0 || isLoading()"
+                    [attr.draggable]="pageCount() > 0 && !isLoading()"
+                    (dragstart)="onAssetLibraryRowDragStart(row, $event)"
                     (click)="insertFromAssetLibraryRow(row, $event)"
                   >
                     <div class="rightbarAssetCard__meta">
@@ -1657,6 +1713,9 @@
                 }
               </p>
             }
+                </div>
+              }
+            </div>
           </div>
         }
 

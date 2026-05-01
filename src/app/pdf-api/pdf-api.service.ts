@@ -159,18 +159,79 @@ export class PdfApiService {
     return `${BACKEND_ORIGIN}${path}`;
   }
 
+  private looksLikeHtml(text: string): boolean {
+    const t = text.trimStart().slice(0, 400).toLowerCase();
+    if (t.startsWith('<!doctype') || t.startsWith('<html') || t.startsWith('<head')) return true;
+    if (t.startsWith('<!--') && t.includes('<html')) return true;
+    return t.startsWith('<') && /<\s*(html|body|head|div|title)\b/i.test(t);
+  }
+
+  private truncateDetail(s: string, max = 220): string {
+    const t = s.replace(/\s+/g, ' ').trim();
+    return t.length <= max ? t : `${t.slice(0, max)}…`;
+  }
+
+  /** Best-effort message from a failed API response body (never returns raw HTML). */
+  private parseErrorFromBody(text: string, status: number): string | null {
+    if (this.looksLikeHtml(text)) {
+      if (status === 413 || status === 431) {
+        return 'The proposal is too large for the server (HTTP 413). Try a smaller file or raise the API upload limit.';
+      }
+      if (status === 404) {
+        return 'API returned “not found” (HTTP 404). Check that the backend is running and /api is proxied correctly.';
+      }
+      if (status === 502 || status === 503 || status === 504) {
+        return `Server is temporarily unavailable (HTTP ${status}). Retry shortly.`;
+      }
+      return `The server returned an HTML page (HTTP ${status}) instead of a JSON error. Check the API URL, proxy, and deployment.`;
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return status ? `Request failed (HTTP ${status}).` : null;
+    }
+
+    try {
+      const j = JSON.parse(trimmed) as { error?: unknown; message?: unknown };
+      const e = j?.error ?? j?.message;
+      if (typeof e === 'string' && e.length > 0) return e;
+    } catch {
+      // not JSON
+    }
+
+    return this.truncateDetail(trimmed);
+  }
+
+  private parseJsonBody<T>(text: string, context: string): T {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error(`Empty response from server (${context}).`);
+    }
+    if (this.looksLikeHtml(trimmed)) {
+      throw new Error(
+        `Invalid response (${context}): received HTML instead of JSON. Confirm the API base URL and /api proxy.`
+      );
+    }
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      throw new Error(`Invalid response (${context}): body is not valid JSON.`);
+    }
+  }
+
+  private async readJsonResponse<T>(res: Response, context: string, fallbackError: string): Promise<T> {
+    const text = await res.text();
+    if (!res.ok) {
+      const msg = this.parseErrorFromBody(text, res.status) ?? fallbackError;
+      throw new Error(msg);
+    }
+    return this.parseJsonBody<T>(text, context);
+  }
+
   private async readErrorMessage(res: Response): Promise<string | null> {
     try {
       const text = await res.text();
-      try {
-        const j = JSON.parse(text) as { error?: unknown };
-        const e = j?.error;
-        if (typeof e === 'string' && e.length > 0) return e;
-      } catch {
-        // ignore
-      }
-      const t = text.trim();
-      return t.length > 0 ? t : null;
+      return this.parseErrorFromBody(text, res.status);
     } catch {
       return null;
     }
@@ -195,28 +256,19 @@ export class PdfApiService {
 
   async list(): Promise<PdfMeta[]> {
     const res = await fetch(this.apiUrl('/api/pdfs'));
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load library.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta[];
+    return this.readJsonResponse<PdfMeta[]>(res, 'list PDFs', 'Failed to load library.');
   }
 
   async upload(file: File): Promise<PdfMeta> {
     const fd = new FormData();
     fd.set('file', file);
     const res = await fetch(this.apiUrl('/api/pdfs'), { method: 'POST', body: fd });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Upload failed.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta;
+    return this.readJsonResponse<PdfMeta>(res, 'upload PDF', 'Upload failed.');
   }
 
   async getMeta(id: string): Promise<PdfMeta> {
     const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/meta`));
-    if (!res.ok) throw new Error('Failed to load PDF meta.');
-    return (await res.json()) as PdfMeta;
+    return this.readJsonResponse<PdfMeta>(res, 'PDF meta', 'Failed to load PDF meta.');
   }
 
   async getBytes(id: string): Promise<Uint8Array> {
@@ -240,11 +292,7 @@ export class PdfApiService {
       method: 'PUT',
       body
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to save PDF.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta;
+    return this.readJsonResponse<PdfMeta>(res, 'save PDF', 'Failed to save PDF.');
   }
 
   async saveAsNewProposal(
@@ -265,16 +313,14 @@ export class PdfApiService {
       method: 'POST',
       body: fd
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to save new proposal version.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta & {
-      versionId: string;
-      timestamp: number;
-      editedBy: string;
-      parentProposalId: string;
-    };
+    return this.readJsonResponse<
+      PdfMeta & {
+        versionId: string;
+        timestamp: number;
+        editedBy: string;
+        parentProposalId: string;
+      }
+    >(res, 'save new proposal version', 'Failed to save new proposal version.');
   }
 
   async overwriteProposal(id: string, bytes: Uint8Array, editedBy?: string): Promise<PdfMeta> {
@@ -286,29 +332,17 @@ export class PdfApiService {
       headers: editedBy ? { 'X-Edited-By': editedBy } : undefined,
       body
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to overwrite proposal.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta;
+    return this.readJsonResponse<PdfMeta>(res, 'overwrite proposal', 'Failed to overwrite proposal.');
   }
 
   async getProposalVersions(id: string): Promise<ProposalVersion[]> {
     const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/versions`));
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load proposal versions.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as ProposalVersion[];
+    return this.readJsonResponse<ProposalVersion[]>(res, 'proposal versions', 'Failed to load proposal versions.');
   }
 
   async getProposal(id: string): Promise<ProposalDetails> {
     const res = await fetch(this.apiUrl(`/api/proposal/${encodeURIComponent(id)}`));
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load proposal.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as ProposalDetails;
+    return this.readJsonResponse<ProposalDetails>(res, 'proposal details', 'Failed to load proposal.');
   }
 
   async generateShareLink(body: GenerateShareLinkBody): Promise<ShareRecord & { url: string }> {
@@ -323,21 +357,12 @@ export class PdfApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to generate share link.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as ShareRecord & { url: string };
+    return this.readJsonResponse<ShareRecord & { url: string }>(res, 'share link', 'Failed to generate share link.');
   }
 
   async getShareForProposal(proposalId: string): Promise<ShareRecord | null> {
     const res = await fetch(this.apiUrl(`/api/share/by-proposal/${encodeURIComponent(proposalId)}`));
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load share settings.';
-      throw new Error(msg);
-    }
-    const data = (await res.json()) as ShareRecord | null;
-    return data;
+    return this.readJsonResponse<ShareRecord | null>(res, 'share settings', 'Failed to load share settings.');
   }
 
   async addShareUser(body: AddShareUserBody): Promise<ShareRecord> {
@@ -346,11 +371,7 @@ export class PdfApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to add share user.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as ShareRecord;
+    return this.readJsonResponse<ShareRecord>(res, 'add share user', 'Failed to add share user.');
   }
 
   async rejectProposal(id: string, body: RejectProposalBody): Promise<ProposalRejection> {
@@ -359,21 +380,18 @@ export class PdfApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to reject proposal.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as ProposalRejection;
+    return this.readJsonResponse<ProposalRejection>(res, 'reject proposal', 'Failed to reject proposal.');
   }
 
   async getProposalRejection(id: string): Promise<ProposalRejection | null> {
     const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/rejection`));
+    const text = await res.text();
     if (res.status === 404) return null;
     if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load rejection status.';
+      const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to load rejection status.';
       throw new Error(msg);
     }
-    return (await res.json()) as ProposalRejection;
+    return this.parseJsonBody<ProposalRejection>(text, 'rejection status');
   }
 
   async restoreProposalVersion(
@@ -389,23 +407,30 @@ export class PdfApiService {
         body: editedBy ? JSON.stringify({ editedBy }) : undefined
       }
     );
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to restore proposal version.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as PdfMeta & { restoredFromVersionId: string };
+    return this.readJsonResponse<PdfMeta & { restoredFromVersionId: string }>(
+      res,
+      'restore proposal version',
+      'Failed to restore proposal version.'
+    );
   }
 
   async delete(id: string): Promise<void> {
     const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}`), { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete PDF.');
+    if (!res.ok) {
+      const msg = (await this.readErrorMessage(res)) ?? 'Failed to delete PDF.';
+      throw new Error(msg);
+    }
   }
 
   async getFurniture(id: string): Promise<PageFurniture | null> {
     const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/furniture`));
+    const text = await res.text();
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error('Failed to load page furniture.');
-    const payload = (await res.json()) as { pageFurniture?: PageFurniture | null };
+    if (!res.ok) {
+      const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to load page furniture.';
+      throw new Error(msg);
+    }
+    const payload = this.parseJsonBody<{ pageFurniture?: PageFurniture | null }>(text, 'page furniture');
     return payload?.pageFurniture ?? null;
   }
 
@@ -415,8 +440,9 @@ export class PdfApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pageFurniture: furniture })
     });
+    const text = await res.text();
     if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to save page furniture.';
+      const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to save page furniture.';
       throw new Error(msg);
     }
   }
@@ -424,11 +450,7 @@ export class PdfApiService {
   /** Loads CRM-backed asset library metadata (empty when CRM is not configured on the backend). */
   async getCrmAssetLibrary(): Promise<CrmAssetLibraryResponse> {
     const res = await fetch(this.apiUrl('/api/crm/asset-library'));
-    if (!res.ok) {
-      const msg = (await this.readErrorMessage(res)) ?? 'Failed to load asset library.';
-      throw new Error(msg);
-    }
-    return (await res.json()) as CrmAssetLibraryResponse;
+    return this.readJsonResponse<CrmAssetLibraryResponse>(res, 'asset library', 'Failed to load asset library.');
   }
 }
 

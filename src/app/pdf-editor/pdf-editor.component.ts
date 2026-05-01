@@ -395,7 +395,7 @@ type TextReplace = {
   fontSize: number;
   fontStyle: FontStyle;
   fontFamily: FontFamily;
-  source?: 'textEdit' | 'mediaErase';
+  source?: 'textEdit' | 'mediaErase' | 'globalTypography';
 };
 
 type PageEdits = {
@@ -592,6 +592,9 @@ export class PdfEditorComponent implements AfterViewInit {
   /** Top-level panel: insert tools vs CRM asset library (matches studio sidebar mockup). */
   protected readonly rightbarPrimaryTab = signal<'elements' | 'assets'>('elements');
   protected readonly insertSourceMenu = signal<'image' | 'video' | null>(null);
+  protected readonly rightbarInsertLibraryCollapsed = signal(false);
+  /** Collapses search, categories, and asset grid on the Assets Library tab. */
+  protected readonly rightbarAssetLibraryBrowserCollapsed = signal(false);
   protected readonly rightbarFrequentCollapsed = signal(false);
   protected readonly rightbarLayoutCollapsed = signal(false);
   protected readonly rightbarBaseCollapsed = signal(false);
@@ -1089,6 +1092,14 @@ export class PdfEditorComponent implements AfterViewInit {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
   }
 
+  protected toggleRightbarInsertLibrary() {
+    this.rightbarInsertLibraryCollapsed.update((v) => !v);
+  }
+
+  protected toggleRightbarAssetLibraryBrowser() {
+    this.rightbarAssetLibraryBrowserCollapsed.update((v) => !v);
+  }
+
   protected toggleRightbarSection(which: 'frequent' | 'layout' | 'base') {
     if (which === 'frequent') this.rightbarFrequentCollapsed.update((v) => !v);
     else if (which === 'layout') this.rightbarLayoutCollapsed.update((v) => !v);
@@ -1358,21 +1369,135 @@ export class PdfEditorComponent implements AfterViewInit {
     this.insertCrmLibraryItem(row.item, ev);
   }
 
+  private static readonly assetLibraryDragMime = 'application/x-avyro-asset-library';
+
+  /** Normalize a URL for `<video src>`: absolute http(s), blob, data, or protocol-relative. */
+  private normalizeVideoWidgetSrc(src: string | undefined | null): string | null {
+    if (src == null) return null;
+    const s = String(src).trim();
+    if (!s) return null;
+    if (s.startsWith('//')) return `https:${s}`;
+    const low = s.toLowerCase();
+    if (
+      s.startsWith('http://') ||
+      s.startsWith('https://') ||
+      s.startsWith('blob:') ||
+      low.startsWith('data:video/') ||
+      low.startsWith('data:application/octet-stream')
+    ) {
+      return s;
+    }
+    return null;
+  }
+
+  protected onAssetLibraryRowDragStart(row: AssetLibraryRow, ev: DragEvent) {
+    if (this.pageCount() === 0 || this.isLoading()) {
+      ev.preventDefault();
+      return;
+    }
+    const dt = ev.dataTransfer;
+    if (!dt) return;
+    const payload =
+      row.rowKind === 'local'
+        ? ({ v: 1 as const, rowKind: 'local' as const, id: row.asset.id } as const)
+        : ({ v: 1 as const, rowKind: 'crm' as const, id: row.item.id } as const);
+    const json = JSON.stringify(payload);
+    dt.setData(PdfEditorComponent.assetLibraryDragMime, json);
+    dt.setData('text/plain', json);
+    dt.effectAllowed = 'copy';
+  }
+
+  /** Place an asset-library row at overlay coordinates (same rules as click-to-place). */
+  private placeAssetLibraryRowAtPoint(pageIndex: number, row: AssetLibraryRow, x: number, y: number) {
+    this.errorText.set(null);
+    this.tool.set('text');
+    if (row.rowKind === 'local') {
+      const asset = row.asset;
+      if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
+        this.addWidgetAtPoint(pageIndex, 'image', x, y, { imageDataUrl: asset.imageSrc });
+        return;
+      }
+      if (asset.kind === 'video') {
+        let src = asset.videoUrl;
+        if (!src && asset.videoFile) {
+          src = URL.createObjectURL(asset.videoFile);
+        }
+        const playable = this.normalizeVideoWidgetSrc(src);
+        if (!playable) {
+          this.errorText.set(
+            'Video asset has no playable URL. If it came from the CRM, refresh the Assets Library.'
+          );
+          return;
+        }
+        this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: playable });
+        return;
+      }
+      this.errorText.set('This asset type cannot be placed on the canvas.');
+      return;
+    }
+    const item = row.item;
+    if (item.kind === 'video') {
+      const playable = this.normalizeVideoWidgetSrc(item.url || item.previewUrl);
+      if (!playable) {
+        this.errorText.set(
+          'Video asset has no playable URL. Refresh the Assets Library, or ask your admin to expose a direct file link from the CRM.'
+        );
+        return;
+      }
+      this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: playable });
+      return;
+    }
+    if (item.kind === 'image' || item.kind === 'template') {
+      const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
+      if (!src) {
+        this.errorText.set('Asset is missing a file or preview URL.');
+        return;
+      }
+      this.addWidgetAtPoint(pageIndex, 'image', x, y, { imageDataUrl: src });
+      return;
+    }
+    this.errorText.set('This asset type cannot be placed on the canvas.');
+  }
+
+  private parseAssetLibraryDropPayload(raw: string): { v: 1; rowKind: 'local' | 'crm'; id: string } | null {
+    const t = raw.trim();
+    if (!t.startsWith('{')) return null;
+    try {
+      const o = JSON.parse(t) as { v?: unknown; rowKind?: unknown; id?: unknown };
+      if (o?.v !== 1) return null;
+      if (o.rowKind !== 'local' && o.rowKind !== 'crm') return null;
+      if (typeof o.id !== 'string' || !o.id) return null;
+      return { v: 1, rowKind: o.rowKind, id: o.id };
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveAssetLibraryRowFromPayload(
+    payload: { v: 1; rowKind: 'local' | 'crm'; id: string }
+  ): AssetLibraryRow | null {
+    if (payload.rowKind === 'local') {
+      const asset = this.reusableAssets().find((a) => a.id === payload.id);
+      return asset ? { rowKind: 'local', asset } : null;
+    }
+    const item = this.crmAssetItems().find((i) => i.id === payload.id);
+    return item ? { rowKind: 'crm', item } : null;
+  }
+
   private insertCrmLibraryItem(item: CrmAssetLibraryItem, ev?: Event) {
     ev?.preventDefault();
     ev?.stopPropagation();
     this.errorText.set(null);
     this.tool.set('text');
     if (item.kind === 'video') {
-      const src = item.url || item.previewUrl;
-      if (
-        !src ||
-        (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('blob:'))
-      ) {
-        this.errorText.set('Video asset is missing a playable URL.');
+      const playable = this.normalizeVideoWidgetSrc(item.url || item.previewUrl);
+      if (!playable) {
+        this.errorText.set(
+          'Video asset has no playable URL. Refresh the Assets Library, or ask your admin to expose a direct file link from the CRM.'
+        );
         return;
       }
-      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: src });
+      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
       this.focusRightbarInsertPanel();
       return;
     }
@@ -1630,35 +1755,86 @@ export class PdfEditorComponent implements AfterViewInit {
         images: [],
         replaces: []
       };
-      const replaces = [...(existing.replaces ?? [])];
-
-      for (const block of blocks) {
-        const alreadyOverridden = replaces.some(
-          (r) => r.oldText === block.text && Math.abs(r.x - block.x) < 2 && Math.abs(r.y - block.y) < 2
-        );
-        if (alreadyOverridden) continue;
-        const section = typography[this.blockSectionForDetected(block)];
-        replaces.push({
-          x: block.x,
-          y: block.y,
-          w: block.w,
-          h: block.h,
-          oldText: block.text,
-          newText: block.text,
-          maskMode: 'color',
-          bgColor: '#ffffff',
-          color: section.color,
-          fontSize: section.size,
-          fontStyle: this.styleToFontStyle(section),
-          fontFamily: section.fontFamily
-        });
-      }
+      const replaces = this.mergeGlobalTypographyReplacesForPage(existing.replaces ?? [], blocks, typography);
 
       next[pageIndex] = { ...existing, replaces };
     }
 
     this.editsByPage.set(next);
     await this.renderActivePage();
+  }
+
+  /** Rebuilds auto-applied typography masks so repeated global font changes do not stack duplicates. */
+  private mergeGlobalTypographyReplacesForPage(
+    existing: TextReplace[],
+    blocks: DetectedBlock[],
+    typography: GlobalTypographySettings
+  ): TextReplace[] {
+    const kept: TextReplace[] = [];
+    for (const r of existing) {
+      if (r.source === 'globalTypography') continue;
+      if (this.isLegacyAutoTypographyReplace(r, blocks)) continue;
+      kept.push(r);
+    }
+
+    const out = [...kept];
+    for (const block of blocks) {
+      if (!block.text.trim()) continue;
+      if (out.some((r) => this.blockPrimarilyCoveredByReplace(block, r))) continue;
+      const section = typography[this.blockSectionForDetected(block)];
+      const { w, h } = this.globalTypographyMaskSize(block, section);
+      out.push({
+        x: block.x,
+        y: block.y,
+        w,
+        h,
+        oldText: block.text,
+        newText: block.text,
+        maskMode: 'color',
+        bgColor: '#ffffff',
+        color: section.color,
+        fontSize: section.size,
+        fontStyle: this.styleToFontStyle(section),
+        fontFamily: section.fontFamily,
+        source: 'globalTypography'
+      });
+    }
+    return out;
+  }
+
+  private globalTypographyMaskSize(
+    block: DetectedBlock,
+    section: GlobalTypographySection
+  ): { w: number; h: number } {
+    const lineCount = Math.max(1, block.text.split('\n').length);
+    const lh = Math.max(1, Math.round(section.size * 1.2));
+    const minH = lineCount * lh + 6;
+    const h = Math.max(block.h, minH, Math.round(section.size * 1.35));
+    const fontRatio = section.size / Math.max(6, block.fontSize);
+    const w = Math.max(block.w, Math.round(block.w * Math.max(1, fontRatio * 1.08)));
+    return { w: Math.max(1, w), h: Math.max(1, h) };
+  }
+
+  private blockPrimarilyCoveredByReplace(block: DetectedBlock, r: TextReplace): boolean {
+    const left = Math.max(block.x, r.x);
+    const top = Math.max(block.y, r.y);
+    const right = Math.min(block.x + block.w, r.x + r.w);
+    const bottom = Math.min(block.y + block.h, r.y + r.h);
+    const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+    const blockArea = Math.max(1, block.w * block.h);
+    return overlapArea / blockArea >= 0.62;
+  }
+
+  /** Older sessions stacked anonymous replaces (newText === oldText); strip when re-applying global typography. */
+  private isLegacyAutoTypographyReplace(r: TextReplace, blocks: DetectedBlock[]): boolean {
+    if (r.source === 'textEdit' || r.source === 'mediaErase') return false;
+    if (r.newText !== r.oldText) return false;
+    if (r.maskMode !== 'color') return false;
+    return blocks.some(
+      (b) =>
+        b.text.trim() === r.oldText.trim() &&
+        this.isSameReplaceRegion(r, { x: b.x, y: b.y, w: b.w, h: b.h })
+    );
   }
 
   protected furnitureAlignOptions: FurnitureAlignment[] = ['left', 'center', 'right'];
@@ -1952,9 +2128,18 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!src && asset.videoFile) {
         src = URL.createObjectURL(asset.videoFile);
       }
-      if (src) {
-        this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: src });
+      const playable = this.normalizeVideoWidgetSrc(src);
+      if (playable) {
+        this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
         this.focusRightbarInsertPanel();
+      } else if (src) {
+        this.errorText.set(
+          'Video URL is not supported. Use http(s), //…, or blob URLs. Try refreshing the Assets Library.'
+        );
+      } else {
+        this.errorText.set(
+          'Video asset has no playable URL. Refresh the Assets Library, or re-add the video from a direct link.'
+        );
       }
     }
   }
@@ -2396,6 +2581,42 @@ export class PdfEditorComponent implements AfterViewInit {
     this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, textValue: value }));
   }
 
+  /** Flush textarea value then exit edit (blur may run before last ngModel tick). */
+  protected onTextWidgetEditorBlur(pageIndex: number, widgetId: string, ev: FocusEvent) {
+    const ta = ev.target as HTMLTextAreaElement | null;
+    if (ta && this.textFeatureEnabled()) {
+      this.updateTextWidget(pageIndex, widgetId, ta.value);
+    }
+    this.stopEditingWidget(widgetId);
+  }
+
+  protected onTextWidgetEditorEscape(pageIndex: number, widgetId: string, ev: Event) {
+    const ta = ev.target as HTMLTextAreaElement | null;
+    if (ta && this.textFeatureEnabled()) {
+      this.updateTextWidget(pageIndex, widgetId, ta.value);
+    }
+    this.stopEditingWidget(widgetId);
+  }
+
+  /** Enter commits and leaves edit; Shift+Enter inserts a newline. */
+  protected onTextWidgetEditorEnter(pageIndex: number, widgetId: string, ev: Event) {
+    const ke = ev as KeyboardEvent;
+    if (ke.key !== 'Enter' || ke.shiftKey) return;
+    ke.preventDefault();
+    const ta = ke.target as HTMLTextAreaElement | null;
+    if (ta && this.textFeatureEnabled()) {
+      this.updateTextWidget(pageIndex, widgetId, ta.value);
+    }
+    this.stopEditingWidget(widgetId);
+  }
+
+  /** Empty text widget: full hit-target so clicks don’t fall through to widget drag; + pill stays hover-only. */
+  protected onTextWidgetEmptyActivate(widgetId: string, ev: Event) {
+    if (!this.textFeatureEnabled()) return;
+    ev.preventDefault?.();
+    this.startEditingWidget(widgetId, ev);
+  }
+
   protected updateLayeredTextWidget(pageIndex: number, widgetId: string, value: string) {
     this.updateWidget(pageIndex, widgetId, (w) =>
       w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, layeredTextValue: value } : w
@@ -2549,6 +2770,25 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected onPageStackDrop(pageIndex: number, ev: DragEvent) {
     ev.preventDefault();
+
+    const assetLibRaw =
+      ev.dataTransfer?.getData(PdfEditorComponent.assetLibraryDragMime) ||
+      ev.dataTransfer?.getData('text/plain') ||
+      '';
+    const assetPayload = this.parseAssetLibraryDropPayload(assetLibRaw);
+    if (assetPayload) {
+      const row = this.resolveAssetLibraryRowFromPayload(assetPayload);
+      if (row) {
+        const { overlay } = this.getCanvasPair(pageIndex);
+        if (!overlay) return;
+        const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
+        const pt = this.eventToPoint(overlay, pseudoPointer);
+        this.placeAssetLibraryRowAtPoint(pageIndex, row, pt.x, pt.y);
+      } else {
+        this.errorText.set('That asset is no longer in the list. Refresh the Assets Library and try again.');
+      }
+      return;
+    }
 
     // Dragging from our sidebar "Insert Image" tile.
     const pdfInsert = ev.dataTransfer?.getData('application/x-avyro-pdf-insert') ?? '';
@@ -4283,13 +4523,24 @@ export class PdfEditorComponent implements AfterViewInit {
         name: nextName,
         editedBy: this.getEditedBy()
       });
+      if (!created?.id || typeof created.id !== 'string') {
+        throw new Error('Save did not return a new document id. Check the API and try again.');
+      }
       // New version gets a new doc id; carry local widget/furniture/title state forward
       // so image/video overlays remain editable after navigation/refresh.
       await this.persistMediaWidgetsForDoc(created.id, currentWidgets);
       this.persistPageFurnitureForDoc(created.id, currentFurniture);
       if (currentTitle) this.persistTitleForDoc(created.id, currentTitle);
+      try {
+        await this.api.putFurniture(created.id, this.normalizePageFurniture(currentFurniture));
+      } catch {
+        // PDF is stored; furniture remains in localStorage for this browser.
+      }
       this.showSlideToast('New version saved');
-      await this.router.navigate(['/edit', created.id]);
+      const nav = await this.router.navigate(['/edit', created.id]);
+      if (nav === false) {
+        this.errorText.set('Version saved, but navigation failed. Open the new version from the library.');
+      }
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Save failed - reconnecting.');
     } finally {
@@ -4333,6 +4584,11 @@ export class PdfEditorComponent implements AfterViewInit {
         : await this.buildSemanticExportBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
       await this.persistMediaWidgetsForDoc(id, this.widgetsByPage());
+      try {
+        await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
+      } catch {
+        // Bytes updated; furniture still in localStorage.
+      }
       this.showSlideToast('Original overwritten successfully');
       await this.loadProposalVersions(id);
       this.closeOverwriteConfirmation();
@@ -6429,7 +6685,8 @@ export class PdfEditorComponent implements AfterViewInit {
         color: this.textColor(),
         fontSize: this.textSize(),
         fontStyle: this.textStyle(),
-        fontFamily: this.textFamily()
+        fontFamily: this.textFamily(),
+        source: 'textEdit'
       };
       if (this.editingReplace && this.editingReplace.pageIndex === pageIndex) {
         this.updateTextReplace(pageIndex, this.editingReplace.idx, r);
@@ -6672,7 +6929,10 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
-  private isSameReplaceRegion(a: TextReplace, b: TextReplace): boolean {
+  private isSameReplaceRegion(
+    a: Pick<TextReplace, 'x' | 'y' | 'w' | 'h'>,
+    b: Pick<TextReplace, 'x' | 'y' | 'w' | 'h'>
+  ): boolean {
     const left = Math.max(a.x, b.x);
     const top = Math.max(a.y, b.y);
     const right = Math.min(a.x + a.w, b.x + b.w);
