@@ -68,6 +68,11 @@ type Widget = {
   h: number;
   /** PNG/JPEG data URL for image widgets */
   imageSrc?: string;
+  /** Natural pixel size of imageSrc (for crop UI / export) */
+  imageNaturalW?: number;
+  imageNaturalH?: number;
+  /** Crop rect in full-image pixel coordinates (image widgets only) */
+  imageCrop?: { x: number; y: number; w: number; h: number };
   /** Object URL for video widgets (revoked on remove) */
   videoSrc?: string;
   /** Plain text for text widgets */
@@ -105,6 +110,9 @@ type PersistedMediaWidget = {
   w: number;
   h: number;
   imageSrc?: string;
+  imageNaturalW?: number;
+  imageNaturalH?: number;
+  imageCrop?: { x: number; y: number; w: number; h: number };
   videoSrc?: string;
 };
 
@@ -641,6 +649,10 @@ export class PdfEditorComponent implements AfterViewInit {
   private layeredImagePickTargetWidgetId: string | null = null;
 
   private readonly videoObjectUrlByWidgetId = new Map<string, string>();
+  /** Maps detected embedded-media id → replacement overlay id (session-only; survives slight re-detection drift). */
+  private readonly embeddedImageReplacementByDetectedId = new Map<string, string>();
+  private readonly persistedVideoDbName = 'avyro-editor-media';
+  private readonly persistedVideoStoreName = 'videoByRef';
 
   private activeWidgetOp:
     | null
@@ -664,14 +676,27 @@ export class PdfEditorComponent implements AfterViewInit {
   private static readonly placedImageHandleHit = 10;
 
   protected readonly selectedPlacedImageId = signal<string | null>(null);
-  protected readonly imageCropSession = signal<{
-    pageIndex: number;
-    id: string;
-    leftPct: number;
-    topPct: number;
-    rightPct: number;
-    bottomPct: number;
-  } | null>(null);
+  protected readonly imageCropSession = signal<
+    | {
+        mode: 'placed';
+        pageIndex: number;
+        id: string;
+        leftPct: number;
+        topPct: number;
+        rightPct: number;
+        bottomPct: number;
+      }
+    | {
+        mode: 'widget';
+        pageIndex: number;
+        widgetId: string;
+        leftPct: number;
+        topPct: number;
+        rightPct: number;
+        bottomPct: number;
+      }
+    | null
+  >(null);
 
   protected readonly isLoading = signal(false);
   /** Shown in the busy overlay while `isLoading` (and related) is true. */
@@ -875,8 +900,8 @@ export class PdfEditorComponent implements AfterViewInit {
     effect(() => {
       const id = this.docId();
       const widgets = this.widgetsByPage();
-      if (!id) return;
-      this.persistMediaWidgetsForDoc(id, widgets);
+      if (!id || this.isLoading()) return;
+      void this.persistMediaWidgetsForDoc(id, widgets);
     });
 
     effect(() => {
@@ -1839,7 +1864,14 @@ export class PdfEditorComponent implements AfterViewInit {
             img.naturalWidth,
             img.naturalHeight
           );
-          return { ...w, ...nextBounds, imageSrc: dataUrl };
+          return {
+            ...w,
+            ...nextBounds,
+            imageSrc: dataUrl,
+            imageNaturalW: Math.max(1, img.naturalWidth),
+            imageNaturalH: Math.max(1, img.naturalHeight),
+            imageCrop: undefined
+          };
         });
       } finally {
         // Always clear replace target, even when crop/validation is cancelled.
@@ -2125,6 +2157,16 @@ export class PdfEditorComponent implements AfterViewInit {
         const nw = maxW;
         const nh = Math.max(10, Math.round((img.height / img.width) * maxW));
         this.patchWidgetSize(pageIndex, id, nw, nh);
+        this.updateWidget(pageIndex, id, (w) =>
+          w.kind === 'image'
+            ? {
+                ...w,
+                imageNaturalW: Math.max(1, img.naturalWidth),
+                imageNaturalH: Math.max(1, img.naturalHeight),
+                imageCrop: undefined
+              }
+            : w
+        );
       });
     }
 
@@ -2746,6 +2788,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.embeddedImageReplacementByDetectedId.clear();
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
       this.detectedMediaByPage.set({});
@@ -2854,6 +2897,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.embeddedImageReplacementByDetectedId.clear();
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
       this.detectedMediaByPage.set({});
@@ -2862,7 +2906,7 @@ export class PdfEditorComponent implements AfterViewInit {
       // Key slots are session-scoped (re-created on load).
       this.customKeySlots.set([]);
       this.ensureKeySlotSectionOverrides();
-      this.widgetsByPage.set(this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
+      this.widgetsByPage.set(await this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
       const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
       this.pageFurniture.set(
         this.normalizePageFurniture(localFurniture ?? furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
@@ -2924,6 +2968,7 @@ export class PdfEditorComponent implements AfterViewInit {
       }
     }
     this.videoObjectUrlByWidgetId.clear();
+    this.embeddedImageReplacementByDetectedId.clear();
     this.editsByPage.set({});
     this.widgetsByPage.set({});
     this.selectedWidgetId.set(null);
@@ -3261,7 +3306,8 @@ export class PdfEditorComponent implements AfterViewInit {
     const hasFlattenOnlyWidgets = Object.values(widgetsByPage).some((list) =>
       (list ?? []).some((w) =>
         w.kind !== 'image' &&
-        w.kind !== 'signature'
+        w.kind !== 'signature' &&
+        w.kind !== 'video'
       )
     );
     if (hasFlattenOnlyWidgets) return true;
@@ -3426,7 +3472,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const { height } = page.getSize();
     for (const w of widgets) {
       if (w.kind === 'image' && w.imageSrc) {
-        const embedded = await this.embedImageDataUrlForPdf(pdf, w.imageSrc);
+        const embedded = await this.embedWidgetImageForPdf(pdf, w);
         page.drawImage(embedded, {
           x: w.x * sx,
           y: height - (w.y + w.h) * sy,
@@ -3443,13 +3489,79 @@ export class PdfEditorComponent implements AfterViewInit {
           width: w.w * sx,
           height: w.h * sy
         });
+        continue;
       }
+      // Video widgets stay interactive in the editor via persisted overlay state.
+      // Do not rasterize a poster into semantic PDF bytes — that made reload look like a static image
+      // and hid the real player when overlay metadata failed to restore.
     }
   }
 
   private async embedImageDataUrlForPdf(pdf: PDFDocument, dataUrl: string) {
     const { bytes, kind } = this.dataUrlToBytes(dataUrl);
     return kind === 'png' ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+  }
+
+  private getSourceRectForWidgetImage(w: Widget, el: HTMLImageElement) {
+    const natW = Math.max(1, el.naturalWidth);
+    const natH = Math.max(1, el.naturalHeight);
+    if (w.kind !== 'image') return { sx: 0, sy: 0, sw: natW, sh: natH };
+    if (w.imageCrop) {
+      return { sx: w.imageCrop.x, sy: w.imageCrop.y, sw: w.imageCrop.w, sh: w.imageCrop.h };
+    }
+    const sw = w.imageNaturalW && w.imageNaturalW > 0 ? w.imageNaturalW : natW;
+    const sh = w.imageNaturalH && w.imageNaturalH > 0 ? w.imageNaturalH : natH;
+    return { sx: 0, sy: 0, sw, sh };
+  }
+
+  private async embedWidgetImageForPdf(pdf: PDFDocument, w: Widget) {
+    if (w.kind !== 'image' || !w.imageSrc) throw new Error('Invalid image widget.');
+    const el = await this.loadHtmlImage(w.imageSrc);
+    const { sx, sy, sw, sh } = this.getSourceRectForWidgetImage(w, el);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.floor(sw));
+    c.height = Math.max(1, Math.floor(sh));
+    const cctx = c.getContext('2d');
+    if (!cctx) throw new Error('Canvas unavailable.');
+    cctx.drawImage(el, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    const png = c.toDataURL('image/png');
+    const { bytes } = this.dataUrlToBytes(png);
+    return pdf.embedPng(bytes);
+  }
+
+  private waitForVideoReady(video: HTMLVideoElement, timeoutMs = 12000): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let done = false;
+      const cleanup = () => {
+        video.onloadeddata = null;
+        video.onloadedmetadata = null;
+        video.oncanplay = null;
+        video.onerror = null;
+      };
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        cleanup();
+        if (ok) resolve();
+        else reject(new Error('video'));
+      };
+      const timer = window.setTimeout(() => finish(false), Math.max(500, timeoutMs));
+      const onReady = () => finish(true);
+      video.onloadeddata = onReady;
+      video.oncanplay = onReady;
+      video.onloadedmetadata = () => {
+        if (video.readyState >= 2) onReady();
+      };
+      video.onerror = () => finish(false);
+      if (video.readyState >= 2) onReady();
+      else {
+        video.muted = true;
+        void video.play().catch(() => {
+          /* autoplay may be blocked; loadeddata/canplay still used */
+        });
+      }
+    });
   }
 
   /**
@@ -3618,7 +3730,8 @@ export class PdfEditorComponent implements AfterViewInit {
       if (w.kind === 'image' && w.imageSrc) {
         try {
           const img = await this.loadHtmlImage(w.imageSrc);
-          ctx.drawImage(img, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
+          const { sx, sy, sw, sh } = this.getSourceRectForWidgetImage(w, img);
+          ctx.drawImage(img, sx, sy, sw, sh, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
         } catch {
           // ignore
         }
@@ -3732,12 +3845,7 @@ export class PdfEditorComponent implements AfterViewInit {
           v.playsInline = true;
           v.preload = 'metadata';
           v.src = w.videoSrc;
-          await new Promise<void>((resolve, reject) => {
-            const onOk = () => resolve();
-            const onErr = () => reject(new Error('video'));
-            v.onloadeddata = onOk;
-            v.onerror = onErr;
-          });
+          await this.waitForVideoReady(v, 3500);
           ctx.drawImage(v, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
         } catch {
           ctx.save();
@@ -3943,7 +4051,7 @@ export class PdfEditorComponent implements AfterViewInit {
             }
           };
         }
-        if (w.kind === 'image') return { ...w, imageSrc: undefined };
+        if (w.kind === 'image') return { ...w, imageSrc: undefined, imageNaturalW: undefined, imageNaturalH: undefined, imageCrop: undefined };
         if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
           return { ...w, imageSrc: undefined, layeredTextValue: '' };
         }
@@ -3975,10 +4083,18 @@ export class PdfEditorComponent implements AfterViewInit {
         ? await this.buildFlattenedExportBytes()
         : await this.buildSemanticExportBytes();
       const nextName = this.buildVersionName(this.fileName() ?? 'Proposal.pdf');
+      const currentWidgets = this.widgetsByPage();
+      const currentFurniture = this.pageFurniture();
+      const currentTitle = this.fileName();
       const created = await this.api.saveAsNewProposal(id, safeBytes, {
         name: nextName,
         editedBy: this.getEditedBy()
       });
+      // New version gets a new doc id; carry local widget/furniture/title state forward
+      // so image/video overlays remain editable after navigation/refresh.
+      await this.persistMediaWidgetsForDoc(created.id, currentWidgets);
+      this.persistPageFurnitureForDoc(created.id, currentFurniture);
+      if (currentTitle) this.persistTitleForDoc(created.id, currentTitle);
       this.showSlideToast('New version saved');
       await this.router.navigate(['/edit', created.id]);
     } catch (e) {
@@ -4023,6 +4139,7 @@ export class PdfEditorComponent implements AfterViewInit {
         ? await this.buildFlattenedExportBytes()
         : await this.buildSemanticExportBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
+      await this.persistMediaWidgetsForDoc(id, this.widgetsByPage());
       this.showSlideToast('Original overwritten successfully');
       await this.loadProposalVersions(id);
       this.closeOverwriteConfirmation();
@@ -4110,6 +4227,7 @@ export class PdfEditorComponent implements AfterViewInit {
         ? await this.buildFlattenedExportBytes()
         : await this.buildSemanticExportBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
+      await this.persistMediaWidgetsForDoc(id, this.widgetsByPage());
       await this.loadProposalVersions(id);
     } catch {
       // Avoid blocking editing flow for auto-version failures.
@@ -4352,7 +4470,9 @@ export class PdfEditorComponent implements AfterViewInit {
   protected parseWidgetVideo(src?: string): ParsedVideoEmbed | null {
     const raw = (src ?? '').trim();
     if (!raw) return null;
-    return parseVideoEmbedInput(raw);
+    const parent =
+      typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
+    return parseVideoEmbedInput(raw, { embedParent: parent });
   }
 
   protected selectedItemWidget(): { pageIndex: number; widget: Widget } | null {
@@ -4411,6 +4531,103 @@ export class PdfEditorComponent implements AfterViewInit {
     this.beginEmbeddedMediaReplace(selected.pageIndex, selected.media);
   }
 
+  protected cropSelectedDetectedEmbeddedImage(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected || selected.media.kind !== 'image') return;
+    const { pageIndex, media } = selected;
+    const anno = this.findReplacementImageAnnoForDetected(pageIndex, media);
+    if (!anno) {
+      this.errorText.set(
+        'Crop works on your replacement picture. Click Replace, pick an image, then Crop to fine-tune it.'
+      );
+      return;
+    }
+    this.errorText.set(null);
+    this.selectedPlacedImageId.set(anno.id);
+    this.openPlacedImageCropSession(pageIndex, anno.id);
+  }
+
+  private detectedMediaLinkKey(pageIndex: number, detectedId: string): string {
+    return `${pageIndex}:${detectedId}`;
+  }
+
+  /**
+   * Find the user-placed overlay for an embedded PDF image. Geometry-based ids can miss after
+   * media re-detection (sub-pixel drift); we also store a direct link and fall back to bbox match.
+   */
+  private findReplacementImageAnnoForDetected(pageIndex: number, media: DetectedPdfMedia): ImageAnno | null {
+    const images = this.editsByPage()[pageIndex]?.images ?? [];
+    if (images.length === 0) return null;
+
+    const exactId = this.replacementImageIdForBox(pageIndex, media);
+    const byExact = images.find((i) => i.id === exactId);
+    if (byExact) return byExact;
+
+    const mappedId = this.embeddedImageReplacementByDetectedId.get(this.detectedMediaLinkKey(pageIndex, media.id));
+    if (mappedId) {
+      const byMap = images.find((i) => i.id === mappedId);
+      if (byMap) return byMap;
+    }
+
+    const prefix = `pdfmedia_replace_p${pageIndex}_`;
+    const cxA = media.x + media.w / 2;
+    const cyA = media.y + media.h / 2;
+    const maxDim = Math.max(40, media.w, media.h);
+
+    let best: ImageAnno | null = null;
+    let bestDist = Infinity;
+    for (const im of images) {
+      if (!im.id.startsWith(prefix)) continue;
+      const cxB = im.x + im.w / 2;
+      const cyB = im.y + im.h / 2;
+      const d = Math.hypot(cxA - cxB, cyA - cyB);
+      if (d < bestDist) {
+        bestDist = d;
+        best = im;
+      }
+    }
+    if (best && bestDist <= maxDim * 0.55) return best;
+    return null;
+  }
+
+  protected onDetectedEmbeddedImageDragOver(ev: DragEvent) {
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected || selected.media.kind !== 'image') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    try {
+      ev.dataTransfer!.dropEffect = 'copy';
+    } catch {
+      // ignore
+    }
+  }
+
+  protected async onDetectedEmbeddedImageDrop(ev: DragEvent) {
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected || selected.media.kind !== 'image') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const file = ev.dataTransfer?.files?.[0] ?? null;
+    if (!file) return;
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+      this.errorText.set('Drop a PNG or JPEG image.');
+      return;
+    }
+    this.errorText.set(null);
+    this.isInserting.set(true);
+    try {
+      const dataUrl = await this.readAndCropImageFile(file);
+      if (!dataUrl) return;
+      await this.placeReplacementImageInPdfMediaRect(selected.pageIndex, dataUrl, selected.media);
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
+    } finally {
+      this.isInserting.set(false);
+    }
+  }
+
   protected removeSelectedDetectedMedia(ev: Event) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -4441,6 +4658,18 @@ export class PdfEditorComponent implements AfterViewInit {
       default:
         return 'Selected item';
     }
+  }
+
+  protected selectedVideoSourceDisplay(): string {
+    const selected = this.selectedItemWidget();
+    if (!selected || selected.widget.kind !== 'video') return '';
+    const src = (selected.widget.videoSrc ?? '').trim();
+    if (!src) return '';
+    if (src.startsWith('data:video/')) return 'Uploaded video (stored data URL)';
+    if (src.startsWith('idb-video:')) return 'Uploaded video (stored local ref)';
+    const parsed = this.parseWidgetVideo(src);
+    if (parsed && (parsed.kind === 'youtube' || parsed.kind === 'vimeo')) return src;
+    return src;
   }
 
   protected canReplaceSelectedWidget(): boolean {
@@ -6858,6 +7087,7 @@ export class PdfEditorComponent implements AfterViewInit {
     } else {
       this.pushImageAnno(pageIndex, anno);
     }
+    this.embeddedImageReplacementByDetectedId.set(this.detectedMediaLinkKey(pageIndex, box.id), id);
     this.selectedPlacedImageId.set(id);
     this.redrawOverlay(pageIndex);
   }
@@ -7527,15 +7757,56 @@ export class PdfEditorComponent implements AfterViewInit {
   protected openImageCrop() {
     const id = this.selectedPlacedImageId();
     if (!id) return;
-    const pageIndex = this.activePageIndex();
+    this.openPlacedImageCropSession(this.activePageIndex(), id);
+  }
+
+  private openPlacedImageCropSession(pageIndex: number, id: string) {
     const anno = this.getImageAnno(pageIndex, id);
     if (!anno) return;
     const sw = Math.max(1, anno.srcW);
     const sh = Math.max(1, anno.srcH);
     const c = anno.crop ?? { x: 0, y: 0, w: sw, h: sh };
     this.imageCropSession.set({
+      mode: 'placed',
       pageIndex,
       id,
+      leftPct: (c.x / sw) * 100,
+      topPct: (c.y / sh) * 100,
+      rightPct: ((sw - c.x - c.w) / sw) * 100,
+      bottomPct: ((sh - c.y - c.h) / sh) * 100
+    });
+  }
+
+  protected async openSelectedWidgetImageCrop(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedItemWidget();
+    if (!sel || sel.widget.kind !== 'image') return;
+    const imageSrc = sel.widget.imageSrc;
+    if (!imageSrc) return;
+    const { pageIndex, widget } = sel;
+    let w = widget;
+    if (!w.imageNaturalW || !w.imageNaturalH) {
+      try {
+        const img = await this.loadHtmlImage(imageSrc);
+        const nw = Math.max(1, img.naturalWidth);
+        const nh = Math.max(1, img.naturalHeight);
+        this.updateWidget(pageIndex, w.id, (cur) =>
+          cur.kind === 'image' ? { ...cur, imageNaturalW: nw, imageNaturalH: nh } : cur
+        );
+        w = { ...w, imageNaturalW: nw, imageNaturalH: nh };
+      } catch {
+        this.errorText.set('Could not read image for cropping.');
+        return;
+      }
+    }
+    const sw = Math.max(1, w.imageNaturalW ?? 1);
+    const sh = Math.max(1, w.imageNaturalH ?? 1);
+    const c = w.imageCrop ?? { x: 0, y: 0, w: sw, h: sh };
+    this.imageCropSession.set({
+      mode: 'widget',
+      pageIndex,
+      widgetId: w.id,
       leftPct: (c.x / sw) * 100,
       topPct: (c.y / sh) * 100,
       rightPct: ((sw - c.x - c.w) / sw) * 100,
@@ -7555,31 +7826,95 @@ export class PdfEditorComponent implements AfterViewInit {
   protected applyImageCrop() {
     const s = this.imageCropSession();
     if (!s) return;
-    const anno = this.getImageAnno(s.pageIndex, s.id);
-    if (!anno) return;
-    const sw = Math.max(1, anno.srcW);
-    const sh = Math.max(1, anno.srcH);
     let l = clamp(s.leftPct, 0, 49);
     let t = clamp(s.topPct, 0, 49);
     let r = clamp(s.rightPct, 0, 49);
     let b = clamp(s.bottomPct, 0, 49);
     if (l + r >= 99.5) r = Math.max(0, 99.5 - l);
     if (t + b >= 99.5) b = Math.max(0, 99.5 - t);
-    const x = (l / 100) * sw;
-    const y = (t / 100) * sh;
-    const w = Math.max(1, (1 - (l + r) / 100) * sw);
-    const h = Math.max(1, (1 - (t + b) / 100) * sh);
+
+    if (s.mode === 'placed') {
+      const anno = this.getImageAnno(s.pageIndex, s.id);
+      if (!anno) return;
+      const sw = Math.max(1, anno.srcW);
+      const sh = Math.max(1, anno.srcH);
+      const cx = (l / 100) * sw;
+      const cy = (t / 100) * sh;
+      const cw = Math.max(1, (1 - (l + r) / 100) * sw);
+      const ch = Math.max(1, (1 - (t + b) / 100) * sh);
+      this.beginHistoryStep();
+      this.updatePlacedImage(s.pageIndex, s.id, (a) => ({
+        ...a,
+        crop: {
+          x: Math.round(cx),
+          y: Math.round(cy),
+          w: Math.round(cw),
+          h: Math.round(ch)
+        }
+      }));
+      this.imageCropSession.set(null);
+      this.redrawOverlay(s.pageIndex);
+      return;
+    }
+
+    const widget = this.getWidget(s.pageIndex, s.widgetId);
+    if (!widget || widget.kind !== 'image') return;
+    const sw = Math.max(1, widget.imageNaturalW ?? 1);
+    const sh = Math.max(1, widget.imageNaturalH ?? 1);
+    const cx = (l / 100) * sw;
+    const cy = (t / 100) * sh;
+    const cw = Math.max(1, (1 - (l + r) / 100) * sw);
+    const ch = Math.max(1, (1 - (t + b) / 100) * sh);
     this.beginHistoryStep();
-    this.updatePlacedImage(s.pageIndex, s.id, (a) => ({
-      ...a,
-      crop: { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }
-    }));
+    this.updateWidget(s.pageIndex, s.widgetId, (cur) => {
+      if (cur.kind !== 'image') return cur;
+      return {
+        ...cur,
+        imageCrop: {
+          x: Math.round(cx),
+          y: Math.round(cy),
+          w: Math.round(cw),
+          h: Math.round(ch)
+        }
+      };
+    });
     this.imageCropSession.set(null);
-    this.redrawOverlay(s.pageIndex);
   }
 
   protected cancelImageCrop() {
     this.imageCropSession.set(null);
+  }
+
+  protected widgetImageCropWrapStyle(w: Widget): Record<string, string> {
+    if (w.kind !== 'image') return {};
+    return {
+      width: `${w.w}px`,
+      height: `${w.h}px`,
+      overflow: 'hidden',
+      borderRadius: '12px',
+      background: '#0f172a'
+    };
+  }
+
+  protected widgetImageCropImgStyle(w: Widget): Record<string, string> {
+    if (w.kind !== 'image') return {};
+    const nw = Math.max(1, w.imageNaturalW ?? 1);
+    const nh = Math.max(1, w.imageNaturalH ?? 1);
+    const c = w.imageCrop ?? { x: 0, y: 0, w: nw, h: nh };
+    const scale = Math.min(w.w / c.w, w.h / c.h);
+    const dispW = nw * scale;
+    const dispH = nh * scale;
+    const ml = -c.x * scale;
+    const mt = -c.y * scale;
+    return {
+      width: `${dispW}px`,
+      height: `${dispH}px`,
+      marginLeft: `${ml}px`,
+      marginTop: `${mt}px`,
+      display: 'block',
+      maxWidth: 'none',
+      verticalAlign: 'top'
+    };
   }
 
   protected removeSelectedPlacedImage() {
@@ -7781,14 +8116,25 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private persistMediaWidgetsForDoc(id: string, widgetsByPage: Record<number, Widget[]>) {
+  private async persistMediaWidgetsForDoc(id: string, widgetsByPage: Record<number, Widget[]>) {
     const key = this.mediaWidgetsStorageKey(id);
     const out: PersistedMediaWidgetsByPage = {};
     for (const [k, list] of Object.entries(widgetsByPage)) {
       const pageIndex = Number(k);
-      const media = (list ?? [])
-        .filter((w) => w.kind === 'image' || w.kind === 'video')
-        .map((w) => ({
+      const media: PersistedMediaWidget[] = [];
+      for (const w of list ?? []) {
+        if (w.kind !== 'image' && w.kind !== 'video') continue;
+        let persistedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
+        if (w.kind === 'video' && persistedVideoSrc?.startsWith('blob:')) {
+          const blobDataUrl = await this.blobUrlToDataUrl(persistedVideoSrc);
+          if (blobDataUrl) persistedVideoSrc = blobDataUrl;
+        }
+        if (w.kind === 'video' && persistedVideoSrc?.startsWith('data:video/')) {
+          const ref = this.persistedVideoRef(id, w.id);
+          await this.putPersistedVideoDataUrl(ref, persistedVideoSrc);
+          persistedVideoSrc = ref;
+        }
+        media.push({
           id: w.id,
           kind: (w.kind === 'image' ? 'image' : 'video') as 'image' | 'video',
           x: w.x,
@@ -7796,8 +8142,12 @@ export class PdfEditorComponent implements AfterViewInit {
           w: w.w,
           h: w.h,
           imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
-          videoSrc: w.kind === 'video' ? w.videoSrc : undefined
-        }));
+          imageNaturalW: w.kind === 'image' ? w.imageNaturalW : undefined,
+          imageNaturalH: w.kind === 'image' ? w.imageNaturalH : undefined,
+          imageCrop: w.kind === 'image' ? w.imageCrop : undefined,
+          videoSrc: persistedVideoSrc
+        });
+      }
       if (media.length > 0) out[pageIndex] = media;
     }
     try {
@@ -7807,7 +8157,7 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private loadPersistedMediaWidgetsForDoc(id: string, pageCount: number): Record<number, Widget[]> {
+  private async loadPersistedMediaWidgetsForDoc(id: string, pageCount: number): Promise<Record<number, Widget[]>> {
     const key = this.mediaWidgetsStorageKey(id);
     try {
       const raw = localStorage.getItem(key);
@@ -7817,9 +8167,14 @@ export class PdfEditorComponent implements AfterViewInit {
       for (const [k, list] of Object.entries(parsed ?? {})) {
         const pageIndex = Number(k);
         if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) continue;
-        const widgets: Widget[] = (list ?? [])
-          .filter((w) => w && (w.kind === 'image' || w.kind === 'video'))
-          .map((w) => ({
+        const widgets: Widget[] = [];
+        for (const w of list ?? []) {
+          if (!w || (w.kind !== 'image' && w.kind !== 'video')) continue;
+          let resolvedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
+          if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
+            resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
+          }
+          widgets.push({
             id: w.id,
             kind: w.kind,
             x: Number.isFinite(w.x) ? w.x : 0,
@@ -7827,8 +8182,20 @@ export class PdfEditorComponent implements AfterViewInit {
             w: Number.isFinite(w.w) ? w.w : 220,
             h: Number.isFinite(w.h) ? w.h : 160,
             imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
-            videoSrc: w.kind === 'video' ? w.videoSrc : undefined
-          }));
+            imageNaturalW: w.kind === 'image' && Number.isFinite(w.imageNaturalW as number) ? w.imageNaturalW : undefined,
+            imageNaturalH: w.kind === 'image' && Number.isFinite(w.imageNaturalH as number) ? w.imageNaturalH : undefined,
+            imageCrop:
+              w.kind === 'image' && w.imageCrop && typeof w.imageCrop === 'object'
+                ? {
+                    x: Number.isFinite(w.imageCrop.x) ? w.imageCrop.x : 0,
+                    y: Number.isFinite(w.imageCrop.y) ? w.imageCrop.y : 0,
+                    w: Number.isFinite(w.imageCrop.w) ? w.imageCrop.w : 1,
+                    h: Number.isFinite(w.imageCrop.h) ? w.imageCrop.h : 1
+                  }
+                : undefined,
+            videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined
+          });
+        }
         if (widgets.length > 0) out[pageIndex] = widgets;
       }
       return out;
@@ -7839,6 +8206,73 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private mediaWidgetsStorageKey(id: string): string {
     return `avyro:pdf-media-widgets:v1:${id}`;
+  }
+
+  private persistedVideoRef(docId: string, widgetId: string): string {
+    return `idb-video:${docId}:${widgetId}`;
+  }
+
+  private openPersistedVideoDb(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.persistedVideoDbName, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(this.persistedVideoStoreName)) {
+          db.createObjectStore(this.persistedVideoStoreName);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error ?? new Error('Failed to open media storage.'));
+    });
+  }
+
+  private async putPersistedVideoDataUrl(ref: string, dataUrl: string): Promise<void> {
+    try {
+      const db = await this.openPersistedVideoDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(this.persistedVideoStoreName, 'readwrite');
+        const store = tx.objectStore(this.persistedVideoStoreName);
+        const req = store.put(dataUrl, ref);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error ?? new Error('Failed to persist video.'));
+      });
+      db.close();
+    } catch {
+      // ignore storage issues
+    }
+  }
+
+  private async getPersistedVideoDataUrl(ref: string): Promise<string | undefined> {
+    try {
+      const db = await this.openPersistedVideoDb();
+      const value = await new Promise<string | undefined>((resolve, reject) => {
+        const tx = db.transaction(this.persistedVideoStoreName, 'readonly');
+        const store = tx.objectStore(this.persistedVideoStoreName);
+        const req = store.get(ref);
+        req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : undefined);
+        req.onerror = () => reject(req.error ?? new Error('Failed to load persisted video.'));
+      });
+      db.close();
+      return value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async blobUrlToDataUrl(blobUrl: string): Promise<string | undefined> {
+    try {
+      const res = await fetch(blobUrl);
+      if (!res.ok) return undefined;
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob media.'));
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   private dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; kind: 'png' | 'jpg' } {

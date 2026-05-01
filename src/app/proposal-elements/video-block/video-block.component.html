@@ -27,7 +27,7 @@
     <p class="videoSourceHint">
       {{
         activeSource() === 'embed'
-          ? 'Use YouTube, Vimeo, or a direct video file URL (MP4, WebM, …).'
+          ? 'Use YouTube, Vimeo, Twitch, HLS (.m3u8), or a direct HTTPS / file video URL.'
           : 'Pick a video from gallery or Files. On phones, this opens your photo / video library.'
       }}
     </p>
@@ -87,7 +87,7 @@
 }
 
 <div class="videoFrame" [style.--proposal-video-fit]="presentation().objectFit ?? 'contain'">
-  @if (parsedNow?.kind === 'youtube' || parsedNow?.kind === 'vimeo') {
+  @if (parsedNow?.kind === 'youtube' || parsedNow?.kind === 'vimeo' || parsedNow?.kind === 'twitch') {
     <iframe
       class="videoIframe"
       [src]="parsedNow!.embedSrc | safeVideoUrl"

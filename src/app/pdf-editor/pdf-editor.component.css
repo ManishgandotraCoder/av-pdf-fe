@@ -1108,6 +1108,11 @@
   background: rgba(255, 255, 255, 0.88);
 }
 
+.rightbarMediaActions--imageReplaceFocus {
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
+}
+
 .rightbarMediaActions__title {
   font-size: 12px;
   font-weight: 700;
@@ -1136,6 +1141,12 @@
   cursor: pointer;
 }
 
+.rightbarMediaActions__btn--highlight {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(219, 234, 254, 0.95);
+  color: rgba(30, 64, 175, 0.98);
+}
+
 .rightbarMediaActions__icon {
   width: 14px;
   height: 14px;
@@ -1145,6 +1156,19 @@
 .rightbarMediaActions__btnDanger {
   border-color: rgba(220, 38, 38, 0.32);
   color: rgba(153, 27, 27, 0.95);
+}
+
+.rightbarDetectedImageDrop {
+  margin-top: 8px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+  background: rgba(219, 234, 254, 0.35);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: rgba(30, 64, 175, 0.92);
+  text-align: center;
 }
 
 .rightbarTextGate {
@@ -2246,6 +2270,12 @@
 
 .widget--image .widget__media {
   border-radius: 12px;
+}
+
+.widget__imageCropWrap {
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
 }
 
 .widget__mediaIframe {

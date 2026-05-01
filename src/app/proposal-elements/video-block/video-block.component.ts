@@ -35,7 +35,10 @@ export class VideoBlockComponent {
 
   protected readonly parsed = computed(() => {
     const raw = this.playableUrlRaw().trim();
-    return raw ? parseVideoEmbedInput(raw) : null;
+    if (!raw) return null;
+    const parent =
+      typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
+    return parseVideoEmbedInput(raw, { embedParent: parent });
   });
 
   protected playableUrlRaw = computed(() =>
@@ -53,6 +56,7 @@ export class VideoBlockComponent {
     const k = this.parsed()?.kind;
     if (k === 'youtube') return 'YouTube embed';
     if (k === 'vimeo') return 'Vimeo embed';
+    if (k === 'twitch') return 'Twitch embed';
     return 'Embedded video';
   });
 

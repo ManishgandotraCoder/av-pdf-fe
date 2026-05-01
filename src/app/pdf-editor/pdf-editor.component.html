@@ -480,6 +480,64 @@
     <div class="errorToast" role="alert" aria-live="polite">{{ errorText() }}</div>
   }
 
+  @if (imageCropSession(); as ic) {
+    <div class="imageCropBar" role="region" aria-label="Image crop">
+      <span class="imageCropBar__label">
+        @if (ic.mode === 'placed') {
+          Crop placed image
+        } @else {
+          Crop image widget
+        }
+      </span>
+      <div class="imageCropBar__row">
+        <span>Left</span>
+        <input
+          type="range"
+          min="0"
+          max="49"
+          step="0.5"
+          [ngModel]="ic.leftPct"
+          (ngModelChange)="patchImageCropField('leftPct', $event)"
+        />
+      </div>
+      <div class="imageCropBar__row">
+        <span>Top</span>
+        <input
+          type="range"
+          min="0"
+          max="49"
+          step="0.5"
+          [ngModel]="ic.topPct"
+          (ngModelChange)="patchImageCropField('topPct', $event)"
+        />
+      </div>
+      <div class="imageCropBar__row">
+        <span>Right</span>
+        <input
+          type="range"
+          min="0"
+          max="49"
+          step="0.5"
+          [ngModel]="ic.rightPct"
+          (ngModelChange)="patchImageCropField('rightPct', $event)"
+        />
+      </div>
+      <div class="imageCropBar__row">
+        <span>Bottom</span>
+        <input
+          type="range"
+          min="0"
+          max="49"
+          step="0.5"
+          [ngModel]="ic.bottomPct"
+          (ngModelChange)="patchImageCropField('bottomPct', $event)"
+        />
+      </div>
+      <button type="button" class="placedImageTools__btn" (click)="applyImageCrop()">Apply crop</button>
+      <button type="button" class="placedImageTools__btn" (click)="cancelImageCrop()">Cancel</button>
+    </div>
+  }
+
   @if ((isLoading() || isInserting() || isImagePlacing()) && !imageUploadCropModal()) {
     <div class="busyOverlay" role="status" aria-live="polite" aria-busy="true">
       <div class="busyOverlay__panel">
@@ -886,7 +944,13 @@
                           }
                           @case ('image') {
                             @if (w.imageSrc) {
-                              <img class="widget__media" [src]="w.imageSrc" alt="" draggable="false" />
+                              @if (w.imageCrop && w.imageNaturalW && w.imageNaturalH) {
+                                <div class="widget__imageCropWrap" [ngStyle]="widgetImageCropWrapStyle(w)">
+                                  <img [src]="w.imageSrc" alt="" draggable="false" [ngStyle]="widgetImageCropImgStyle(w)" />
+                                </div>
+                              } @else {
+                                <img class="widget__media" [src]="w.imageSrc" alt="" draggable="false" />
+                              }
                             } @else {
                               <div class="widget__label">Image</div>
                             }
@@ -917,20 +981,21 @@
                           @case ('video') {
                             @if (w.videoSrc) {
                               @if (parseWidgetVideo(w.videoSrc); as parsedVideo) {
-                                @if (parsedVideo.kind === 'youtube' || parsedVideo.kind === 'vimeo') {
+                                @if (parsedVideo.kind === 'youtube' || parsedVideo.kind === 'vimeo' || parsedVideo.kind === 'twitch') {
                                   <iframe
                                     class="widget__media widget__mediaIframe"
                                     [src]="parsedVideo.embedSrc | safeVideoUrl"
                                     title="Embedded video"
                                     loading="lazy"
+                                    referrerpolicy="strict-origin-when-cross-origin"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                     allowfullscreen
                                   ></iframe>
                                 } @else {
-                                  <video class="widget__media" [src]="parsedVideo.embedSrc" controls draggable="false"></video>
+                                  <video class="widget__media" [src]="parsedVideo.embedSrc" controls playsinline preload="metadata" draggable="false"></video>
                                 }
                               } @else {
-                                <video class="widget__media" [src]="w.videoSrc" controls draggable="false"></video>
+                                <video class="widget__media" [src]="w.videoSrc" controls playsinline preload="metadata" draggable="false"></video>
                               }
                             } @else {
                               <div class="widget__label">Video</div>
@@ -1302,22 +1367,36 @@
               </section>
 
               @if (selectedItemWidget(); as selectedItem) {
-                <div class="rightbarMediaActions" role="group" aria-label="Selected media actions">
+                <div
+                  class="rightbarMediaActions"
+                  [class.rightbarMediaActions--imageReplaceFocus]="selectedItem.widget.kind === 'image'"
+                  role="group"
+                  aria-label="Selected media actions"
+                >
                   <div class="rightbarMediaActions__title">
                     {{ selectedWidgetTitle() }}
                   </div>
                   <div class="rightbarAssetsHint">
                     Type: {{ selectedItem.widget.kind }}
                   </div>
+                  @if (selectedItem.widget.kind === 'video' && selectedVideoSourceDisplay()) {
+                    <div class="rightbarAssetsHint">Source: {{ selectedVideoSourceDisplay() }}</div>
+                  }
                   <div class="rightbarMediaActions__row">
                     <button
                       type="button"
                       class="rightbarMediaActions__btn"
+                      [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'image'"
                       [disabled]="!canReplaceSelectedWidget()"
                       (click)="replaceSelectedWidget($event)"
                     >
                       Replace
                     </button>
+                    @if (selectedItem.widget.kind === 'image' && selectedItem.widget.imageSrc) {
+                      <button type="button" class="rightbarMediaActions__btn" (click)="openSelectedWidgetImageCrop($event)">
+                        Crop
+                      </button>
+                    }
                     <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedWidget($event)">
                       Remove
                     </button>
@@ -1326,13 +1405,40 @@
               }
 
               @if (selectedDetectedMediaItem(); as selectedDetected) {
-                <div class="rightbarMediaActions" role="group" aria-label="Detected media actions">
+                <div
+                  class="rightbarMediaActions"
+                  [class.rightbarMediaActions--imageReplaceFocus]="selectedDetected.media.kind === 'image'"
+                  role="group"
+                  aria-label="Detected media actions"
+                >
                   <div class="rightbarMediaActions__title">{{ selectedDetectedMediaTitle() }}</div>
                   <div class="rightbarAssetsHint">Type: {{ selectedDetected.media.kind }} (embedded in PDF)</div>
+                  @if (selectedDetected.media.kind === 'image') {
+                    <div class="rightbarAssetsHint">
+                      Crop adjusts your replacement image after Replace (not the original PDF bitmap).
+                    </div>
+                    <div
+                      class="rightbarDetectedImageDrop"
+                      (dragover)="onDetectedEmbeddedImageDragOver($event)"
+                      (drop)="onDetectedEmbeddedImageDrop($event)"
+                    >
+                      Drag & drop PNG or JPEG here to replace (crop step follows)
+                    </div>
+                  }
                   <div class="rightbarMediaActions__row">
-                    <button type="button" class="rightbarMediaActions__btn" (click)="replaceSelectedDetectedMedia($event)">
-                      Update
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      [class.rightbarMediaActions__btn--highlight]="selectedDetected.media.kind === 'image'"
+                      (click)="replaceSelectedDetectedMedia($event)"
+                    >
+                      {{ selectedDetected.media.kind === 'image' ? 'Replace' : 'Update' }}
                     </button>
+                    @if (selectedDetected.media.kind === 'image') {
+                      <button type="button" class="rightbarMediaActions__btn" (click)="cropSelectedDetectedEmbeddedImage($event)">
+                        Crop
+                      </button>
+                    }
                     <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedDetectedMedia($event)">
                       Remove
                     </button>
@@ -1341,12 +1447,16 @@
               }
 
               @if (selectedPlacedImage(); as placedImageSel) {
-                <div class="rightbarMediaActions" role="group" aria-label="Selected placed image actions">
+                <div class="rightbarMediaActions rightbarMediaActions--imageReplaceFocus" role="group" aria-label="Selected placed image actions">
                   <div class="rightbarMediaActions__title">Selected image</div>
                   <div class="rightbarAssetsHint">Type: image (editable overlay)</div>
                   <div class="rightbarMediaActions__row">
-                    <button type="button" class="rightbarMediaActions__btn" (click)="replaceSelectedPlacedImage($event)">
-                      Update
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn rightbarMediaActions__btn--highlight"
+                      (click)="replaceSelectedPlacedImage($event)"
+                    >
+                      Replace
                     </button>
                     <button type="button" class="rightbarMediaActions__btn" (click)="openImageCrop()">
                       Crop
