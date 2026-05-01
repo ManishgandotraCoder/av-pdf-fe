@@ -47,8 +47,16 @@ type Tool = 'pan' | 'pen' | 'text' | 'image';
 type FontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
 type FontFamily =
   | 'helvetica'
+  | 'arial'
+  | 'calibri'
   | 'times'
+  | 'georgia'
+  | 'cambria'
+  | 'garamond'
   | 'courier'
+  | 'verdana'
+  | 'tahoma'
+  | 'trebuchet_ms'
   | 'poppins'
   | 'montserrat'
   | 'abcdee_helvetica_bold';
@@ -329,6 +337,7 @@ type DetectedText = {
   text: string;
   fontSize: number;
   fontStyle: FontStyle;
+  fontFamily: FontFamily;
 };
 
 type DetectedBlockKind = 'paragraph' | 'list' | 'heading';
@@ -340,6 +349,7 @@ type DetectedBlock = {
   text: string;
   fontSize: number;
   fontStyle: FontStyle;
+  fontFamily: FontFamily;
   kind: DetectedBlockKind;
 };
 
@@ -360,6 +370,10 @@ type EditHistoryEvent = {
   kind: EditHistoryEventKind;
   label: string;
   at: number;
+};
+type EditorHistorySnapshot = {
+  editsByPage: Record<number, PageEdits>;
+  widgetsByPage: Record<number, Widget[]>;
 };
 
 type KeySlotKind = 'fixed' | 'custom';
@@ -481,13 +495,62 @@ function dominantFontStyle(styles: FontStyle[]): FontStyle {
   return 'regular';
 }
 
+function inferFontFamilyFromPdfJsStyle(raw: any): FontFamily {
+  const a = String(raw?.fontFamily ?? '').toLowerCase();
+  const b = String(raw?.fontName ?? '').toLowerCase();
+  const c = String(raw?.name ?? '').toLowerCase();
+  const combined = `${a} ${b} ${c}`;
+  if (combined.includes('abcdee') && combined.includes('helvetica') && combined.includes('bold')) {
+    return 'abcdee_helvetica_bold';
+  }
+  if (combined.includes('montserrat')) return 'montserrat';
+  if (combined.includes('poppins')) return 'poppins';
+  if (combined.includes('trebuchet')) return 'trebuchet_ms';
+  if (combined.includes('verdana')) return 'verdana';
+  if (combined.includes('tahoma')) return 'tahoma';
+  if (combined.includes('calibri')) return 'calibri';
+  if (combined.includes('cambria')) return 'cambria';
+  if (combined.includes('garamond')) return 'garamond';
+  if (combined.includes('georgia')) return 'georgia';
+  if (combined.includes('arial')) return 'arial';
+  if (combined.includes('courier')) return 'courier';
+  if (combined.includes('times')) return 'times';
+  if (combined.includes('serif') || combined.includes('roman')) return 'times';
+  if (combined.includes('mono')) return 'courier';
+  return 'helvetica';
+}
+
+function dominantFontFamily(families: FontFamily[]): FontFamily {
+  if (families.length === 0) return 'helvetica';
+  const counts: Partial<Record<FontFamily, number>> = {};
+  for (const family of families) counts[family] = (counts[family] ?? 0) + 1;
+  const ranked = Object.entries(counts) as [FontFamily, number][];
+  ranked.sort((a, b) => b[1] - a[1]);
+  return ranked[0]?.[0] ?? 'helvetica';
+}
+
 function cssFontFamily(f: FontFamily): string {
   if (f === 'abcdee_helvetica_bold') return '"Helvetica Neue", Arial, sans-serif';
+  if (f === 'arial') return 'Arial, "Helvetica Neue", Helvetica, sans-serif';
+  if (f === 'calibri') return 'Calibri, "Segoe UI", Arial, sans-serif';
   if (f === 'poppins') return '"Poppins", "Helvetica Neue", Arial, sans-serif';
   if (f === 'montserrat') return '"Montserrat", "Poppins", "Helvetica Neue", Arial, sans-serif';
+  if (f === 'georgia') return 'Georgia, "Times New Roman", Times, serif';
+  if (f === 'cambria') return 'Cambria, Georgia, "Times New Roman", serif';
+  if (f === 'garamond') return 'Garamond, "Times New Roman", serif';
   if (f === 'times') return '"Times New Roman", Times, serif';
   if (f === 'courier') return '"Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+  if (f === 'verdana') return 'Verdana, Geneva, sans-serif';
+  if (f === 'tahoma') return 'Tahoma, "Segoe UI", sans-serif';
+  if (f === 'trebuchet_ms') return '"Trebuchet MS", Tahoma, Arial, sans-serif';
   return 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial';
+}
+
+type PdfExportFontFamily = 'helvetica' | 'times' | 'courier';
+function normalizePdfExportFontFamily(family: FontFamily): PdfExportFontFamily {
+  if (family === 'times' || family === 'georgia' || family === 'cambria' || family === 'garamond') return 'times';
+  if (family === 'courier') return 'courier';
+  return 'helvetica';
 }
 
 function styleWithWeight(style: FontStyle, weight: 400 | 700): FontStyle {
@@ -534,8 +597,8 @@ export class PdfEditorComponent implements AfterViewInit {
     this.renderTaskByPage.clear();
   }
 
-  private readonly undoStack: Record<number, PageEdits>[] = [];
-  private readonly redoStack: Record<number, PageEdits>[] = [];
+  private readonly undoStack: EditorHistorySnapshot[] = [];
+  private readonly redoStack: EditorHistorySnapshot[] = [];
   private readonly undoLabels: string[] = [];
   private readonly redoLabels: string[] = [];
   private readonly maxHistoryEntries = 200;
@@ -1703,7 +1766,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private async detectBlocksForPage(pageIndex: number): Promise<DetectedBlock[]> {
     if (!this.pdfDoc) return [];
     const page = await this.pdfDoc.getPage(pageIndex + 1);
-    const cssViewport = page.getViewport({ scale: this.scale() });
+    const cssViewport = this.getCssViewportForPdfPage(page);
     try {
       const textContent = await page.getTextContent();
       const styles = (textContent as any).styles ?? {};
@@ -1727,7 +1790,8 @@ export class PdfEditorComponent implements AfterViewInit {
           h,
           text: str,
           fontSize: Math.max(6, h),
-          fontStyle: inferFontStyleFromPdfJsStyle(styles[fontName] ?? { fontName })
+          fontStyle: inferFontStyleFromPdfJsStyle(styles[fontName] ?? { fontName }),
+          fontFamily: inferFontFamilyFromPdfJsStyle(styles[fontName] ?? { fontName })
         });
       }
       const blocks = this.groupDetectedTextIntoBlocks(items);
@@ -2453,14 +2517,14 @@ export class PdfEditorComponent implements AfterViewInit {
       imageBackgroundText: { w: 360, h: 220 }
     };
     const d = defaults[kind];
-    const rect = overlay.getBoundingClientRect();
+    const { w: cw, h: ch } = this.overlayNominalCssSize(overlay);
 
     const id = `w_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
     const widget: Widget = {
       id,
       kind,
-      x: clamp(centerX - d.w / 2, 0, Math.max(0, rect.width - d.w)),
-      y: clamp(centerY - d.h / 2, 0, Math.max(0, rect.height - d.h)),
+      x: clamp(centerX - d.w / 2, 0, Math.max(0, cw - d.w)),
+      y: clamp(centerY - d.h / 2, 0, Math.max(0, ch - d.h)),
       w: d.w,
       h: d.h
     };
@@ -2739,21 +2803,21 @@ export class PdfEditorComponent implements AfterViewInit {
   private patchWidgetSize(pageIndex: number, widgetId: string, w: number, h: number) {
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
-    const rect = overlay.getBoundingClientRect();
+    const { w: maxW, h: maxH } = this.overlayNominalCssSize(overlay);
     this.widgetsByPage.update((prev) => {
       const cur = prev[pageIndex] ?? [];
       const idx = cur.findIndex((x) => x.id === widgetId);
       if (idx < 0) return prev;
       const next = cur.slice();
       const it = next[idx]!;
-      const cw = clamp(w, 40, rect.width);
-      const ch = clamp(h, 40, rect.height);
+      const cw = clamp(w, 40, maxW);
+      const ch = clamp(h, 40, maxH);
       next[idx] = {
         ...it,
         w: cw,
         h: ch,
-        x: clamp(it.x, 0, Math.max(0, rect.width - cw)),
-        y: clamp(it.y, 0, Math.max(0, rect.height - ch))
+        x: clamp(it.x, 0, Math.max(0, maxW - cw)),
+        y: clamp(it.y, 0, Math.max(0, maxH - ch))
       };
       return { ...prev, [pageIndex]: next };
     });
@@ -3451,10 +3515,10 @@ export class PdfEditorComponent implements AfterViewInit {
     const prev = this.undoStack.pop();
     if (!prev) return;
     const action = this.undoLabels.pop() ?? 'Canvas edit';
-    const cur = this.cloneEdits(this.editsByPage());
+    const cur = this.createHistorySnapshot();
     this.redoStack.push(cur);
     this.redoLabels.push(action);
-    this.editsByPage.set(prev);
+    this.restoreHistorySnapshot(prev);
     this.pushEditHistoryEvent('undo', `Undo: ${action}`);
     this.afterHistoryRestore();
   }
@@ -3463,10 +3527,10 @@ export class PdfEditorComponent implements AfterViewInit {
     const next = this.redoStack.pop();
     if (!next) return;
     const action = this.redoLabels.pop() ?? 'Canvas edit';
-    const cur = this.cloneEdits(this.editsByPage());
+    const cur = this.createHistorySnapshot();
     this.undoStack.push(cur);
     this.undoLabels.push(action);
-    this.editsByPage.set(next);
+    this.restoreHistorySnapshot(next);
     this.pushEditHistoryEvent('redo', `Redo: ${action}`);
     this.afterHistoryRestore();
   }
@@ -3672,7 +3736,7 @@ export class PdfEditorComponent implements AfterViewInit {
         ? 'Image edit'
         : 'Canvas edit');
     // Save the current state so Undo can restore it.
-    const snap = this.cloneEdits(this.editsByPage());
+    const snap = this.createHistorySnapshot();
     this.undoStack.push(snap);
     this.undoLabels.push(action);
     if (this.undoStack.length > this.maxHistoryEntries) {
@@ -3704,6 +3768,27 @@ export class PdfEditorComponent implements AfterViewInit {
     } catch {
       return JSON.parse(JSON.stringify(edits)) as Record<number, PageEdits>;
     }
+  }
+
+  private cloneWidgetsByPage(widgetsByPage: Record<number, Widget[]>) {
+    // Keep history snapshots detached from live signal objects.
+    try {
+      return structuredClone(widgetsByPage);
+    } catch {
+      return JSON.parse(JSON.stringify(widgetsByPage)) as Record<number, Widget[]>;
+    }
+  }
+
+  private createHistorySnapshot(): EditorHistorySnapshot {
+    return {
+      editsByPage: this.cloneEdits(this.editsByPage()),
+      widgetsByPage: this.cloneWidgetsByPage(this.widgetsByPage())
+    };
+  }
+
+  private restoreHistorySnapshot(snapshot: EditorHistorySnapshot) {
+    this.editsByPage.set(this.cloneEdits(snapshot.editsByPage));
+    this.widgetsByPage.set(this.cloneWidgetsByPage(snapshot.widgetsByPage));
   }
 
   private afterHistoryRestore() {
@@ -3753,10 +3838,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.assertReadablePdfHeader(this.pdfBytes);
     const edits = editsOverride ?? this.editsByPage();
     const pdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
-      const fontsByFamily: Record<
-        Exclude<FontFamily, 'poppins' | 'montserrat' | 'abcdee_helvetica_bold'>,
-        Record<FontStyle, PDFFont>
-      > = {
+      const fontsByFamily: Record<PdfExportFontFamily, Record<FontStyle, PDFFont>> = {
         helvetica: {
           regular: await pdf.embedFont(StandardFonts.Helvetica),
           bold: await pdf.embedFont(StandardFonts.HelveticaBold),
@@ -3816,10 +3898,7 @@ export class PdfEditorComponent implements AfterViewInit {
             if (r.newText.length > 0) {
               const c = hexToRgb01(r.color);
               const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
-              const family: Exclude<FontFamily, 'poppins' | 'montserrat'> =
-                familyRaw === 'poppins' || familyRaw === 'montserrat' || familyRaw === 'abcdee_helvetica_bold'
-                  ? 'helvetica'
-                  : familyRaw;
+              const family = normalizePdfExportFontFamily(familyRaw);
               const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
               page.drawText(r.newText, {
                 x: r.x * sx,
@@ -3850,10 +3929,7 @@ export class PdfEditorComponent implements AfterViewInit {
           for (const t of edit.text) {
             const c = hexToRgb01(t.color);
             const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
-            const family: Exclude<FontFamily, 'poppins' | 'montserrat'> =
-              familyRaw === 'poppins' || familyRaw === 'montserrat' || familyRaw === 'abcdee_helvetica_bold'
-                ? 'helvetica'
-                : familyRaw;
+            const family = normalizePdfExportFontFamily(familyRaw);
             const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
             const size = t.fontSize * sy;
 
@@ -4698,6 +4774,29 @@ export class PdfEditorComponent implements AfterViewInit {
     return { base, overlay };
   }
 
+  /**
+   * Same rotation policy as {@link renderPage} / export: neutralize incorrect 180° PDF metadata only.
+   * All text detection, hit-testing, and rasterization must use this so boxes align with the canvas.
+   */
+  private pdfPageViewportRotation(page: { rotate?: number }): number {
+    const originalRotate = ((page.rotate ?? 0) % 360 + 360) % 360;
+    return originalRotate === 180 ? 0 : originalRotate;
+  }
+
+  /** PDF.js viewport in CSS pixels at the current editor zoom — single source of truth with the page canvases. */
+  private getCssViewportForPdfPage(page: {
+    rotate?: number;
+    getViewport: (opts: { scale: number; rotation: number }) => any;
+  }) {
+    return page.getViewport({ scale: this.scale(), rotation: this.pdfPageViewportRotation(page) });
+  }
+
+  /** Canvas backing-store size matches viewport CSS size × devicePixelRatio; this returns the CSS coordinate extents. */
+  private overlayNominalCssSize(overlay: HTMLCanvasElement): { w: number; h: number } {
+    const dpr = window.devicePixelRatio || 1;
+    return { w: overlay.width / dpr, h: overlay.height / dpr };
+  }
+
   private async renderActivePage() {
     if (!this.pdfDoc) return;
 
@@ -4742,13 +4841,10 @@ export class PdfEditorComponent implements AfterViewInit {
     // pdf.js-recommended HiDPI rendering:
     // - Keep `viewport` in CSS pixels (includes page rotation correctly)
     // - Scale the backing store via canvas width/height
-    // - Let pdf.js handle DPR scaling through the `transform` option
+    // - Let pdf.js handle DPR scaling through the `transform` option (equivalent to ctx.setTransform(dpr,…))
     const originalRotate = ((page.rotate ?? 0) % 360 + 360) % 360;
-    // Some PDFs carry incorrect 180° rotation metadata, which flips pages upside down.
-    // We intentionally neutralize ONLY 180° to avoid breaking legitimate 90°/270° landscape pages.
-    const rotation = originalRotate === 180 ? 0 : originalRotate;
     this.pageRotateByPage.set(pageIndex, originalRotate);
-    const cssViewport = page.getViewport({ scale: this.scale(), rotation });
+    const cssViewport = this.getCssViewportForPdfPage(page);
 
     base.width = Math.floor(cssViewport.width * dpr);
     base.height = Math.floor(cssViewport.height * dpr);
@@ -4835,7 +4931,8 @@ export class PdfEditorComponent implements AfterViewInit {
             h,
             text: str,
             fontSize,
-            fontStyle
+            fontStyle,
+            fontFamily: inferFontFamilyFromPdfJsStyle(styles[fontName] ?? { fontName })
           });
         }
 
@@ -5256,15 +5353,15 @@ export class PdfEditorComponent implements AfterViewInit {
       const { overlay } = this.getCanvasPair(opI.pageIndex);
       if (!overlay) return;
       const pt = this.eventToPoint(overlay, ev);
-      const rect = overlay.getBoundingClientRect();
+      const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
       const o = opI.orig;
       const minS = 24;
 
       if (opI.mode === 'move') {
         const dx = pt.x - opI.startX;
         const dy = pt.y - opI.startY;
-        const maxX = Math.max(0, rect.width - o.w);
-        const maxY = Math.max(0, rect.height - o.h);
+        const maxX = Math.max(0, rw - o.w);
+        const maxY = Math.max(0, rh - o.h);
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({
           ...a,
           x: clamp(o.x + dx, 0, maxX),
@@ -5279,7 +5376,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const nw = clamp(
           o.w + (pt.x - opI.startX),
           minS,
-          Math.max(minS, rect.width - o.x)
+          Math.max(minS, rw - o.x)
         );
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: nw }));
         this.redrawOverlay(opI.pageIndex);
@@ -5289,7 +5386,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const nh = clamp(
           o.h + (pt.y - opI.startY),
           minS,
-          Math.max(minS, rect.height - o.y)
+          Math.max(minS, rh - o.y)
         );
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, h: nh }));
         this.redrawOverlay(opI.pageIndex);
@@ -5325,13 +5422,13 @@ export class PdfEditorComponent implements AfterViewInit {
     const { overlay } = this.getCanvasPair(op.pageIndex);
     if (!overlay) return;
     const pt = this.eventToPoint(overlay, ev);
-    const rect = overlay.getBoundingClientRect();
+    const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
 
     if (op.mode === 'move') {
       const dx = pt.x - op.startX;
       const dy = pt.y - op.startY;
-      const maxX = Math.max(0, rect.width - op.origW);
-      const maxY = Math.max(0, rect.height - op.origH);
+      const maxX = Math.max(0, rw - op.origW);
+      const maxY = Math.max(0, rh - op.origH);
       this.updateWidget(op.pageIndex, op.id, (w) => ({
         ...w,
         x: clamp(op.origX + dx, 0, maxX),
@@ -5348,8 +5445,8 @@ export class PdfEditorComponent implements AfterViewInit {
     const edge = op.resizeEdge ?? 'br';
 
     if (edge === 'br') {
-      const maxWb = Math.max(minW, rect.width - o.x);
-      const maxHb = Math.max(minH, rect.height - o.y);
+      const maxWb = Math.max(minW, rw - o.x);
+      const maxHb = Math.max(minH, rh - o.y);
       this.updateWidget(op.pageIndex, op.id, (w) => ({
         ...w,
         w: clamp(o.w + dx, minW, maxWb),
@@ -5362,7 +5459,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const nw = clamp(
         o.w + dx,
         minW,
-        Math.max(minW, rect.width - o.x)
+        Math.max(minW, rw - o.x)
       );
       this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, w: nw }));
       return;
@@ -5371,7 +5468,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const nh = clamp(
         o.h + dy,
         minH,
-        Math.max(minH, rect.height - o.y)
+        Math.max(minH, rh - o.y)
       );
       this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, h: nh }));
       return;
@@ -6552,7 +6649,7 @@ export class PdfEditorComponent implements AfterViewInit {
           this.textDraft.set(hit.text);
           this.textDraftPageIndex.set(pageIndex);
           // Pad mask bbox to fully cover anti-aliased glyph edges.
-          const pad = 6;
+          const pad = 0;
           this.textDraftX.set(Math.max(0, hit.x - pad));
           this.textDraftY.set(Math.max(0, hit.y - pad));
           const hitFontSize = Math.round(hit.fontSize);
@@ -6561,7 +6658,7 @@ export class PdfEditorComponent implements AfterViewInit {
           this.textColor.set(fg);
           // Preserve detected font style (bold/italic) so edits don't change formatting.
           this.textStyle.set(hit.fontStyle);
-          // Family is not reliably detectable from pdf.js; keep current selection.
+          this.textFamily.set(hit.fontFamily);
           this.textBgEnabled.set(true);
           this.textBgColor.set(bg);
           this.textDraftBox = {
@@ -6575,7 +6672,7 @@ export class PdfEditorComponent implements AfterViewInit {
             maskMode: 'inpaint',
             fontSize: hitFontSize,
             fontStyle: hit.fontStyle,
-            fontFamily: this.textFamily()
+            fontFamily: hit.fontFamily
           };
           // While editing, mask the old content on the overlay so the textarea
           // sits on a clean (white) region.
@@ -7198,11 +7295,20 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private eventToPoint(canvas: HTMLCanvasElement, ev: PointerEvent): InkPoint {
+  /**
+   * Map pointer position to PDF.js viewport CSS coordinates (same space as {@link getCssViewportForPdfPage}).
+   * Normalizes against the element's laid-out size so browser zoom / subpixel drift does not skew hits vs drawing.
+   */
+  private eventToPoint(canvas: HTMLCanvasElement, ev: Pick<PointerEvent, 'clientX' | 'clientY'>): InkPoint {
+    const dpr = window.devicePixelRatio || 1;
+    const nominalW = canvas.width / dpr;
+    const nominalH = canvas.height / dpr;
     const rect = canvas.getBoundingClientRect();
-    const x = ev.clientX - rect.left;
-    const y = ev.clientY - rect.top;
-    return { x: clamp(x, 0, rect.width), y: clamp(y, 0, rect.height) };
+    const rw = rect.width > 0 ? rect.width : nominalW;
+    const rh = rect.height > 0 ? rect.height : nominalH;
+    const x = ((ev.clientX - rect.left) / rw) * nominalW;
+    const y = ((ev.clientY - rect.top) / rh) * nominalH;
+    return { x: clamp(x, 0, nominalW), y: clamp(y, 0, nominalH) };
   }
 
   private pdfCornersToViewportAabb(
@@ -7665,6 +7771,7 @@ export class PdfEditorComponent implements AfterViewInit {
       y1: number;
       fontSize: number;
       fontStyle: FontStyle;
+      fontFamily: FontFamily;
       text: string;
     }[] = [];
 
@@ -7696,6 +7803,7 @@ export class PdfEditorComponent implements AfterViewInit {
           y1: s.y + s.h,
           fontSize: s.fontSize,
           fontStyle: s.fontStyle,
+          fontFamily: s.fontFamily,
           text: ''
         });
       }
@@ -7731,6 +7839,7 @@ export class PdfEditorComponent implements AfterViewInit {
         let y1 = -Infinity;
         let maxFs = 0;
         const fs: FontStyle[] = [];
+        const families: FontFamily[] = [];
         let prevR = -Infinity;
         for (const sp of seg) {
           x0 = Math.min(x0, sp.x);
@@ -7739,6 +7848,7 @@ export class PdfEditorComponent implements AfterViewInit {
           y1 = Math.max(y1, sp.y + sp.h);
           maxFs = Math.max(maxFs, sp.fontSize);
           fs.push(sp.fontStyle);
+          families.push(sp.fontFamily);
 
           const gap = sp.x - prevR;
           if (text.length > 0 && gap > Math.max(2, sp.fontSize * 0.35)) text += ' ';
@@ -7754,6 +7864,7 @@ export class PdfEditorComponent implements AfterViewInit {
           y1,
           fontSize: maxFs || medianFont,
           fontStyle: dominantFontStyle(fs),
+          fontFamily: dominantFontFamily(families),
           text: text.trim()
         });
       }
@@ -7783,6 +7894,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const isHeading = cur.fontSize >= medianFont * 1.25 && allText.length <= 120;
       const kind: DetectedBlockKind = isHeading ? 'heading' : isList ? 'list' : 'paragraph';
       const blockStyle = dominantFontStyle(cur.lines.map((l) => l.fontStyle));
+      const blockFamily = dominantFontFamily(cur.lines.map((l) => l.fontFamily));
       blocks.push({
         x: cur.x0,
         y: cur.y0,
@@ -7791,6 +7903,7 @@ export class PdfEditorComponent implements AfterViewInit {
         text: allText.trim(),
         fontSize: cur.fontSize,
         fontStyle: blockStyle,
+        fontFamily: blockFamily,
         kind
       });
     };
@@ -8193,7 +8306,7 @@ export class PdfEditorComponent implements AfterViewInit {
     }
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
-    const rect = overlay.getBoundingClientRect();
+    const { w: pageCssW, h: pageCssH } = this.overlayNominalCssSize(overlay);
 
     let img: HTMLImageElement;
     try {
@@ -8214,8 +8327,8 @@ export class PdfEditorComponent implements AfterViewInit {
     const h = Math.max(10, Math.round(natH * scale));
     const cx = x - w / 2;
     const cy = y - h / 2;
-    const px = clamp(cx, 0, Math.max(0, rect.width - w));
-    const py = clamp(cy, 0, Math.max(0, rect.height - h));
+    const px = clamp(cx, 0, Math.max(0, pageCssW - w));
+    const py = clamp(cy, 0, Math.max(0, pageCssH - h));
     const id = this.newPlacedImageId();
     const anno: ImageAnno = {
       id,
