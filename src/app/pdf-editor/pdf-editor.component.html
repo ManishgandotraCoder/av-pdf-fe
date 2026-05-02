@@ -57,6 +57,39 @@
     </div>
   }
 
+  @if (clearAllEditsConfirmOpen()) {
+    <div class="deleteSlideModal" (click)="closeClearAllEditsConfirmation()">
+      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
+      <div
+        class="deleteSlideModal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="clearAllEditsTitle"
+        (click)="$event.stopPropagation()"
+      >
+        <h2 id="clearAllEditsTitle" class="deleteSlideModal__title">Clear all edits?</h2>
+        <p class="deleteSlideModal__message">
+          This removes every saved version copy of this document from the library, clears annotations and local changes in
+          this browser, and reopens the original upload. If you previously overwrote the main PDF file on the server, that
+          file is not automatically reverted.
+        </p>
+        <div class="deleteSlideModal__actions">
+          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="closeClearAllEditsConfirmation()">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="deleteSlideModal__btn deleteSlideModal__btn--danger"
+            [disabled]="clearingAllEdits() || isLoading()"
+            (click)="confirmClearAllEdits()"
+          >
+            @if (clearingAllEdits()) { Clearing… } @else { Clear all edits }
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   @if (imageUploadCropModal(); as crop) {
     <div class="deleteSlideModal" (click)="cancelImageUploadCrop($event)">
       <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
@@ -269,6 +302,16 @@
 
       <div class="docsRight">
         <button
+          class="docsToolbarBtn docsToolbarBtn--danger"
+          type="button"
+          (click)="openClearAllEditsConfirmation()"
+          [disabled]="pageCount() === 0 || isLoading() || docId() === null || readonlyMode() || clearingAllEdits()"
+          title="Remove saved versions, clear local edits, reopen original"
+        >
+          Clear all edits
+        </button>
+
+        <button
           class="docsSave"
           type="button"
           (click)="savePdfAsNewVersion()"
@@ -304,16 +347,6 @@
           title="Export as PDF"
         >
           Export
-        </button>
-
-        <button
-          class="docsToolbarBtn docsToolbarBtn--danger"
-          type="button"
-          (click)="openRejectConfirmation('internal')"
-          [disabled]="rejectionBusy() || isLoading() || isSaving()"
-          title="Reject proposal"
-        >
-          Reject
         </button>
 
         <button class="docsIcon" type="button" title="Undo" (click)="undo()" [disabled]="!canUndo()">
@@ -962,6 +995,7 @@
                                 class="widget__text widget__editor"
                                 [ngModel]="w.textValue ?? ''"
                                 (ngModelChange)="updateTextWidget(activePageIndex(), w.id, $event)"
+                                (input)="onTextWidgetEditorInput(activePageIndex(), w.id, $event)"
                                 placeholder="Type…"
                                 (pointerdown)="$event.stopPropagation()"
                                 (keydown.escape)="onTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
@@ -1880,6 +1914,10 @@
 
         @if (!isCreateFlow() && rightbarPrimaryTab() === 'elements' && rightbarTab() === 'versions') {
           <div class="rightbar__panel rightbar__panelVersions" role="tabpanel" aria-label="Version history">
+            <p class="rightbarAssetsHint rightbarAssetsHint--versionsLead">
+              Revisions of this document only. The library lists one card per original upload; open it here to switch between
+              versions.
+            </p>
             @if (isVersionHistoryLoading()) {
               <p class="rightbarAssetsHint">Loading version history...</p>
             } @else if (versionHistory().length === 0) {
@@ -1912,4 +1950,3 @@
     </main>
   }
 </div>
-

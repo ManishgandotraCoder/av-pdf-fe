@@ -3,7 +3,7 @@
     <div class="brand">
       <div class="brand__dot"></div>
       <div class="brand__title">Avyro Editor</div>
-      <div class="brand__sub">Your PDFs from the backend</div>
+      <div class="brand__sub">Original documents — versions stay inside the editor</div>
     </div>
 
     <div class="actions">
@@ -34,7 +34,7 @@
       </div>
     } @else {
       <div class="grid">
-        @for (item of items(); track item.id) {
+        @for (item of rootItems(); track item.id) {
           <div class="card">
             <button class="card__open" type="button" (click)="open(item)">
               <div class="card__name">{{ item.name }}</div>

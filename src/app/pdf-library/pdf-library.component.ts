@@ -21,7 +21,10 @@ export class PdfLibraryComponent {
   protected readonly errorText = signal<string | null>(null);
   protected readonly items = signal<PdfMeta[]>([]);
 
-  protected readonly hasItems = computed(() => this.items().length > 0);
+  /** One library row per original upload; saved “versions” stay under Versions in the editor. */
+  protected readonly rootItems = computed(() => this.items().filter((i) => !i.parentId));
+
+  protected readonly hasItems = computed(() => this.rootItems().length > 0);
 
   constructor() {
     void this.refresh();

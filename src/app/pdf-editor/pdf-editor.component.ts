@@ -865,6 +865,8 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly isCreateFlow = signal(false);
   protected readonly overwriteConfirmOpen = signal(false);
   protected readonly rejectConfirmOpen = signal(false);
+  protected readonly clearAllEditsConfirmOpen = signal(false);
+  protected readonly clearingAllEdits = signal(false);
   protected readonly rejectConfirmLevel = signal<RejectionLevel>('internal');
   protected readonly sharePanelOpen = signal(false);
   protected readonly shareAccessType = signal<ShareAccessType>('restricted');
@@ -889,6 +891,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly isAutoVersionSaving = signal(false);
   protected readonly globalTypography = signal<GlobalTypographySettings>(cloneGlobalTypography(DEFAULT_GLOBAL_TYPOGRAPHY));
   private autoVersionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private editorStatePersistTimer: ReturnType<typeof setTimeout> | null = null;
   private autoVersionSaveInFlight = false;
   private autoVersionSavePending = false;
   private autoVersionSnapshotReady = false;
@@ -2713,6 +2716,12 @@ export class PdfEditorComponent implements AfterViewInit {
   protected updateTextWidget(pageIndex: number, widgetId: string, value: string) {
     if (!this.textFeatureEnabled()) return;
     this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, textValue: value }));
+    this.scheduleEditorStatePersist();
+  }
+
+  protected onTextWidgetEditorInput(pageIndex: number, widgetId: string, ev: Event) {
+    const value = (ev.target as HTMLTextAreaElement | null)?.value ?? '';
+    this.updateTextWidget(pageIndex, widgetId, value);
   }
 
   /** Flush textarea value then exit edit (blur may run before last ngModel tick). */
@@ -2720,6 +2729,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const ta = ev.target as HTMLTextAreaElement | null;
     if (ta && this.textFeatureEnabled()) {
       this.updateTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
     }
     this.stopEditingWidget(widgetId);
   }
@@ -2728,6 +2738,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const ta = ev.target as HTMLTextAreaElement | null;
     if (ta && this.textFeatureEnabled()) {
       this.updateTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
     }
     this.stopEditingWidget(widgetId);
   }
@@ -2740,6 +2751,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const ta = ke.target as HTMLTextAreaElement | null;
     if (ta && this.textFeatureEnabled()) {
       this.updateTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
     }
     this.stopEditingWidget(widgetId);
   }
@@ -2755,6 +2767,20 @@ export class PdfEditorComponent implements AfterViewInit {
     this.updateWidget(pageIndex, widgetId, (w) =>
       w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, layeredTextValue: value } : w
     );
+  }
+
+  private scheduleEditorStatePersist() {
+    if (this.editorStatePersistTimer !== null) clearTimeout(this.editorStatePersistTimer);
+    this.editorStatePersistTimer = setTimeout(() => {
+      this.editorStatePersistTimer = null;
+      this.persistEditorStateNow();
+    }, 120);
+  }
+
+  private persistEditorStateNow() {
+    const id = this.docId();
+    if (!id || this.isLoading()) return;
+    void this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
   }
 
   protected tableCellValue(w: Widget, r: number, c: number) {
@@ -3313,6 +3339,10 @@ export class PdfEditorComponent implements AfterViewInit {
       if (this.autoVersionSaveTimer !== null) {
         clearTimeout(this.autoVersionSaveTimer);
         this.autoVersionSaveTimer = null;
+      }
+      if (this.editorStatePersistTimer !== null) {
+        clearTimeout(this.editorStatePersistTimer);
+        this.editorStatePersistTimer = null;
       }
       try {
         this.pdfDoc?.destroy();
@@ -4781,6 +4811,54 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected async viewProposalVersion(version: ProposalVersion) {
     await this.router.navigate(['/edit', version.proposalId]);
+  }
+
+  protected openClearAllEditsConfirmation() {
+    if (this.readonlyMode() || this.pageCount() === 0 || !this.docId()) return;
+    this.clearAllEditsConfirmOpen.set(true);
+  }
+
+  protected closeClearAllEditsConfirmation() {
+    this.clearAllEditsConfirmOpen.set(false);
+  }
+
+  /**
+   * Removes saved derivative PDFs for this document, clears local overlay/title/furniture
+   * persistence, and reloads the root upload. Does not revert server PDF bytes if the root
+   * file was overwritten by export/save—only removes version copies and in-browser edits.
+   */
+  protected async confirmClearAllEdits() {
+    const id = this.docId();
+    if (!id || this.readonlyMode() || this.clearingAllEdits()) return;
+    this.clearingAllEdits.set(true);
+    this.errorText.set(null);
+    try {
+      const { rootId, deletedIds } = await this.api.clearProposalVersions(id);
+      const idsToClear = new Set<string>([rootId, ...deletedIds, id]);
+      this.clearLocalDocPersistence([...idsToClear]);
+      this.closeClearAllEditsConfirmation();
+      await this.router.navigate(['/edit', rootId], { replaceUrl: true });
+      this.docId.set(rootId);
+      await this.loadFromApi(rootId);
+      await this.loadProposalVersions(rootId);
+      await this.loadProposalDetails(rootId);
+      await this.loadProposalRejection(rootId);
+      this.showSlideToast('Edits cleared; reopened original document');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to clear edits.');
+    } finally {
+      this.clearingAllEdits.set(false);
+    }
+  }
+
+  private clearLocalDocPersistence(ids: string[]) {
+    if (typeof localStorage === 'undefined') return;
+    for (const docId of ids) {
+      localStorage.removeItem(this.editorStateStorageKey(docId));
+      localStorage.removeItem(this.titleStorageKey(docId));
+      localStorage.removeItem(this.pageFurnitureStorageKey(docId));
+      localStorage.removeItem(this.legacyMediaWidgetsStorageKey(docId));
+    }
   }
 
   private async loadProposalVersions(id: string) {

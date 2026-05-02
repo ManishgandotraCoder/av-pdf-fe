@@ -18,6 +18,12 @@ export type ProposalVersion = {
   createdBy: string;
 };
 
+export type ClearProposalVersionsResult = {
+  ok: boolean;
+  rootId: string;
+  deletedIds: string[];
+};
+
 export type ProposalDetails = {
   id: string;
   name: string;
@@ -338,6 +344,21 @@ export class PdfApiService {
   async getProposalVersions(id: string): Promise<ProposalVersion[]> {
     const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/versions`));
     return this.readJsonResponse<ProposalVersion[]>(res, 'proposal versions', 'Failed to load proposal versions.');
+  }
+
+  /**
+   * Deletes all derived proposal PDFs for this document chain (keeps the root upload).
+   * Editor should clear local overlay state and navigate to `rootId`.
+   */
+  async clearProposalVersions(id: string): Promise<ClearProposalVersionsResult> {
+    const res = await fetch(this.apiUrl(`/api/proposals/${encodeURIComponent(id)}/clear-versions`), {
+      method: 'POST'
+    });
+    return this.readJsonResponse<ClearProposalVersionsResult>(
+      res,
+      'clear proposal versions',
+      'Failed to clear saved versions.'
+    );
   }
 
   async getProposal(id: string): Promise<ProposalDetails> {
