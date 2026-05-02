@@ -862,7 +862,7 @@
                       }
                     </div>
                   }
-                  @if (pageNumberLabel(activePageIndex())) {
+                  <!-- @if (pageNumberLabel(activePageIndex())) {
                     <div
                       class="pageFurnitureNumber"
                       [class.headerLeft]="pageFurniture().pageNumber.position === 'header-left'"
@@ -873,7 +873,7 @@
                     >
                       {{ pageNumberLabel(activePageIndex()) }}
                     </div>
-                  }
+                  } -->
                   @if (pageFurniture().footer.visible) {
                     <div class="pageFurnitureFooter" [class.withDivider]="pageFurniture().footer.divider">
                       <div class="pageFurnitureFooter__cell">{{ furnitureText(pageFurniture().footer.leftContent, activePageIndex()) }}</div>

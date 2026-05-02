@@ -378,6 +378,18 @@ type ActivePlacedImageOp = {
   orig: { x: number; y: number; w: number; h: number };
 };
 
+type ActivePlacedTextOp = {
+  pageIndex: number;
+  id: string;
+  pointerId: number;
+  mode: 'move' | 'resize';
+  edge: PlacedImageEdge | null;
+  startX: number;
+  startY: number;
+  /** Snapshot at gesture start: position, measured bounds, font size. */
+  orig: { x: number; y: number; w: number; h: number; fontSize: number };
+};
+
 type DetectedText = {
   x: number;
   y: number;
@@ -862,6 +874,7 @@ export class PdfEditorComponent implements AfterViewInit {
       } = null;
 
   private activePlacedImageOp: ActivePlacedImageOp | null = null;
+  private activePlacedTextOp: ActivePlacedTextOp | null = null;
   private static readonly placedImageHandlePx = 7;
   private static readonly placedImageHandleHit = 10;
   private static readonly placedTextClosePx = 26;
@@ -3670,6 +3683,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
     this.activePlacedImageOp = null;
+    this.activePlacedTextOp = null;
     // Restore original page renders (replaces are drawn directly onto the base canvas).
     for (let pageIndex = 0; pageIndex < this.pageCount(); pageIndex++) {
       this.restoreBaseFromSnapshot(pageIndex);
@@ -4016,6 +4030,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.pendingPdfImageDrop = null;
     this.pendingVideoWidgetDrop = null;
     this.activePlacedImageOp = null;
+    this.activePlacedTextOp = null;
     this.selectedPlacedImageId.set(null);
     this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
@@ -5617,6 +5632,71 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
+    const opT = this.activePlacedTextOp;
+    if (opT) {
+      if (ev.pointerId !== opT.pointerId) return;
+      const { overlay } = this.getCanvasPair(opT.pageIndex);
+      if (!overlay) return;
+      const pt = this.eventToPoint(overlay, ev);
+      const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+      const o = opT.orig;
+      const minS = 24;
+      const scaleFont = (scale: number) => Math.round(clamp(o.fontSize * scale, 6, 200));
+
+      if (opT.mode === 'move') {
+        const dx = pt.x - opT.startX;
+        const dy = pt.y - opT.startY;
+        const maxX = Math.max(0, rw - o.w);
+        const maxY = Math.max(0, rh - o.h);
+        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({
+          ...t,
+          x: clamp(o.x + dx, 0, maxX),
+          y: clamp(o.y + dy, 0, maxY)
+        }));
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+
+      const edge = opT.edge;
+      if (edge === 'e') {
+        const nw = clamp(o.w + (pt.x - opT.startX), minS, Math.max(minS, rw - o.x));
+        const nfs = scaleFont(nw / o.w);
+        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, fontSize: nfs }));
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 's') {
+        const nh = clamp(o.h + (pt.y - opT.startY), minS, Math.max(minS, rh - o.y));
+        const nfs = scaleFont(nh / o.h);
+        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, fontSize: nfs }));
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 'w') {
+        const dx = pt.x - opT.startX;
+        const nx = o.x + dx;
+        const nw0 = o.w - dx;
+        const x = clamp(nx, 0, o.x + o.w - minS);
+        const ww = clamp(nw0, minS, o.x + o.w - x);
+        const nfs = scaleFont(ww / o.w);
+        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, x, fontSize: nfs }));
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 'n') {
+        const dy = pt.y - opT.startY;
+        const ny = o.y + dy;
+        const nh0 = o.h - dy;
+        const y = clamp(ny, 0, o.y + o.h - minS);
+        const hh = clamp(nh0, minS, o.y + o.h - y);
+        const nfs = scaleFont(hh / o.h);
+        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, y, fontSize: nfs }));
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      return;
+    }
+
     const opI = this.activePlacedImageOp;
     if (opI) {
       if (ev.pointerId !== opI.pointerId) return;
@@ -5770,6 +5850,14 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
+    const opTUp = this.activePlacedTextOp;
+    if (opTUp) {
+      if (ev.pointerId !== opTUp.pointerId) return;
+      this.activePlacedTextOp = null;
+      this.redrawOverlay(opTUp.pageIndex);
+      return;
+    }
+
     const opI = this.activePlacedImageOp;
     if (opI) {
       if (ev.pointerId !== opI.pointerId) return;
@@ -5826,9 +5914,27 @@ export class PdfEditorComponent implements AfterViewInit {
     await this.mutatePdfPages(
       async (pdf) => {
         const insertAt = clamp(pageIndex + 1, 0, pdf.getPageCount());
-        const ref = pdf.getPageCount() > 0 ? pdf.getPage(clamp(pageIndex, 0, pdf.getPageCount() - 1)) : null;
-        const size = ref ? ref.getSize() : { width: 595.28, height: 841.89 };
-        pdf.insertPage(insertAt, [size.width, size.height]);
+        const count = pdf.getPageCount();
+        if (count <= 0) {
+          pdf.insertPage(insertAt, [595.28, 841.89]);
+          return;
+        }
+        const srcIndex = clamp(pageIndex, 0, count - 1);
+        // Inherit PDF-native header/footer (and margins) from the prior slide so layout matches
+        // template artwork; wipe the middle band so body content is not duplicated.
+        const [copied] = await pdf.copyPages(pdf, [srcIndex]);
+        pdf.insertPage(insertAt, copied);
+        const newPage = pdf.getPage(insertAt);
+        const { width, height } = newPage.getSize();
+        const band = Math.min(140, Math.max(48, height * 0.095));
+        const bodyHeight = Math.max(1, height - 2 * band);
+        newPage.drawRectangle({
+          x: 0,
+          y: band,
+          width,
+          height: bodyHeight,
+          color: rgb(1, 1, 1)
+        });
       },
       { kind: 'insert', at: pageIndex + 1 }
     );
@@ -6793,17 +6899,45 @@ export class PdfEditorComponent implements AfterViewInit {
       if (overlay) {
         const p = this.eventToPoint(overlay, ev);
         const textHit = this.hitTestPlacedText(pageIndex, p.x, p.y);
-        if (textHit?.part === 'close') {
-          this.removePlacedTextAnno(pageIndex, textHit.id);
-          ev.preventDefault();
-          ev.stopPropagation();
-          return;
-        }
-        if (textHit?.part === 'body') {
+        if (textHit) {
+          if (textHit.part === 'close') {
+            if (!this.readonlyMode()) {
+              this.removePlacedTextAnno(pageIndex, textHit.id);
+            }
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+          }
+          const tAnno = this.getPlacedTextAnno(pageIndex, textHit.id);
+          if (!tAnno) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+          }
           this.selectedWidgetId.set(null);
           this.selectedDetectedPdfMedia.set(null);
           this.selectedPlacedImageId.set(null);
           this.selectedPlacedTextId.set(textHit.id);
+          if (this.readonlyMode()) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.redrawOverlay(pageIndex);
+            return;
+          }
+          this.beginHistoryStep();
+          const ctx = overlay.getContext('2d');
+          const b = ctx ? this.measureTextAnnoBounds(ctx, tAnno) : { x: tAnno.x, y: tAnno.y, w: 40, h: tAnno.fontSize };
+          (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
+          this.activePlacedTextOp = {
+            pageIndex,
+            id: textHit.id,
+            pointerId: ev.pointerId,
+            mode: textHit.part === 'body' ? 'move' : 'resize',
+            edge: textHit.part === 'body' ? null : textHit.part,
+            startX: p.x,
+            startY: p.y,
+            orig: { x: tAnno.x, y: tAnno.y, w: b.w, h: b.h, fontSize: tAnno.fontSize }
+          };
           ev.preventDefault();
           ev.stopPropagation();
           this.redrawOverlay(pageIndex);
@@ -7593,6 +7727,19 @@ export class PdfEditorComponent implements AfterViewInit {
     return this.editsByPage()[pageIndex]?.images?.find((a) => a.id === id) ?? null;
   }
 
+  private getPlacedTextAnno(pageIndex: number, id: string): TextAnno | null {
+    return this.editsByPage()[pageIndex]?.text?.find((t) => t.id === id) ?? null;
+  }
+
+  private updatePlacedText(pageIndex: number, id: string, updater: (t: TextAnno) => TextAnno) {
+    this.editsByPage.update((prev) => {
+      const ex = prev[pageIndex];
+      if (!ex) return prev;
+      const text = (ex.text ?? []).map((t) => (t.id === id ? updater(t) : t));
+      return { ...prev, [pageIndex]: { ...ex, text } };
+    });
+  }
+
   private updatePlacedImage(pageIndex: number, id: string, updater: (a: ImageAnno) => ImageAnno) {
     this.editsByPage.update((prev) => {
       const ex = prev[pageIndex];
@@ -7658,7 +7805,7 @@ export class PdfEditorComponent implements AfterViewInit {
     pageIndex: number,
     x: number,
     y: number
-  ): { id: string; part: 'close' | 'body' } | null {
+  ): { id: string; part: 'close' | 'body' | PlacedImageEdge } | null {
     this.ensureTextAnnosHaveIds(pageIndex);
     const edit = this.editsByPage()[pageIndex];
     const list = edit?.text ?? [];
@@ -7668,6 +7815,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const ctx = overlay.getContext('2d');
     if (!ctx) return null;
     const pad = PdfEditorComponent.placedTextCloseHitPad;
+    const hsz = PdfEditorComponent.placedImageHandleHit;
     for (let i = list.length - 1; i >= 0; i--) {
       const t = list[i]!;
       const b = this.measureTextAnnoBounds(ctx, t);
@@ -7680,6 +7828,10 @@ export class PdfEditorComponent implements AfterViewInit {
       ) {
         return { id: t.id, part: 'close' };
       }
+      if (Math.hypot(x - (b.x + b.w / 2), y - b.y) <= hsz) return { id: t.id, part: 'n' };
+      if (Math.hypot(x - (b.x + b.w / 2), y - (b.y + b.h)) <= hsz) return { id: t.id, part: 's' };
+      if (Math.hypot(x - (b.x + b.w), y - (b.y + b.h / 2)) <= hsz) return { id: t.id, part: 'e' };
+      if (Math.hypot(x - b.x, y - (b.y + b.h / 2)) <= hsz) return { id: t.id, part: 'w' };
       if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
         return { id: t.id, part: 'body' };
       }
@@ -7690,8 +7842,8 @@ export class PdfEditorComponent implements AfterViewInit {
   private drawPlacedTextChrome(ctx: CanvasRenderingContext2D, t: TextAnno) {
     if (this.selectedPlacedTextId() !== t.id) return;
     const b = this.measureTextAnnoBounds(ctx, t);
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.95)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
+    ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(b.x, b.y, b.w, b.h);
     ctx.setLineDash([]);
@@ -7715,10 +7867,28 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.fillText('✕', cr.x + cr.w / 2, cr.y + cr.h / 2 + 0.5);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
+
+    const hs = PdfEditorComponent.placedImageHandlePx;
+    const { x, y, w, h: hh } = b;
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
+    const drawHandle = (ax: number, ay: number) => {
+      ctx.beginPath();
+      ctx.rect(ax - hs / 2, ay - hs / 2, hs, hs);
+      ctx.fill();
+      ctx.stroke();
+    };
+    drawHandle(x + w / 2, y);
+    drawHandle(x + w / 2, y + hh);
+    drawHandle(x + w, y + hh / 2);
+    drawHandle(x, y + hh / 2);
   }
 
   private removePlacedTextAnno(pageIndex: number, id: string) {
     this.beginHistoryStep('Remove text box');
+    if (this.activePlacedTextOp?.pageIndex === pageIndex && this.activePlacedTextOp.id === id) {
+      this.activePlacedTextOp = null;
+    }
     this.editsByPage.update((prev) => {
       const ex = prev[pageIndex];
       if (!ex) return prev;
@@ -7754,13 +7924,13 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.selectedPlacedImageId() !== anno.id) return;
     const hs = PdfEditorComponent.placedImageHandlePx;
     const { x, y, w, h: hh } = anno;
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.95)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
+    ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(x, y, w, hh);
     ctx.setLineDash([]);
     ctx.fillStyle = '#fff';
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.9)';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
 
     const drawHandle = (ax: number, ay: number) => {
       ctx.beginPath();
