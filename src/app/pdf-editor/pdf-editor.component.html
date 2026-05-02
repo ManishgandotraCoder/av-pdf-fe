@@ -1067,8 +1067,9 @@
                                   (ngModelChange)="updateLayeredTextWidget(activePageIndex(), w.id, $event)"
                                   placeholder="Type overlay text..."
                                   (pointerdown)="$event.stopPropagation()"
-                                  (keydown.escape)="stopEditingWidget(w.id)"
-                                  (blur)="stopEditingWidget(w.id)"
+                                  (keydown.escape)="onLayeredTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
+                                  (keydown.enter)="onLayeredTextWidgetEditorEnter(activePageIndex(), w.id, $event)"
+                                  (blur)="onLayeredTextWidgetEditorBlur(activePageIndex(), w.id, $event)"
                                   autofocus
                                 ></textarea>
                               } @else {
@@ -1093,8 +1094,9 @@
                                   (ngModelChange)="updateLayeredTextWidget(activePageIndex(), w.id, $event)"
                                   placeholder="Type text content..."
                                   (pointerdown)="$event.stopPropagation()"
-                                  (keydown.escape)="stopEditingWidget(w.id)"
-                                  (blur)="stopEditingWidget(w.id)"
+                                  (keydown.escape)="onLayeredTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
+                                  (keydown.enter)="onLayeredTextWidgetEditorEnter(activePageIndex(), w.id, $event)"
+                                  (blur)="onLayeredTextWidgetEditorBlur(activePageIndex(), w.id, $event)"
                                   autofocus
                                 ></textarea>
                               } @else {
@@ -1114,29 +1116,116 @@
                 </div>
 
                 @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
-                  <div class="textDraft" [ngStyle]="textDraftStyle()">
-                    <button
-                      type="button"
-                      class="textDraft__close"
-                      title="Delete text"
-                      (pointerdown)="$event.stopPropagation()"
-                      (click)="cancelTextDraft()"
-                    >
-                      ✕
-                    </button>
-                    <textarea
-                      #textDraftEditor
-                      [(ngModel)]="textDraft"
-                      placeholder="Type…"
-                      (keydown)="onTextDraftKeydown($event)"
-                      (keydown.escape)="cancelTextDraft()"
-                      (blur)="onTextDraftBlur($event)"
-                      (select)="onTextDraftSelectionChange()"
-                      (keyup)="onTextDraftSelectionChange()"
-                      (pointerup)="onTextDraftSelectionChange()"
-                      (focus)="onTextDraftSelectionChange()"
-                      autofocus
-                    ></textarea>
+                  <div class="textDraft" [ngStyle]="textDraftShellStyle()">
+                    @if (!readonlyMode()) {
+                      <div class="textDraftToolbar" (pointerdown)="onTextDraftChromePointerDown($event)">
+                        <button
+                          type="button"
+                          class="textDraftToolbar__grip"
+                          title="Drag to move"
+                          aria-label="Drag to move text"
+                          (pointerdown)="onTextDraftMovePointerDown($event)"
+                        >
+                          <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
+                        </button>
+                        <div class="textDraftToolbar__actions">
+                          <button
+                            type="button"
+                            class="textDraftToolbar__btn"
+                            title="Duplicate"
+                            aria-label="Duplicate text box"
+                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
+                            (click)="duplicateTextDraft(); $event.stopPropagation()"
+                          >
+                            ⧉
+                          </button>
+                          <button
+                            type="button"
+                            class="textDraftToolbar__btn textDraftToolbar__btn--danger"
+                            title="Delete"
+                            aria-label="Delete text box"
+                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
+                            (click)="cancelTextDraft(); $event.stopPropagation()"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    }
+                    <div class="textDraft__frame" [ngStyle]="textDraftFrameStyle()">
+                      <textarea
+                        #textDraftEditor
+                        class="textDraft__textarea"
+                        [(ngModel)]="textDraft"
+                        placeholder="Type…"
+                        (keydown)="onTextDraftKeydown($event)"
+                        (keydown.escape)="cancelTextDraft()"
+                        (focusout)="onTextDraftFocusOut($event)"
+                        (select)="onTextDraftSelectionChange()"
+                        (keyup)="onTextDraftSelectionChange()"
+                        (pointerup)="onTextDraftSelectionChange()"
+                        (focus)="onTextDraftSelectionChange()"
+                        autofocus
+                      ></textarea>
+                      @if (!readonlyMode()) {
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--nw"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('nw', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--n"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('n', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--ne"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('ne', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--e"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('e', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--se"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('se', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--s"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('s', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--sw"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('sw', $event)"
+                        ></button>
+                        <button
+                          type="button"
+                          class="textDraft__handle textDraft__handle--w"
+                          aria-hidden="true"
+                          tabindex="-1"
+                          (pointerdown)="onTextDraftResizePointerDown('w', $event)"
+                        ></button>
+                      }
+                    </div>
                   </div>
                 }
               </div>

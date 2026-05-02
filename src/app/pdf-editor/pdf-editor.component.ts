@@ -14,10 +14,12 @@ import {
   inject,
   signal
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { ActivatedRoute, Router } from '@angular/router';
+import { map } from 'rxjs/operators';
 import {
   AnnotationType,
   GlobalWorkerOptions,
@@ -365,7 +367,32 @@ type ImageAnno = {
   crop?: { x: number; y: number; w: number; h: number };
 };
 
-type PlacedImageEdge = 'n' | 's' | 'e' | 'w';
+type PlacedImageEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
+
+type TextDraftResizeEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
+
+type ActiveTextDraftGesture =
+  | {
+      pageIndex: number;
+      pointerId: number;
+      kind: 'move';
+      startX: number;
+      startY: number;
+      origX: number;
+      origY: number;
+    }
+  | {
+      pageIndex: number;
+      pointerId: number;
+      kind: 'resize';
+      edge: TextDraftResizeEdge;
+      startX: number;
+      startY: number;
+      origX: number;
+      origY: number;
+      origW: number;
+      origH: number;
+    };
 type WidgetResizeEdge = 'n' | 's' | 'e' | 'w' | 'br';
 type ActivePlacedImageOp = {
   pageIndex: number;
@@ -386,6 +413,8 @@ type ActivePlacedTextOp = {
   edge: PlacedImageEdge | null;
   startX: number;
   startY: number;
+  /** Full snapshot at gesture start (for resize blending / collision). */
+  annoStart: TextAnno;
   /** Snapshot at gesture start: position, measured bounds, font size. */
   orig: { x: number; y: number; w: number; h: number; fontSize: number };
 };
@@ -495,6 +524,14 @@ type PageEdits = {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function axisRectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): boolean {
+  if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0) return false;
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
 function pdfLayoutRegionSortKey(r: PdfLayoutRegion): [number, number] {
@@ -670,6 +707,16 @@ export class PdfEditorComponent implements AfterViewInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+
+  /** Reactive `:id` so in-place navigation (e.g. save-as-new version) reloads doc + version list. */
+  private readonly editRouteId = toSignal(
+    this.route.paramMap.pipe(map((pm) => pm.get('id'))),
+    { initialValue: this.route.snapshot.paramMap.get('id') }
+  );
+  private readonly editRouteReadonly = toSignal(
+    this.route.queryParamMap.pipe(map((qm) => qm.get('readonly') === '1')),
+    { initialValue: this.route.snapshot.queryParamMap.get('readonly') === '1' }
+  );
   private readonly api = inject(PdfApiService);
   private readonly assetMeta = inject(AssetMetaService);
 
@@ -875,8 +922,11 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private activePlacedImageOp: ActivePlacedImageOp | null = null;
   private activePlacedTextOp: ActivePlacedTextOp | null = null;
+  private activeTextDraftGesture: ActiveTextDraftGesture | null = null;
   private static readonly placedImageHandlePx = 7;
   private static readonly placedImageHandleHit = 10;
+  private static readonly textDraftToolbarGapPx = 6;
+  private static readonly textDraftToolbarHeightPx = 38;
   private static readonly placedTextClosePx = 26;
   private static readonly placedTextCloseHitPad = 4;
 
@@ -1054,6 +1104,10 @@ export class PdfEditorComponent implements AfterViewInit {
     | {
         w: number;
         h: number;
+        maskX: number;
+        maskY: number;
+        maskW: number;
+        maskH: number;
         oldText: string;
         bgColor: string;
         color: string;
@@ -1063,6 +1117,8 @@ export class PdfEditorComponent implements AfterViewInit {
         fontFamily: FontFamily;
       }
     | null = null;
+  /** When adding new overlay text (no mask box), layout size for the in-page editor. */
+  private readonly textDraftFreeRect = signal<{ w: number; h: number }>({ w: 320, h: 44 });
 
   protected readonly isImagePlacing = signal(false);
   private pendingImageDataUrl: string | null = null;
@@ -1093,9 +1149,9 @@ export class PdfEditorComponent implements AfterViewInit {
 
     // Load the selected PDF from the library (route param).
     effect(() => {
-      const id = this.route.snapshot.paramMap.get('id');
+      const id = this.editRouteId();
       this.isCreateFlow.set(!id);
-      this.readonlyMode.set(this.route.snapshot.queryParamMap.get('readonly') === '1');
+      this.readonlyMode.set(this.editRouteReadonly());
       this.furniturePersistenceReady = false;
       this.docId.set(id);
       this.autoVersionSnapshotReady = false;
@@ -2837,6 +2893,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected onTextWidgetEditorEscape(pageIndex: number, widgetId: string, ev: Event) {
+    (ev as KeyboardEvent).stopPropagation();
     const ta = ev.target as HTMLTextAreaElement | null;
     if (ta && this.textFeatureEnabled()) {
       this.updateTextWidget(pageIndex, widgetId, ta.value);
@@ -2850,6 +2907,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const ke = ev as KeyboardEvent;
     if (ke.key !== 'Enter' || ke.shiftKey) return;
     ke.preventDefault();
+    ke.stopPropagation();
     const ta = ke.target as HTMLTextAreaElement | null;
     if (ta && this.textFeatureEnabled()) {
       this.updateTextWidget(pageIndex, widgetId, ta.value);
@@ -2869,6 +2927,40 @@ export class PdfEditorComponent implements AfterViewInit {
     this.updateWidget(pageIndex, widgetId, (w) =>
       w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, layeredTextValue: value } : w
     );
+    this.scheduleEditorStatePersist();
+  }
+
+  /** Flush layered textarea value; blur can run before the last ngModel tick. */
+  protected onLayeredTextWidgetEditorBlur(pageIndex: number, widgetId: string, ev: FocusEvent) {
+    const ta = ev.target as HTMLTextAreaElement | null;
+    if (ta) {
+      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
+    }
+    this.stopEditingWidget(widgetId);
+  }
+
+  protected onLayeredTextWidgetEditorEscape(pageIndex: number, widgetId: string, ev: Event) {
+    const ta = ev.target as HTMLTextAreaElement | null;
+    if (ta) {
+      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
+    }
+    this.stopEditingWidget(widgetId);
+  }
+
+  /** Enter commits and leaves edit; Shift+Enter inserts a newline. */
+  protected onLayeredTextWidgetEditorEnter(pageIndex: number, widgetId: string, ev: Event) {
+    const ke = ev as KeyboardEvent;
+    if (ke.key !== 'Enter' || ke.shiftKey) return;
+    ke.preventDefault();
+    ke.stopPropagation();
+    const ta = ke.target as HTMLTextAreaElement | null;
+    if (ta) {
+      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
+      this.persistEditorStateNow();
+    }
+    this.stopEditingWidget(widgetId);
   }
 
   private scheduleEditorStatePersist() {
@@ -4031,6 +4123,8 @@ export class PdfEditorComponent implements AfterViewInit {
     this.pendingVideoWidgetDrop = null;
     this.activePlacedImageOp = null;
     this.activePlacedTextOp = null;
+    this.activeTextDraftGesture = null;
+    this.textDraftFreeRect.set({ w: 320, h: 44 });
     this.selectedPlacedImageId.set(null);
     this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
@@ -4856,6 +4950,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const nav = await this.router.navigate(['/edit', created.id]);
       if (nav === false) {
         this.errorText.set('Version saved, but navigation failed. Open the new version from the library.');
+        await this.loadProposalVersions(id);
       }
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Save failed - reconnecting.');
@@ -5632,6 +5727,103 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
+    const tdg = this.activeTextDraftGesture;
+    if (tdg) {
+      if (ev.pointerId !== tdg.pointerId) return;
+      const { overlay } = this.getCanvasPair(tdg.pageIndex);
+      if (!overlay) return;
+      const pt = this.eventToPoint(overlay, ev);
+      const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+      const minW = 120;
+      const minH = 40;
+
+      if (tdg.kind === 'move') {
+        const { w, h } = this.getTextDraftLayoutSize();
+        const dx = pt.x - tdg.startX;
+        const dy = pt.y - tdg.startY;
+        const ctx = overlay.getContext('2d');
+        const obstacles = this.collectPageObstacleRects(tdg.pageIndex, { kind: 'textDraft' }, ctx);
+        const ix = clamp(tdg.origX + dx, 0, Math.max(0, rw - w));
+        const iy = clamp(tdg.origY + dy, 0, Math.max(0, rh - h));
+        const pos = this.constrainAxisMoveNoOverlap(rw, rh, w, h, tdg.origX, tdg.origY, ix, iy, obstacles);
+        this.textDraftX.set(pos.x);
+        this.textDraftY.set(pos.y);
+        this.redrawOverlay(tdg.pageIndex);
+        return;
+      }
+
+      const o = tdg;
+      const ox = o.origX;
+      const oy = o.origY;
+      const ow = o.origW;
+      const oh = o.origH;
+      let nx = ox;
+      let ny = oy;
+      let nw = ow;
+      let nh = oh;
+
+      switch (o.edge) {
+        case 'e':
+          nw = clamp(pt.x - ox, minW, rw - ox);
+          break;
+        case 's':
+          nh = clamp(pt.y - oy, minH, rh - oy);
+          break;
+        case 'n': {
+          const bottom = oy + oh;
+          ny = clamp(pt.y, 0, bottom - minH);
+          nh = bottom - ny;
+          break;
+        }
+        case 'w': {
+          const right = ox + ow;
+          nx = clamp(pt.x, 0, right - minW);
+          nw = right - nx;
+          break;
+        }
+        case 'se':
+          nw = clamp(pt.x - ox, minW, rw - ox);
+          nh = clamp(pt.y - oy, minH, rh - oy);
+          break;
+        case 'sw': {
+          const right = ox + ow;
+          nx = clamp(pt.x, 0, right - minW);
+          nw = right - nx;
+          nh = clamp(pt.y - oy, minH, rh - oy);
+          break;
+        }
+        case 'ne': {
+          const bottom = oy + oh;
+          nw = clamp(pt.x - ox, minW, rw - ox);
+          ny = clamp(pt.y, 0, bottom - minH);
+          nh = bottom - ny;
+          break;
+        }
+        case 'nw': {
+          const right = ox + ow;
+          const bottom = oy + oh;
+          nx = clamp(pt.x, 0, right - minW);
+          nw = right - nx;
+          ny = clamp(pt.y, 0, bottom - minH);
+          nh = bottom - ny;
+          break;
+        }
+        default:
+          break;
+      }
+
+      const ctxR = overlay.getContext('2d');
+      const obstaclesR = this.collectPageObstacleRects(tdg.pageIndex, { kind: 'textDraft' }, ctxR);
+      const origR = { x: o.origX, y: o.origY, w: o.origW, h: o.origH };
+      const candR = { x: nx, y: ny, w: nw, h: nh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesR);
+      this.textDraftX.set(fin.x);
+      this.textDraftY.set(fin.y);
+      this.setTextDraftLayoutSize(fin.w, fin.h);
+      this.redrawOverlay(tdg.pageIndex);
+      return;
+    }
+
     const opT = this.activePlacedTextOp;
     if (opT) {
       if (ev.pointerId !== opT.pointerId) return;
@@ -5639,19 +5831,33 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!overlay) return;
       const pt = this.eventToPoint(overlay, ev);
       const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+      const ctxT = overlay.getContext('2d');
       const o = opT.orig;
       const minS = 24;
       const scaleFont = (scale: number) => Math.round(clamp(o.fontSize * scale, 6, 200));
+      const startAnno = opT.annoStart;
 
       if (opT.mode === 'move') {
         const dx = pt.x - opT.startX;
         const dy = pt.y - opT.startY;
         const maxX = Math.max(0, rw - o.w);
         const maxY = Math.max(0, rh - o.h);
+        const obstacles = this.collectPageObstacleRects(opT.pageIndex, { kind: 'placedText', id: opT.id }, ctxT);
+        const pos = this.constrainAxisMoveNoOverlap(
+          rw,
+          rh,
+          o.w,
+          o.h,
+          o.x,
+          o.y,
+          clamp(o.x + dx, 0, maxX),
+          clamp(o.y + dy, 0, maxY),
+          obstacles
+        );
         this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({
           ...t,
-          x: clamp(o.x + dx, 0, maxX),
-          y: clamp(o.y + dy, 0, maxY)
+          x: pos.x,
+          y: pos.y
         }));
         this.redrawOverlay(opT.pageIndex);
         return;
@@ -5661,14 +5867,18 @@ export class PdfEditorComponent implements AfterViewInit {
       if (edge === 'e') {
         const nw = clamp(o.w + (pt.x - opT.startX), minS, Math.max(minS, rw - o.x));
         const nfs = scaleFont(nw / o.w);
-        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, fontSize: nfs }));
+        const candidate = { ...startAnno, fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
         this.redrawOverlay(opT.pageIndex);
         return;
       }
       if (edge === 's') {
         const nh = clamp(o.h + (pt.y - opT.startY), minS, Math.max(minS, rh - o.y));
         const nfs = scaleFont(nh / o.h);
-        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, fontSize: nfs }));
+        const candidate = { ...startAnno, fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
         this.redrawOverlay(opT.pageIndex);
         return;
       }
@@ -5679,7 +5889,9 @@ export class PdfEditorComponent implements AfterViewInit {
         const x = clamp(nx, 0, o.x + o.w - minS);
         const ww = clamp(nw0, minS, o.x + o.w - x);
         const nfs = scaleFont(ww / o.w);
-        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, x, fontSize: nfs }));
+        const candidate = { ...startAnno, x, fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
         this.redrawOverlay(opT.pageIndex);
         return;
       }
@@ -5690,7 +5902,55 @@ export class PdfEditorComponent implements AfterViewInit {
         const y = clamp(ny, 0, o.y + o.h - minS);
         const hh = clamp(nh0, minS, o.y + o.h - y);
         const nfs = scaleFont(hh / o.h);
-        this.updatePlacedText(opT.pageIndex, opT.id, (t) => ({ ...t, y, fontSize: nfs }));
+        const candidate = { ...startAnno, y, fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      const minRatio = minS / Math.max(o.w, o.h);
+      if (edge === 'se') {
+        const ratio = clamp(Math.min((pt.x - o.x) / o.w, (pt.y - o.y) / o.h), minRatio, 8);
+        const nfs = scaleFont(ratio);
+        const candidate = { ...startAnno, fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 'nw') {
+        const ratio = clamp(Math.min((o.x + o.w - pt.x) / o.w, (o.y + o.h - pt.y) / o.h), minRatio, 8);
+        const nfs = scaleFont(ratio);
+        const nx = o.x + o.w - o.w * ratio;
+        const ny = o.y + o.h - o.h * ratio;
+        const candidate = {
+          ...startAnno,
+          x: clamp(nx, 0, rw),
+          y: clamp(ny, 0, rh),
+          fontSize: nfs
+        };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 'ne') {
+        const ratio = clamp(Math.min((pt.x - o.x) / o.w, (o.y + o.h - pt.y) / o.h), minRatio, 8);
+        const nfs = scaleFont(ratio);
+        const ny = o.y + o.h - o.h * ratio;
+        const candidate = { ...startAnno, y: clamp(ny, 0, rh), fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
+        this.redrawOverlay(opT.pageIndex);
+        return;
+      }
+      if (edge === 'sw') {
+        const ratio = clamp(Math.min((o.x + o.w - pt.x) / o.w, (pt.y - o.y) / o.h), minRatio, 8);
+        const nfs = scaleFont(ratio);
+        const nx = o.x + o.w - o.w * ratio;
+        const candidate = { ...startAnno, x: clamp(nx, 0, rw), fontSize: nfs };
+        const applied = this.applyPlacedTextCandidateWithNoOverlap(opT.pageIndex, opT.id, startAnno, candidate, ctxT);
+        this.updatePlacedText(opT.pageIndex, opT.id, () => applied);
         this.redrawOverlay(opT.pageIndex);
         return;
       }
@@ -5704,6 +5964,8 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!overlay) return;
       const pt = this.eventToPoint(overlay, ev);
       const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+      const ctxI = overlay.getContext('2d');
+      const obstaclesI = this.collectPageObstacleRects(opI.pageIndex, { kind: 'placedImage', id: opI.id }, ctxI);
       const o = opI.orig;
       const minS = 24;
 
@@ -5712,10 +5974,21 @@ export class PdfEditorComponent implements AfterViewInit {
         const dy = pt.y - opI.startY;
         const maxX = Math.max(0, rw - o.w);
         const maxY = Math.max(0, rh - o.h);
+        const pos = this.constrainAxisMoveNoOverlap(
+          rw,
+          rh,
+          o.w,
+          o.h,
+          o.x,
+          o.y,
+          clamp(o.x + dx, 0, maxX),
+          clamp(o.y + dy, 0, maxY),
+          obstaclesI
+        );
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({
           ...a,
-          x: clamp(o.x + dx, 0, maxX),
-          y: clamp(o.y + dy, 0, maxY)
+          x: pos.x,
+          y: pos.y
         }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -5728,7 +6001,10 @@ export class PdfEditorComponent implements AfterViewInit {
           minS,
           Math.max(minS, rw - o.x)
         );
-        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: nw }));
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x: o.x, y: o.y, w: nw, h: o.h };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: fin.w }));
         this.redrawOverlay(opI.pageIndex);
         return;
       }
@@ -5738,7 +6014,10 @@ export class PdfEditorComponent implements AfterViewInit {
           minS,
           Math.max(minS, rh - o.y)
         );
-        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, h: nh }));
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x: o.x, y: o.y, w: o.w, h: nh };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
       }
@@ -5747,8 +6026,11 @@ export class PdfEditorComponent implements AfterViewInit {
         const nx = o.x + dx;
         const nw0 = o.w - dx;
         const x = clamp(nx, 0, o.x + o.w - minS);
-        const w = clamp(nw0, minS, o.x + o.w - x);
-        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, x, w }));
+        const w0 = clamp(nw0, minS, o.x + o.w - x);
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x, y: o.y, w: w0, h: o.h };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, x: fin.x, w: fin.w }));
         this.redrawOverlay(opI.pageIndex);
         return;
       }
@@ -5757,8 +6039,11 @@ export class PdfEditorComponent implements AfterViewInit {
         const ny = o.y + dy;
         const nh0 = o.h - dy;
         const y = clamp(ny, 0, o.y + o.h - minS);
-        const h = clamp(nh0, minS, o.y + o.h - y);
-        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, y, h }));
+        const h0 = clamp(nh0, minS, o.y + o.h - y);
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x: o.x, y, w: o.w, h: h0 };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, y: fin.y, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
       }
@@ -5773,16 +6058,29 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!overlay) return;
     const pt = this.eventToPoint(overlay, ev);
     const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+    const ctxW = overlay.getContext('2d');
+    const obstaclesW = this.collectPageObstacleRects(op.pageIndex, { kind: 'widget', id: op.id }, ctxW);
 
     if (op.mode === 'move') {
       const dx = pt.x - op.startX;
       const dy = pt.y - op.startY;
       const maxX = Math.max(0, rw - op.origW);
       const maxY = Math.max(0, rh - op.origH);
+      const pos = this.constrainAxisMoveNoOverlap(
+        rw,
+        rh,
+        op.origW,
+        op.origH,
+        op.origX,
+        op.origY,
+        clamp(op.origX + dx, 0, maxX),
+        clamp(op.origY + dy, 0, maxY),
+        obstaclesW
+      );
       this.updateWidget(op.pageIndex, op.id, (w) => ({
         ...w,
-        x: clamp(op.origX + dx, 0, maxX),
-        y: clamp(op.origY + dy, 0, maxY)
+        x: pos.x,
+        y: pos.y
       }));
       return;
     }
@@ -5797,10 +6095,15 @@ export class PdfEditorComponent implements AfterViewInit {
     if (edge === 'br') {
       const maxWb = Math.max(minW, rw - o.x);
       const maxHb = Math.max(minH, rh - o.y);
+      const cw = clamp(o.w + dx, minW, maxWb);
+      const ch = clamp(o.h + dy, minH, maxHb);
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x: o.x, y: o.y, w: cw, h: ch };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
       this.updateWidget(op.pageIndex, op.id, (w) => ({
         ...w,
-        w: clamp(o.w + dx, minW, maxWb),
-        h: clamp(o.h + dy, minH, maxHb)
+        w: fin.w,
+        h: fin.h
       }));
       return;
     }
@@ -5811,7 +6114,10 @@ export class PdfEditorComponent implements AfterViewInit {
         minW,
         Math.max(minW, rw - o.x)
       );
-      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, w: nw }));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x: o.x, y: o.y, w: nw, h: o.h };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, w: fin.w }));
       return;
     }
     if (edge === 's') {
@@ -5820,7 +6126,10 @@ export class PdfEditorComponent implements AfterViewInit {
         minH,
         Math.max(minH, rh - o.y)
       );
-      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, h: nh }));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x: o.x, y: o.y, w: o.w, h: nh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, h: fin.h }));
       return;
     }
     if (edge === 'w') {
@@ -5828,7 +6137,10 @@ export class PdfEditorComponent implements AfterViewInit {
       const nw0 = o.w - dx;
       const x = clamp(nx, 0, o.x + o.w - minW);
       const ww = clamp(nw0, minW, o.x + o.w - x);
-      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, x, w: ww }));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x, y: o.y, w: ww, h: o.h };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, x: fin.x, w: fin.w }));
       return;
     }
     if (edge === 'n') {
@@ -5836,7 +6148,10 @@ export class PdfEditorComponent implements AfterViewInit {
       const nh0 = o.h - dy;
       const y = clamp(ny, 0, o.y + o.h - minH);
       const hh = clamp(nh0, minH, o.y + o.h - y);
-      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, y, h: hh }));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x: o.x, y, w: o.w, h: hh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({ ...w, y: fin.y, h: fin.h }));
       return;
     }
   }
@@ -5847,6 +6162,20 @@ export class PdfEditorComponent implements AfterViewInit {
     if (cropOp) {
       if (ev.pointerId !== cropOp.pointerId) return;
       this.activeUploadCropHandle = null;
+      return;
+    }
+
+    const tdgUp = this.activeTextDraftGesture;
+    if (tdgUp) {
+      if (ev.pointerId !== tdgUp.pointerId) return;
+      this.activeTextDraftGesture = null;
+      const pi = tdgUp.pageIndex;
+      this.redrawOverlay(pi);
+      queueMicrotask(() => {
+        if (this.isTextPlacing() && this.textDraftPageIndex() === pi) {
+          this.textDraftEditor?.nativeElement?.focus({ preventScroll: true });
+        }
+      });
       return;
     }
 
@@ -6875,6 +7204,12 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected onOverlayPointerDown(pageIndex: number, ev: PointerEvent) {
+    // Clicks on the PDF canvas do not always blur the floating textarea first; without
+    // this flush, starting a new placement or hit-target would discard the draft.
+    if (this.isTextPlacing() && !this.activeTextDraftGesture) {
+      this.commitTextDraft();
+    }
+
     const pending = this.insertWidgetPending();
     if (pending) {
       if (pending.kind === 'image' && !pending.imageDataUrl) return;
@@ -6936,6 +7271,7 @@ export class PdfEditorComponent implements AfterViewInit {
             edge: textHit.part === 'body' ? null : textHit.part,
             startX: p.x,
             startY: p.y,
+            annoStart: { ...tAnno },
             orig: { x: tAnno.x, y: tAnno.y, w: b.w, h: b.h, fontSize: tAnno.fontSize }
           };
           ev.preventDefault();
@@ -7053,6 +7389,10 @@ export class PdfEditorComponent implements AfterViewInit {
           this.textDraftBox = {
             w: bounds.w,
             h: bounds.h,
+            maskX: r.x,
+            maskY: r.y,
+            maskW: r.w,
+            maskH: r.h,
             oldText: r.newText,
             bgColor: r.bgColor,
             color: r.color,
@@ -7101,6 +7441,10 @@ export class PdfEditorComponent implements AfterViewInit {
           this.textDraftBox = {
             w: wrapWidth + pad * 2,
             h: editBounds.h + pad * 2,
+            maskX: Math.max(0, editBounds.x - pad),
+            maskY: Math.max(0, editBounds.y - pad),
+            maskW: wrapWidth + pad * 2,
+            maskH: editBounds.h + pad * 2,
             oldText: hit.text,
             bgColor: bg,
             color: fg,
@@ -7129,6 +7473,7 @@ export class PdfEditorComponent implements AfterViewInit {
       // New text defaults to no background fill.
       this.textBgEnabled.set(false);
       this.textDraftBox = null;
+      this.textDraftFreeRect.set({ w: 320, h: 44 });
       this.redrawOverlay(pageIndex);
     }
 
@@ -7185,7 +7530,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
     // Keep the exact user input; don't trim, otherwise blur/commit can
     // unintentionally change content and create a mask patch.
-    const text = this.textDraft();
+    // Read the live DOM value so Enter/blur commits aren't one tick behind ngModel.
+    const text = this.textDraftEditor?.nativeElement?.value ?? this.textDraft();
 
     // If we are editing existing text, allow empty newText (acts like delete):
     // we still create the replacement rectangle to cover the original glyphs.
@@ -7203,6 +7549,8 @@ export class PdfEditorComponent implements AfterViewInit {
         this.textDraftPageIndex.set(null);
         this.textDraftBox = null;
         this.editingReplace = null;
+        this.activeTextDraftGesture = null;
+        this.textDraftFreeRect.set({ w: 320, h: 44 });
         this.redrawOverlay(pageIndex);
         return;
       }
@@ -7216,20 +7564,11 @@ export class PdfEditorComponent implements AfterViewInit {
         this.textDraftBox.w,
         this.textDraftBox.h
       );
-      const bounds = this.textReplaceCommitBounds(
-        anchorX,
-        anchorY,
-        text,
-        { ...this.textDraftBox, w: wrapWidth },
-        this.textSize(),
-        this.textStyle(),
-        this.textFamily()
-      );
       const r: TextReplace = {
-        x: bounds.x,
-        y: bounds.y,
-        w: bounds.w,
-        h: bounds.h,
+        x: this.textDraftBox.maskX,
+        y: this.textDraftBox.maskY,
+        w: this.textDraftBox.maskW,
+        h: this.textDraftBox.maskH,
         textX: anchorX,
         textY: anchorY,
         textWrapWidth: wrapWidth,
@@ -7272,6 +7611,8 @@ export class PdfEditorComponent implements AfterViewInit {
     this.textDraftPageIndex.set(null);
     this.textDraftBox = null;
     this.editingReplace = null;
+    this.activeTextDraftGesture = null;
+    this.textDraftFreeRect.set({ w: 320, h: 44 });
     this.redrawOverlay(pageIndex);
   }
 
@@ -7288,10 +7629,12 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
-  protected onTextDraftBlur(ev: FocusEvent) {
+  /** Save whenever focus leaves the inline editor unless it stays inside the draft chrome. */
+  protected onTextDraftFocusOut(ev: FocusEvent) {
     if (this.suppressCommitOnBlurOnce) return;
+    if (this.activeTextDraftGesture) return;
     const next = (ev.relatedTarget ?? null) as HTMLElement | null;
-    if (next?.closest?.('.docsRow--tools, .toolStrip, .rightbar')) return;
+    if (next?.closest?.('.textDraft')) return;
     this.commitTextDraft();
   }
 
@@ -7314,27 +7657,74 @@ export class PdfEditorComponent implements AfterViewInit {
     this.textDraftPageIndex.set(null);
     this.textDraftBox = null;
     this.editingReplace = null;
+    this.activeTextDraftGesture = null;
+    this.textDraftFreeRect.set({ w: 320, h: 44 });
     if (pageIndex !== null) this.redrawOverlay(pageIndex);
   }
 
-  /**
-   * In-page text editor style.
-   * - When editing existing detected text, match the detected box width/height.
-   * - When adding new text, use a compact default (like yesterday).
-   */
-  protected textDraftStyle() {
+  private getTextDraftLayoutSize(): { w: number; h: number } {
+    const compact = this.getTextDraftVisibleFrameSize();
+    if (compact) return compact;
+    const box = this.textDraftBox;
+    if (box) {
+      return { w: Math.max(160, Math.round(box.w)), h: Math.max(44, Math.round(box.h)) };
+    }
+    const fr = this.textDraftFreeRect();
+    return { w: Math.max(160, Math.round(fr.w)), h: Math.max(44, Math.round(fr.h)) };
+  }
+
+  private setTextDraftLayoutSize(nw: number, nh: number) {
+    const w = Math.max(120, Math.round(nw));
+    const h = Math.max(40, Math.round(nh));
+    if (this.textDraftBox) {
+      this.textDraftBox = { ...this.textDraftBox, w, h };
+    } else {
+      this.textDraftFreeRect.set({ w, h });
+    }
+  }
+
+  private getTextDraftVisibleFrameSize(): { w: number; h: number } | null {
+    if (!this.textDraftBox) return null;
+    const text = this.textDraft();
+    const fontSize = this.textSize();
+    const measured = this.measureTextBlockCss(text, fontSize, this.textStyle(), this.textFamily());
+    const pad = Math.max(12, Math.ceil(fontSize * 0.75));
+    const maxW = Math.max(120, Math.min(this.textDraftBox.w, this.textDraftBox.maskW));
+    const maxH = Math.max(40, this.textDraftBox.h);
+    return {
+      w: Math.max(120, Math.min(maxW, Math.ceil(measured.w + pad))),
+      h: Math.max(40, Math.min(maxH, Math.ceil(measured.h + Math.max(8, fontSize * 0.35))))
+    };
+  }
+
+  /** Outer shell: toolbar sits above the text frame; `top` is offset so the textarea stays at textDraftY. */
+  protected textDraftShellStyle() {
     const pageIndex = this.textDraftPageIndex();
     if (pageIndex === null) return {};
-    const box = this.textDraftBox;
-    const w = box ? Math.max(160, Math.round(box.w)) : 320;
-    const h = box ? Math.max(44, Math.round(box.h)) : 44;
+    const toolbar = PdfEditorComponent.textDraftToolbarHeightPx;
+    const gap = PdfEditorComponent.textDraftToolbarGapPx;
+    const { w } = this.getTextDraftLayoutSize();
+    const ty = this.textDraftY();
+    const top = Math.max(0, ty - toolbar - gap);
+    return {
+      position: 'absolute' as const,
+      left: `${this.textDraftX()}px`,
+      top: `${top}px`,
+      width: `${w}px`,
+      zIndex: 7
+    };
+  }
+
+  /** Text area frame (typography + size). */
+  protected textDraftFrameStyle() {
+    const pageIndex = this.textDraftPageIndex();
+    if (pageIndex === null) return {};
+    const { w, h } = this.getTextDraftLayoutSize();
     const fontStyle = this.textStyle();
     const style = fontStyle.includes('italic') ? 'italic' : 'normal';
     const weight = fontStyle.includes('bold') ? '700' : '400';
 
     return {
-      left: `${this.textDraftX()}px`,
-      top: `${this.textDraftY()}px`,
       width: `${w}px`,
       height: `${h}px`,
       color: this.textColor(),
@@ -7343,9 +7733,101 @@ export class PdfEditorComponent implements AfterViewInit {
       fontStyle: style,
       fontWeight: weight,
       fontFamily: cssFontFamily(this.textFamily()),
-      lineHeight: '1.2',
-      zIndex: 7
+      lineHeight: '1.2'
     };
+  }
+
+  protected onTextDraftMovePointerDown(ev: PointerEvent) {
+    if (this.readonlyMode()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.captureTextDraftSelection();
+    this.suppressCommitOnBlurOnce = true;
+    queueMicrotask(() => {
+      this.suppressCommitOnBlurOnce = false;
+    });
+    const pageIndex = this.textDraftPageIndex();
+    if (pageIndex === null) return;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const pt = this.eventToPoint(overlay, ev);
+    (ev.currentTarget as HTMLElement | null)?.setPointerCapture?.(ev.pointerId);
+    this.activeTextDraftGesture = {
+      pageIndex,
+      pointerId: ev.pointerId,
+      kind: 'move',
+      startX: pt.x,
+      startY: pt.y,
+      origX: this.textDraftX(),
+      origY: this.textDraftY()
+    };
+  }
+
+  protected onTextDraftResizePointerDown(edge: TextDraftResizeEdge, ev: PointerEvent) {
+    if (this.readonlyMode()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.captureTextDraftSelection();
+    this.suppressCommitOnBlurOnce = true;
+    queueMicrotask(() => {
+      this.suppressCommitOnBlurOnce = false;
+    });
+    const pageIndex = this.textDraftPageIndex();
+    if (pageIndex === null) return;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const pt = this.eventToPoint(overlay, ev);
+    (ev.currentTarget as HTMLElement | null)?.setPointerCapture?.(ev.pointerId);
+    const { w, h } = this.getTextDraftLayoutSize();
+    this.activeTextDraftGesture = {
+      pageIndex,
+      pointerId: ev.pointerId,
+      kind: 'resize',
+      edge,
+      startX: pt.x,
+      startY: pt.y,
+      origX: this.textDraftX(),
+      origY: this.textDraftY(),
+      origW: w,
+      origH: h
+    };
+  }
+
+  protected duplicateTextDraft() {
+    if (this.readonlyMode()) return;
+    const pageIndex = this.textDraftPageIndex();
+    if (pageIndex === null) return;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+    const text = this.textDraft();
+    const { w, h } = this.getTextDraftLayoutSize();
+    const x0 = this.textDraftX();
+    const y0 = this.textDraftY();
+    const step = 22;
+    const nx = clamp(x0 + step, 0, Math.max(0, rw - w));
+    const ny = clamp(y0 + step, 0, Math.max(0, rh - h));
+
+    this.commitTextDraft();
+
+    this.isTextPlacing.set(true);
+    this.textDraftPageIndex.set(pageIndex);
+    this.textDraft.set(text);
+    this.textDraftX.set(nx);
+    this.textDraftY.set(ny);
+    this.textDraftBox = null;
+    this.editingReplace = null;
+    this.textDraftFreeRect.set({ w, h });
+    this.redrawOverlay(pageIndex);
+    queueMicrotask(() => this.textDraftEditor?.nativeElement?.focus({ preventScroll: true }));
+  }
+
+  protected onTextDraftChromePointerDown(ev: PointerEvent) {
+    this.captureTextDraftSelection();
+    this.suppressCommitOnBlurOnce = true;
+    queueMicrotask(() => {
+      this.suppressCommitOnBlurOnce = false;
+    });
   }
 
   private textReplaceEditBounds(pageIndex: number, r: TextReplace) {
@@ -7749,6 +8231,169 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
+  private getTextDraftObstacleRect(pageIndex: number): { x: number; y: number; w: number; h: number } | null {
+    if (!this.isTextPlacing() || this.textDraftPageIndex() !== pageIndex) return null;
+    const { w, h } = this.getTextDraftLayoutSize();
+    const ty = this.textDraftY();
+    const toolbar = PdfEditorComponent.textDraftToolbarHeightPx;
+    const gap = PdfEditorComponent.textDraftToolbarGapPx;
+    const left = this.textDraftX();
+    const top = Math.max(0, ty - toolbar - gap);
+    const bottom = ty + h;
+    return { x: left, y: top, w, h: Math.max(h, bottom - top) };
+  }
+
+  private collectPageObstacleRects(
+    pageIndex: number,
+    exclude:
+      | { kind: 'widget'; id: string }
+      | { kind: 'placedImage'; id: string }
+      | { kind: 'placedText'; id: string }
+      | { kind: 'textDraft' }
+      | null,
+    ctx: CanvasRenderingContext2D | null
+  ): Array<{ x: number; y: number; w: number; h: number }> {
+    const out: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const page = this.editsByPage()[pageIndex];
+    for (const w of this.widgetsByPage()[pageIndex] ?? []) {
+      if (exclude?.kind === 'widget' && exclude.id === w.id) continue;
+      if (w.w > 0 && w.h > 0) out.push({ x: w.x, y: w.y, w: w.w, h: w.h });
+    }
+    for (const im of page?.images ?? []) {
+      if (exclude?.kind === 'placedImage' && exclude.id === im.id) continue;
+      if (im.w > 0 && im.h > 0) out.push({ x: im.x, y: im.y, w: im.w, h: im.h });
+    }
+    for (const t of page?.text ?? []) {
+      if (exclude?.kind === 'placedText' && exclude.id === t.id) continue;
+      const b = ctx
+        ? this.measureTextAnnoBounds(ctx, t)
+        : { x: t.x, y: t.y, w: Math.max(40, t.fontSize * 2), h: Math.max(t.fontSize, 12) };
+      if (b.w > 0 && b.h > 0) out.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+    }
+    for (const r of page?.replaces ?? []) {
+      if (r.w > 0 && r.h > 0) out.push({ x: r.x, y: r.y, w: r.w, h: r.h });
+    }
+    if (exclude?.kind !== 'textDraft') {
+      const td = this.getTextDraftObstacleRect(pageIndex);
+      if (td && td.w > 0 && td.h > 0) out.push(td);
+    }
+    return out;
+  }
+
+  private axisRectOutOfPage(r: { x: number; y: number; w: number; h: number }, pageW: number, pageH: number): boolean {
+    const eps = 1e-3;
+    return r.x < -eps || r.y < -eps || r.x + r.w > pageW + eps || r.y + r.h > pageH + eps;
+  }
+
+  private constrainAxisMoveNoOverlap(
+    pageW: number,
+    pageH: number,
+    boxW: number,
+    boxH: number,
+    origX: number,
+    origY: number,
+    intendedX: number,
+    intendedY: number,
+    obstacles: Array<{ x: number; y: number; w: number; h: number }>
+  ): { x: number; y: number } {
+    const ix = clamp(intendedX, 0, Math.max(0, pageW - boxW));
+    const iy = clamp(intendedY, 0, Math.max(0, pageH - boxH));
+    const hits = (x: number, y: number) => {
+      const r = { x, y, w: boxW, h: boxH };
+      if (this.axisRectOutOfPage(r, pageW, pageH)) return true;
+      return obstacles.some((o) => axisRectsOverlap(r, o));
+    };
+    if (!hits(ix, iy)) return { x: ix, y: iy };
+    if (hits(origX, origY)) {
+      return {
+        x: clamp(origX, 0, Math.max(0, pageW - boxW)),
+        y: clamp(origY, 0, Math.max(0, pageH - boxH))
+      };
+    }
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const t = (lo + hi) / 2;
+      const x = clamp(origX + t * (ix - origX), 0, Math.max(0, pageW - boxW));
+      const y = clamp(origY + t * (iy - origY), 0, Math.max(0, pageH - boxH));
+      if (hits(x, y)) hi = t;
+      else lo = t;
+    }
+    const t = lo;
+    return {
+      x: clamp(origX + t * (ix - origX), 0, Math.max(0, pageW - boxW)),
+      y: clamp(origY + t * (iy - origY), 0, Math.max(0, pageH - boxH))
+    };
+  }
+
+  private constrainAxisRectLerpNoOverlap(
+    pageW: number,
+    pageH: number,
+    orig: { x: number; y: number; w: number; h: number },
+    cand: { x: number; y: number; w: number; h: number },
+    minW: number,
+    minH: number,
+    obstacles: Array<{ x: number; y: number; w: number; h: number }>
+  ): { x: number; y: number; w: number; h: number } {
+    const lerp = (t: number) => ({
+      x: orig.x + t * (cand.x - orig.x),
+      y: orig.y + t * (cand.y - orig.y),
+      w: Math.max(minW, orig.w + t * (cand.w - orig.w)),
+      h: Math.max(minH, orig.h + t * (cand.h - orig.h))
+    });
+    const bad = (t: number) => {
+      const r = lerp(t);
+      if (this.axisRectOutOfPage(r, pageW, pageH)) return true;
+      return obstacles.some((o) => axisRectsOverlap(r, o));
+    };
+    if (!bad(1)) return lerp(1);
+    if (bad(0)) return lerp(0);
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (bad(mid)) hi = mid;
+      else lo = mid;
+    }
+    return lerp(lo);
+  }
+
+  private applyPlacedTextCandidateWithNoOverlap(
+    pageIndex: number,
+    id: string,
+    start: TextAnno,
+    candidate: TextAnno,
+    ctx: CanvasRenderingContext2D | null
+  ): TextAnno {
+    if (!ctx) return candidate;
+    const obstacles = this.collectPageObstacleRects(pageIndex, { kind: 'placedText', id }, ctx);
+    const boundsOf = (t: TextAnno) => this.measureTextAnnoBounds(ctx, t);
+    const overlaps = (t: TextAnno) => {
+      const b = boundsOf(t);
+      return obstacles.some((o) => axisRectsOverlap(b, o));
+    };
+    if (!overlaps(candidate)) return candidate;
+    if (overlaps(start)) return start;
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 20; i++) {
+      const tt = (lo + hi) / 2;
+      const fs = Math.round(start.fontSize + tt * (candidate.fontSize - start.fontSize));
+      const nx = start.x + tt * (candidate.x - start.x);
+      const ny = start.y + tt * (candidate.y - start.y);
+      const blended: TextAnno = { ...candidate, fontSize: fs, x: nx, y: ny };
+      if (overlaps(blended)) hi = tt;
+      else lo = tt;
+    }
+    const tt = lo;
+    return {
+      ...candidate,
+      fontSize: Math.round(start.fontSize + tt * (candidate.fontSize - start.fontSize)),
+      x: start.x + tt * (candidate.x - start.x),
+      y: start.y + tt * (candidate.y - start.y)
+    };
+  }
+
   private getSourceRectForPlaced(anno: ImageAnno, el: HTMLImageElement) {
     const natW = el.naturalWidth;
     const natH = el.naturalHeight;
@@ -7828,6 +8473,10 @@ export class PdfEditorComponent implements AfterViewInit {
       ) {
         return { id: t.id, part: 'close' };
       }
+      if (Math.hypot(x - b.x, y - b.y) <= hsz) return { id: t.id, part: 'nw' };
+      if (Math.hypot(x - (b.x + b.w), y - b.y) <= hsz) return { id: t.id, part: 'ne' };
+      if (Math.hypot(x - b.x, y - (b.y + b.h)) <= hsz) return { id: t.id, part: 'sw' };
+      if (Math.hypot(x - (b.x + b.w), y - (b.y + b.h)) <= hsz) return { id: t.id, part: 'se' };
       if (Math.hypot(x - (b.x + b.w / 2), y - b.y) <= hsz) return { id: t.id, part: 'n' };
       if (Math.hypot(x - (b.x + b.w / 2), y - (b.y + b.h)) <= hsz) return { id: t.id, part: 's' };
       if (Math.hypot(x - (b.x + b.w), y - (b.y + b.h / 2)) <= hsz) return { id: t.id, part: 'e' };
@@ -7869,19 +8518,30 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.textBaseline = 'alphabetic';
 
     const hs = PdfEditorComponent.placedImageHandlePx;
+    const hr = hs / 2 + 0.5;
     const { x, y, w, h: hh } = b;
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
-    const drawHandle = (ax: number, ay: number) => {
+    const drawCorner = (ax: number, ay: number) => {
+      ctx.beginPath();
+      ctx.arc(ax, ay, hr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+    const drawEdge = (ax: number, ay: number) => {
       ctx.beginPath();
       ctx.rect(ax - hs / 2, ay - hs / 2, hs, hs);
       ctx.fill();
       ctx.stroke();
     };
-    drawHandle(x + w / 2, y);
-    drawHandle(x + w / 2, y + hh);
-    drawHandle(x + w, y + hh / 2);
-    drawHandle(x, y + hh / 2);
+    drawCorner(x, y);
+    drawCorner(x + w, y);
+    drawCorner(x, y + hh);
+    drawCorner(x + w, y + hh);
+    drawEdge(x + w / 2, y);
+    drawEdge(x + w / 2, y + hh);
+    drawEdge(x + w, y + hh / 2);
+    drawEdge(x, y + hh / 2);
   }
 
   private removePlacedTextAnno(pageIndex: number, id: string) {
@@ -7970,6 +8630,7 @@ export class PdfEditorComponent implements AfterViewInit {
     // Match the selected background so preview and commit are visually consistent.
     if (this.isTextPlacing() && this.textDraftPageIndex() === pageIndex && this.textDraftBox) {
       ctx.fillStyle = this.textBgColor();
+      ctx.fillRect(this.textDraftBox.maskX, this.textDraftBox.maskY, this.textDraftBox.maskW, this.textDraftBox.maskH);
       ctx.fillRect(this.textDraftX(), this.textDraftY(), this.textDraftBox.w, this.textDraftBox.h);
     }
 
@@ -8726,6 +9387,7 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       const prev = cur.lines[cur.lines.length - 1]!;
       const indentDelta = Math.abs(ln.x0 - cur.lines[0]!.x0);
+      const previousIndentDelta = Math.abs(ln.x0 - prev.x0);
       // Viewport y grows downward: extra space between line bottoms and the next line top
       // means a paragraph / section gap; wrapped lines stay within ~one line advance.
       const verticalGap = ln.y0 - prev.y1;
@@ -8736,10 +9398,26 @@ export class PdfEditorComponent implements AfterViewInit {
       const sizeChanged = Math.round(ln.fontSize) !== Math.round(prev.fontSize);
       const fillChanged =
         normalizeFillColorKey(ln.fillColor) !== normalizeFillColorKey(prev.fillColor);
-      // Lists: each bullet/number starts a new block; wrapped lines belong to the same item
-      // if they are indented to the right of the bullet start.
-      // Large vertical gaps stay in the same block; paragraphGapBefore adds \n\n in merged text.
-      const newBlock = indentDelta > indentTol || sizeChanged || fillChanged;
+      const sameStyle =
+        !sizeChanged &&
+        !fillChanged &&
+        ln.fontStyle === prev.fontStyle &&
+        ln.fontFamily === prev.fontFamily;
+      const startsListItem = /^(\s*([-•]|(\d+)[.)]))\s+/.test(ln.text ?? '');
+      const verticalFlowContinues = verticalGap <= Math.max(18, lineAdvance * 1.8);
+      const likelyNewColumn = ln.x0 > prev.x1 + Math.max(24, medianFont * 2.5);
+      const largeStylePreservingJump =
+        indentDelta > Math.max(indentTol * 3.5, medianFont * 4) &&
+        previousIndentDelta > Math.max(indentTol * 2, medianFont * 2.5);
+      // Keep same-style paragraph/list content together. Preserve section hierarchy by splitting on
+      // clear style changes, new list items, column jumps, or very large indentation shifts.
+      const newBlock =
+        sizeChanged ||
+        fillChanged ||
+        startsListItem ||
+        likelyNewColumn ||
+        !verticalFlowContinues ||
+        (sameStyle ? largeStylePreservingJump : indentDelta > indentTol);
       if (newBlock) {
         pushCur();
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
