@@ -1794,7 +1794,17 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-heading-color">Color</label>
-                  <input id="global-typo-heading-color" class="pageSettings__input" [ngModel]="globalTypography().heading.color" (ngModelChange)="updateGlobalTypography('heading', { color: $event })" placeholder="#hex" />
+                  <div class="pageSettings__colorPick">
+                    <input
+                      id="global-typo-heading-color"
+                      class="pageSettings__colorInput"
+                      type="color"
+                      [ngModel]="globalTypographyColorPickerValue('heading')"
+                      (ngModelChange)="updateGlobalTypography('heading', { color: $event })"
+                      title="Heading text color"
+                      aria-label="Heading text color"
+                    />
+                  </div>
                 </div>
 
                 <div class="pageSettings__sectionTitle">Subheading</div>
@@ -1830,7 +1840,17 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-subheading-color">Color</label>
-                  <input id="global-typo-subheading-color" class="pageSettings__input" [ngModel]="globalTypography().subheading.color" (ngModelChange)="updateGlobalTypography('subheading', { color: $event })" placeholder="#hex" />
+                  <div class="pageSettings__colorPick">
+                    <input
+                      id="global-typo-subheading-color"
+                      class="pageSettings__colorInput"
+                      type="color"
+                      [ngModel]="globalTypographyColorPickerValue('subheading')"
+                      (ngModelChange)="updateGlobalTypography('subheading', { color: $event })"
+                      title="Subheading text color"
+                      aria-label="Subheading text color"
+                    />
+                  </div>
                 </div>
 
                 <div class="pageSettings__sectionTitle">Body</div>
@@ -1866,7 +1886,17 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-body-color">Color</label>
-                  <input id="global-typo-body-color" class="pageSettings__input" [ngModel]="globalTypography().body.color" (ngModelChange)="updateGlobalTypography('body', { color: $event })" placeholder="#hex" />
+                  <div class="pageSettings__colorPick">
+                    <input
+                      id="global-typo-body-color"
+                      class="pageSettings__colorInput"
+                      type="color"
+                      [ngModel]="globalTypographyColorPickerValue('body')"
+                      (ngModelChange)="updateGlobalTypography('body', { color: $event })"
+                      title="Body text color"
+                      aria-label="Body text color"
+                    />
+                  </div>
                 </div>
               </div>
 

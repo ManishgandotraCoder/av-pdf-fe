@@ -2731,6 +2731,22 @@
   resize: vertical;
 }
 
+.pageSettings__colorPick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pageSettings__colorInput {
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: white;
+  cursor: pointer;
+}
+
 .pageSettings__row {
   display: flex;
   gap: 8px;

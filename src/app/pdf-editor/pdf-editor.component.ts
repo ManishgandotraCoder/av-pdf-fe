@@ -238,6 +238,43 @@ function cloneGlobalTypography(v: GlobalTypographySettings): GlobalTypographySet
   };
 }
 
+function clampByte(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(255, Math.round(n)));
+}
+
+/** Normalize a CSS color to `#rrggbb` for `<input type="color">`, or null if unsupported. */
+function cssColorToHex6ForColorInput(input: string | undefined | null): string | null {
+  if (input == null) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  if (s[0] === '#') {
+    const hex = s.slice(1);
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+      const a = hex[0]!;
+      const b = hex[1]!;
+      const c = hex[2]!;
+      return `#${a}${a}${b}${b}${c}${c}`.toLowerCase();
+    }
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+      return `#${hex.toLowerCase()}`;
+    }
+    if (/^[0-9a-fA-F]{8}$/.test(hex)) {
+      return `#${hex.slice(0, 6).toLowerCase()}`;
+    }
+    return null;
+  }
+  const rgb = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgb) {
+    const r = clampByte(parseInt(rgb[1]!, 10));
+    const g = clampByte(parseInt(rgb[2]!, 10));
+    const b = clampByte(parseInt(rgb[3]!, 10));
+    const h = (n: number) => n.toString(16).padStart(2, '0');
+    return `#${h(r)}${h(g)}${h(b)}`;
+  }
+  return null;
+}
+
 type ToolbarIcon =
   | 'undo'
   | 'redo'
@@ -1811,6 +1848,11 @@ export class PdfEditorComponent implements AfterViewInit {
       [section]: { ...prev[section], ...patch }
     }));
     void this.applyGlobalTypographyToDocument();
+  }
+
+  protected globalTypographyColorPickerValue(section: keyof GlobalTypographySettings): string {
+    const raw = this.globalTypography()[section].color;
+    return cssColorToHex6ForColorInput(raw) ?? DEFAULT_GLOBAL_TYPOGRAPHY[section].color;
   }
 
   private blockSectionForDetected(block: DetectedBlock): keyof GlobalTypographySettings {
