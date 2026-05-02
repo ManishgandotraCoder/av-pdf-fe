@@ -987,7 +987,6 @@
                                 class="widget__text widget__editor"
                                 [ngModel]="w.textValue ?? ''"
                                 (ngModelChange)="updateTextWidget(activePageIndex(), w.id, $event)"
-                                (input)="onTextWidgetEditorInput(activePageIndex(), w.id, $event)"
                                 placeholder="Type…"
                                 (pointerdown)="$event.stopPropagation()"
                                 (keydown.escape)="onTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
@@ -1532,6 +1531,50 @@
                   </div>
                   @if (selectedItem.widget.kind === 'video' && selectedVideoSourceDisplay()) {
                     <div class="rightbarAssetsHint">Source: {{ selectedVideoSourceDisplay() }}</div>
+                  }
+                  <div class="rightbarAssetsHint">
+                    Overlapping widgets: send backward or bring forward to change which one is on top.
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      title="Move one step behind other overlapping widgets"
+                      [disabled]="!canSendSelectedWidgetBackward()"
+                      (click)="sendSelectedWidgetBackward($event)"
+                    >
+                      Send backward
+                    </button>
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      title="Move one step in front of overlapping widgets"
+                      [disabled]="!canBringSelectedWidgetForward()"
+                      (click)="bringSelectedWidgetForward($event)"
+                    >
+                      Bring forward
+                    </button>
+                  </div>
+                  @if (selectedItem.widget.kind === 'textOverImage' || selectedItem.widget.kind === 'imageBackgroundText') {
+                    <div class="rightbarAssetsHint">Text + image block style</div>
+                    <div class="rightbarMediaActions__row">
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'textOverImage'"
+                        (click)="setSelectedLayeredWidgetKind('textOverImage', $event)"
+                      >
+                        Text over image
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'imageBackgroundText'"
+                        (click)="setSelectedLayeredWidgetKind('imageBackgroundText', $event)"
+                      >
+                        Image behind text
+                      </button>
+                    </div>
                   }
                   <div class="rightbarMediaActions__row">
                     <button

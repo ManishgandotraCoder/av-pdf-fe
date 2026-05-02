@@ -1721,10 +1721,13 @@
   transition: opacity 0.12s ease;
 }
 
-.widget--text:hover .widget__textEmpty .widget__textAddBtn {
-  display: inline-flex;
-  opacity: 1;
-  visibility: visible;
+/* Real hover only: avoids touch “sticky hover” keeping the pill visible after tap. */
+@media (hover: hover) {
+  .widget--text:hover .widget__textEmpty .widget__textAddBtn {
+    display: inline-flex;
+    opacity: 1;
+    visibility: visible;
+  }
 }
 
 .widget:not(.widget--text) .widget__textAddBtn {
@@ -2593,21 +2596,21 @@
   position: relative;
   flex-shrink: 0;
   align-self: stretch;
-  border-radius: 10px;
+  border-radius: 6px;
   box-sizing: border-box;
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.12),
-    0 0 0 1px rgba(99, 102, 241, 0.5);
+    0 0 0 1px rgba(15, 23, 42, 0.18),
+    0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
 .textDraft__handle {
   position: absolute;
-  width: 11px;
-  height: 11px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  border: 1px solid rgba(99, 102, 241, 0.7);
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(15, 23, 42, 0.38);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
   padding: 0;
   margin: 0;
   z-index: 3;
@@ -2688,8 +2691,8 @@
 }
 
 .textDraft__textarea:focus-visible {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.35);
-  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.14);
+  border-radius: 6px;
 }
 
 .textDraft__textarea::selection {
@@ -2748,6 +2751,21 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.widget__layered .widget__layeredMedia {
+  position: relative;
+  z-index: 0;
+}
+
+.widget__layered--textOverImage::after,
+.widget__layered--imageBackgroundText::after {
+  z-index: 1;
+}
+
+.widget__layered .widget__labelBtn {
+  position: relative;
+  z-index: 2;
 }
 
 .widget__layeredMedia {

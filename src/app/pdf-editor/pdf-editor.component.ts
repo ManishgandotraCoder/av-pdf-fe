@@ -2877,9 +2877,54 @@ export class PdfEditorComponent implements AfterViewInit {
     this.scheduleEditorStatePersist();
   }
 
-  protected onTextWidgetEditorInput(pageIndex: number, widgetId: string, ev: Event) {
-    const value = (ev.target as HTMLTextAreaElement | null)?.value ?? '';
-    this.updateTextWidget(pageIndex, widgetId, value);
+  /**
+   * Overlay/canvas can take focus without a reliable textarea blur; sync inline editors
+   * (text box widgets, layered text, tables) into signals before other hit-handling runs.
+   */
+  private flushInlineWidgetTextEditors(pageIndex: number) {
+    const wid = this.editingWidgetId();
+    if (!wid) return;
+    const w = this.getWidget(pageIndex, wid);
+    if (!w) return;
+
+    if (w.kind === 'text') {
+      if (!this.textFeatureEnabled()) {
+        this.stopEditingWidget(wid);
+        return;
+      }
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        `[data-widget-id="${wid}"] textarea.widget__text.widget__editor`
+      );
+      if (ta) this.updateTextWidget(pageIndex, wid, ta.value);
+      this.persistEditorStateNow();
+      this.stopEditingWidget(wid);
+      return;
+    }
+
+    if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        `[data-widget-id="${wid}"] textarea.widget__layeredText.widget__editor`
+      );
+      if (ta) this.updateLayeredTextWidget(pageIndex, wid, ta.value);
+      this.persistEditorStateNow();
+      this.stopEditingWidget(wid);
+      return;
+    }
+
+    if (w.kind === 'table') {
+      const root = document.querySelector(`[data-widget-id="${wid}"]`);
+      if (root) {
+        for (const input of root.querySelectorAll<HTMLInputElement>('input.widget__cell.widget__editor')) {
+          const r = Number(input.dataset['r']);
+          const c = Number(input.dataset['c']);
+          if (Number.isFinite(r) && Number.isFinite(c)) {
+            this.updateTableCell(pageIndex, wid, r, c, input.value);
+          }
+        }
+      }
+      this.persistEditorStateNow();
+      this.stopEditingWidget(wid);
+    }
   }
 
   /** Flush textarea value then exit edit (blur may run before last ngModel tick). */
@@ -4154,6 +4199,77 @@ export class PdfEditorComponent implements AfterViewInit {
     return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
   }
 
+  /** Map an editor/viewport axis-aligned rect to an axis-aligned box in PDF user space (pdf-lib coordinates). */
+  private editorRectToPdfAabb(
+    vp: { convertToPdfPoint: (x: number, y: number) => number[] },
+    ex: number,
+    ey: number,
+    ew: number,
+    eh: number
+  ): { x: number; y: number; width: number; height: number } {
+    const pts = [
+      vp.convertToPdfPoint(ex, ey),
+      vp.convertToPdfPoint(ex + ew, ey),
+      vp.convertToPdfPoint(ex, ey + eh),
+      vp.convertToPdfPoint(ex + ew, ey + eh)
+    ];
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  /**
+   * Draw a single line of text positioned from a viewport top-left reference, with alignment along viewport +x.
+   */
+  private drawSemanticViewportTextLine(
+    page: PDFPage,
+    vp: { convertToPdfPoint: (x: number, y: number) => number[] },
+    raw: string,
+    vpAnchorX: number,
+    vpAnchorY: number,
+    align: 'left' | 'center' | 'right',
+    editorFontPx: number,
+    fontPdfSize: number,
+    font: PDFFont,
+    color01: { r: number; g: number; b: number },
+    boxWidthVp: number
+  ) {
+    const t = raw.trim();
+    if (!t) return;
+    const tw = font.widthOfTextAtSize(t, fontPdfSize);
+    const vy = vpAnchorY + editorFontPx * 0.88;
+    const [bx, by] = vp.convertToPdfPoint(vpAnchorX, vy);
+    const [hx, hy] = vp.convertToPdfPoint(vpAnchorX + 1, vy);
+    let ux = hx - bx;
+    let uy = hy - by;
+    let ulen = Math.hypot(ux, uy);
+    if (ulen < 1e-6) {
+      ux = 1;
+      uy = 0;
+      ulen = 1;
+    }
+    ux /= ulen;
+    uy /= ulen;
+
+    if (align === 'right') {
+      const [rx, ry] = vp.convertToPdfPoint(vpAnchorX + boxWidthVp, vy);
+      const x0 = rx - tw * ux;
+      const y0 = ry - tw * uy;
+      page.drawText(t, { x: x0, y: y0, size: fontPdfSize, font, color: rgb(color01.r, color01.g, color01.b) });
+      return;
+    }
+
+    let back = 0;
+    if (align === 'center') back = tw / 2;
+    const x0 = bx - back * ux;
+    const y0 = by - back * uy;
+    page.drawText(t, { x: x0, y: y0, size: fontPdfSize, font, color: rgb(color01.r, color01.g, color01.b) });
+  }
+
   private buildEditorStateBaseBytes(): Uint8Array {
     if (!this.pdfBytes) throw new Error('PDF not loaded.');
     return this.clonePdfBytes(this.pdfBytes);
@@ -4204,9 +4320,13 @@ export class PdfEditorComponent implements AfterViewInit {
           }
         }
 
-        const { width, height } = page.getSize();
-        const sx = width / (edit?.viewportWidth ?? width);
-        const sy = height / (edit?.viewportHeight ?? height);
+        if (!this.pdfDoc) throw new Error('PDF not loaded.');
+        const pdfjsPage = await this.pdfDoc.getPage(pageIndex + 1);
+        const vp = pdfjsPage.getViewport({ scale: 1, rotation: this.pdfPageViewportRotation(pdfjsPage) });
+
+        const editW = Math.max(1, edit?.viewportWidth ?? vp.width);
+        const editH = Math.max(1, edit?.viewportHeight ?? vp.height);
+        const scalePub = Math.min(vp.width / editW, vp.height / editH);
 
         if (edit) {
           // Replace text first (cover original area, then draw new).
@@ -4214,11 +4334,12 @@ export class PdfEditorComponent implements AfterViewInit {
             // NOTE: In semantic PDF export, we can only do a flat rectangle mask.
             // For scanned/image PDFs we should prefer a flatten export instead of 'inpaint' masking.
             const bg = hexToRgb01(r.bgColor);
+            const rect = this.editorRectToPdfAabb(vp, r.x, r.y, r.w, r.h);
             page.drawRectangle({
-              x: r.x * sx,
-              y: height - (r.y + r.h) * sy,
-              width: r.w * sx,
-              height: r.h * sy,
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
               color: rgb(bg.r, bg.g, bg.b)
             });
 
@@ -4229,16 +4350,18 @@ export class PdfEditorComponent implements AfterViewInit {
               const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
               const textX = r.textX ?? r.x;
               const textY = r.textY ?? r.y;
-              const size = r.fontSize * sy;
-              const lines = this.wrapTextLinesByWidth(r.newText, r.textWrapWidth ?? r.w, (line) =>
-                font.widthOfTextAtSize(line, r.fontSize)
+              const fontPdf = r.fontSize * scalePub;
+              const wrapPdf = (r.textWrapWidth ?? r.w) * (vp.width / editW);
+              const lines = this.wrapTextLinesByWidth(r.newText, wrapPdf, (line) =>
+                font.widthOfTextAtSize(line, fontPdf)
               );
-              const lh = Math.max(1, Math.round(r.fontSize * 1.2)) * sy;
+              const lhVp = Math.max(1, Math.round(r.fontSize * 1.2));
               for (let i = 0; i < lines.length; i++) {
+                const [bx, by] = vp.convertToPdfPoint(textX, textY + r.fontSize * 0.88 + i * lhVp);
                 page.drawText(lines[i] ?? '', {
-                  x: textX * sx,
-                  y: height - textY * sy - size - i * lh,
-                  size,
+                  x: bx,
+                  y: by,
+                  size: fontPdf,
                   font,
                   color: rgb(c.r, c.g, c.b)
                 });
@@ -4246,17 +4369,20 @@ export class PdfEditorComponent implements AfterViewInit {
             }
           }
 
-          await this.drawImagesToPdf(pdf, page, edit, sx, sy);
+          await this.drawImagesToPdf(pdf, page, edit, vp);
 
           for (const stroke of edit.ink) {
             const c = hexToRgb01(stroke.color);
+            const tthick = Math.max(0.5, stroke.width * (vp.width / editW));
             for (let i = 1; i < stroke.points.length; i++) {
               const a = stroke.points[i - 1];
               const b = stroke.points[i];
+              const sa = vp.convertToPdfPoint(a.x, a.y);
+              const sb = vp.convertToPdfPoint(b.x, b.y);
               page.drawLine({
-                start: { x: a.x * sx, y: height - a.y * sy },
-                end: { x: b.x * sx, y: height - b.y * sy },
-                thickness: Math.max(0.5, stroke.width * sx),
+                start: { x: sa[0], y: sa[1] },
+                end: { x: sb[0], y: sb[1] },
+                thickness: tthick,
                 color: rgb(c.r, c.g, c.b)
               });
             }
@@ -4267,37 +4393,45 @@ export class PdfEditorComponent implements AfterViewInit {
             const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
             const family = normalizePdfExportFontFamily(familyRaw);
             const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
-            const size = t.fontSize * sy;
+            const size = t.fontSize * scalePub;
+            const lhVp = Math.max(1, Math.round(t.fontSize * 1.2));
+            const lines = t.text.split('\n');
 
             // Optional background fill behind text (best-effort bbox).
             if (t.bgColor) {
               const bg = hexToRgb01(t.bgColor);
-              const lines = t.text.split('\n');
-              const lh = Math.max(1, Math.round(size * 1.2));
               for (let i = 0; i < lines.length; i++) {
                 const line = lines[i] ?? '';
-                const w = font.widthOfTextAtSize(line, size);
+                const twPdf = font.widthOfTextAtSize(line, size);
+                const twVp = Math.max(1, twPdf / (vp.width / editW));
+                const rect = this.editorRectToPdfAabb(vp, t.x, t.y + i * lhVp, twVp, lhVp);
                 page.drawRectangle({
-                  x: t.x * sx,
-                  y: height - t.y * sy - size - i * lh,
-                  width: w,
-                  height: lh,
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
                   color: rgb(bg.r, bg.g, bg.b)
                 });
               }
             }
 
-            page.drawText(t.text, {
-              x: t.x * sx,
-              y: height - t.y * sy - size,
-              size,
-              font,
-              color: rgb(c.r, c.g, c.b)
-            });
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i] ?? '';
+              if (!line) continue;
+              const [bx, by] = vp.convertToPdfPoint(t.x, t.y + t.fontSize * 0.88 + i * lhVp);
+              page.drawText(line, {
+                x: bx,
+                y: by,
+                size,
+                font,
+                color: rgb(c.r, c.g, c.b)
+              });
+            }
           }
         }
 
-        await this.drawSemanticWidgetsToPdf(pdf, page, pageWidgets, sx, sy);
+        await this.drawSemanticWidgetsToPdf(pdf, page, pageWidgets, vp);
+        await this.drawSemanticPageFurnitureToPdf(pdf, page, vp, pageIndex, edit, fontsByFamily.helvetica.regular);
       }
 
     const out = await pdf.save();
@@ -4310,29 +4444,29 @@ export class PdfEditorComponent implements AfterViewInit {
     pdf: PDFDocument,
     page: PDFPage,
     widgets: Widget[],
-    sx: number,
-    sy: number
+    vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] }
   ) {
     if (!widgets.length) return;
-    const { height } = page.getSize();
     for (const w of widgets) {
       if (w.kind === 'image' && w.imageSrc) {
         const embedded = await this.embedWidgetImageForPdf(pdf, w);
+        const rect = this.editorRectToPdfAabb(vp, w.x, w.y, w.w, w.h);
         page.drawImage(embedded, {
-          x: w.x * sx,
-          y: height - (w.y + w.h) * sy,
-          width: w.w * sx,
-          height: w.h * sy
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
         });
         continue;
       }
       if (w.kind === 'signature' && w.signatureSrc) {
         const embedded = await this.embedImageDataUrlForPdf(pdf, w.signatureSrc);
+        const rect = this.editorRectToPdfAabb(vp, w.x, w.y, w.w, w.h);
         page.drawImage(embedded, {
-          x: w.x * sx,
-          y: height - (w.y + w.h) * sy,
-          width: w.w * sx,
-          height: w.h * sy
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
         });
         continue;
       }
@@ -4418,21 +4552,17 @@ export class PdfEditorComponent implements AfterViewInit {
   ): Promise<Uint8Array> {
     if (!this.pdfBytes || !this.pdfDoc) throw new Error('PDF not loaded.');
 
-    // Load original for page sizes.
     this.assertReadablePdfHeader(this.pdfBytes);
-    const srcPdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
     const outPdf = await PDFDocument.create();
 
-    const srcPages = srcPdf.getPages();
     const edits = editsOverride ?? this.editsByPage();
     const widgetsByPage = widgetsOverride ?? this.widgetsByPage();
 
     // Render at higher scale for better quality.
     const renderScale = Math.max(2, this.scale());
+    const pageCount = this.pdfDoc.numPages;
 
-    for (let pageIndex = 0; pageIndex < srcPages.length; pageIndex++) {
-      const srcPage = srcPages[pageIndex];
-      const { width, height } = srcPage.getSize();
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
       const edit = edits[pageIndex];
 
       // Render original page via pdf.js.
@@ -4440,6 +4570,9 @@ export class PdfEditorComponent implements AfterViewInit {
       const originalRotate = ((page.rotate ?? 0) % 360 + 360) % 360;
       const rotation = originalRotate === 180 ? 0 : originalRotate;
       const viewport = page.getViewport({ scale: renderScale, rotation });
+      const sizeVp = page.getViewport({ scale: 1, rotation });
+      const width = sizeVp.width;
+      const height = sizeVp.height;
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.ceil(viewport.width);
@@ -4533,7 +4666,7 @@ export class PdfEditorComponent implements AfterViewInit {
       await this.drawWidgetsToFlattenCanvas(pageIndex, ctx, fx, fy, widgetsByPage);
       this.drawPageFurnitureToFlattenCanvas(pageIndex, ctx, fx, fy);
 
-      // Embed rendered page image into output PDF page at original size.
+      // Embed raster at PDF.js viewport size so each output page matches editor pagination (incl. 90°/270°).
       const pngDataUrl = canvas.toDataURL('image/png');
       const { bytes } = this.dataUrlToBytes(pngDataUrl);
       const embedded = await outPdf.embedPng(bytes);
@@ -6239,6 +6372,71 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
+  protected bringSelectedWidgetForward(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedItemWidget();
+    if (!sel) return;
+    const { pageIndex, widget } = sel;
+    this.widgetsByPage.update((prev) => {
+      const cur = prev[pageIndex] ?? [];
+      const i = cur.findIndex((w) => w.id === widget.id);
+      if (i < 0 || i >= cur.length - 1) return prev;
+      const next = cur.slice();
+      const tmp = next[i]!;
+      next[i] = next[i + 1]!;
+      next[i + 1] = tmp;
+      return { ...prev, [pageIndex]: next };
+    });
+  }
+
+  protected sendSelectedWidgetBackward(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedItemWidget();
+    if (!sel) return;
+    const { pageIndex, widget } = sel;
+    this.widgetsByPage.update((prev) => {
+      const cur = prev[pageIndex] ?? [];
+      const i = cur.findIndex((w) => w.id === widget.id);
+      if (i <= 0) return prev;
+      const next = cur.slice();
+      const tmp = next[i]!;
+      next[i] = next[i - 1]!;
+      next[i - 1] = tmp;
+      return { ...prev, [pageIndex]: next };
+    });
+  }
+
+  protected canBringSelectedWidgetForward(): boolean {
+    const sel = this.selectedItemWidget();
+    if (!sel) return false;
+    const list = this.widgetsByPage()[sel.pageIndex] ?? [];
+    const i = list.findIndex((w) => w.id === sel.widget.id);
+    return i >= 0 && i < list.length - 1;
+  }
+
+  protected canSendSelectedWidgetBackward(): boolean {
+    const sel = this.selectedItemWidget();
+    if (!sel) return false;
+    const list = this.widgetsByPage()[sel.pageIndex] ?? [];
+    const i = list.findIndex((w) => w.id === sel.widget.id);
+    return i > 0;
+  }
+
+  protected setSelectedLayeredWidgetKind(kind: 'textOverImage' | 'imageBackgroundText', ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedItemWidget();
+    if (!sel) return;
+    const { pageIndex, widget } = sel;
+    if (widget.kind !== 'textOverImage' && widget.kind !== 'imageBackgroundText') return;
+    if (widget.kind === kind) return;
+    this.updateWidget(pageIndex, widget.id, (w) =>
+      w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, kind } : w
+    );
+  }
+
   protected async addBlankPageAfter(pageIndex: number) {
     await this.mutatePdfPages(
       async (pdf) => {
@@ -7209,6 +7407,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.isTextPlacing() && !this.activeTextDraftGesture) {
       this.commitTextDraft();
     }
+    this.flushInlineWidgetTextEditors(pageIndex);
 
     const pending = this.insertWidgetPending();
     if (pending) {
@@ -8491,9 +8690,9 @@ export class PdfEditorComponent implements AfterViewInit {
   private drawPlacedTextChrome(ctx: CanvasRenderingContext2D, t: TextAnno) {
     if (this.selectedPlacedTextId() !== t.id) return;
     const b = this.measureTextAnnoBounds(ctx, t);
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.18)';
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
+    ctx.setLineDash([3, 4]);
     ctx.strokeRect(b.x, b.y, b.w, b.h);
     ctx.setLineDash([]);
     const cr = this.placedTextCloseScreenRect(b);
@@ -8521,7 +8720,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const hr = hs / 2 + 0.5;
     const { x, y, w, h: hh } = b;
     ctx.fillStyle = '#fff';
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
     const drawCorner = (ax: number, ay: number) => {
       ctx.beginPath();
       ctx.arc(ax, ay, hr, 0, Math.PI * 2);
@@ -10048,20 +10247,140 @@ export class PdfEditorComponent implements AfterViewInit {
     pdf: PDFDocument,
     page: PDFPage,
     edit: PageEdits,
-    sx: number,
-    sy: number
+    vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] }
   ) {
     if (edit.images.length === 0) return;
-    const { height } = page.getSize();
 
     for (const img of edit.images) {
       const embedded = await this.embedPlacedImageForPdf(pdf, img);
+      const rect = this.editorRectToPdfAabb(vp, img.x, img.y, img.w, img.h);
       page.drawImage(embedded, {
-        x: img.x * sx,
-        y: height - (img.y + img.h) * sy,
-        width: img.w * sx,
-        height: img.h * sy
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height
       });
+    }
+  }
+
+  /** Headers, footers, page numbers, and logo — matches flattened export and editor furniture layer. */
+  private async drawSemanticPageFurnitureToPdf(
+    pdf: PDFDocument,
+    page: PDFPage,
+    vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] },
+    pageIndex: number,
+    edit: PageEdits | undefined,
+    font: PDFFont
+  ) {
+    const furniture = this.pageFurniture();
+    const editW = Math.max(1, edit?.viewportWidth ?? vp.width);
+    const editH = Math.max(1, edit?.viewportHeight ?? vp.height);
+    const pad = 20;
+    const scalePub = Math.min(vp.width / editW, vp.height / editH);
+    const sizePdf = Math.max(8, 12 * scalePub);
+    const ink = { r: 0.06, g: 0.09, b: 0.16 };
+
+    if (furniture.logo.visible && furniture.logo.url) {
+      try {
+        const img = await this.loadHtmlImage(furniture.logo.url);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, img.naturalWidth || img.width);
+        c.height = Math.max(1, img.naturalHeight || img.height);
+        const cctx = c.getContext('2d');
+        if (cctx) {
+          cctx.drawImage(img, 0, 0);
+          const png = c.toDataURL('image/png');
+          const { bytes } = this.dataUrlToBytes(png);
+          const embedded = await pdf.embedPng(bytes);
+          const lw = furniture.logo.width;
+          const lh = furniture.logo.height;
+          const lx = furniture.logo.position === 'header-right' ? editW - pad - lw : pad;
+          const ly = 10;
+          const box = this.editorRectToPdfAabb(vp, lx, ly, lw, lh);
+          page.drawImage(embedded, { x: box.x, y: box.y, width: box.width, height: box.height });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (furniture.header.visible) {
+      const text = this.furnitureText(furniture.header.content, pageIndex);
+      const align = furniture.header.alignment;
+      const anchorX = align === 'center' ? editW / 2 : pad;
+      const hAlign: 'left' | 'center' | 'right' =
+        align === 'center' ? 'center' : align === 'right' ? 'right' : 'left';
+      this.drawSemanticViewportTextLine(page, vp, text, anchorX, 16, hAlign, 12, sizePdf, font, ink, editW - pad * 2);
+    }
+
+    if (furniture.footer.visible) {
+      if (furniture.footer.divider) {
+        const a = vp.convertToPdfPoint(pad, editH - 40);
+        const b = vp.convertToPdfPoint(editW - pad, editH - 40);
+        page.drawLine({
+          start: { x: a[0], y: a[1] },
+          end: { x: b[0], y: b[1] },
+          thickness: Math.max(0.5, scalePub),
+          color: rgb(0.55, 0.58, 0.62)
+        });
+      }
+      const fy = editH - 24;
+      const third = (editW - pad * 2) / 3;
+      this.drawSemanticViewportTextLine(
+        page,
+        vp,
+        this.furnitureText(furniture.footer.leftContent, pageIndex),
+        pad,
+        fy,
+        'left',
+        12,
+        sizePdf,
+        font,
+        ink,
+        third
+      );
+      this.drawSemanticViewportTextLine(
+        page,
+        vp,
+        this.furnitureText(furniture.footer.centerContent, pageIndex),
+        pad + third + third / 2,
+        fy,
+        'center',
+        12,
+        sizePdf,
+        font,
+        ink,
+        third
+      );
+      this.drawSemanticViewportTextLine(
+        page,
+        vp,
+        this.furnitureText(furniture.footer.rightContent, pageIndex),
+        pad + 2 * third,
+        fy,
+        'right',
+        12,
+        sizePdf,
+        font,
+        ink,
+        third
+      );
+    }
+
+    const pageLabel = this.pageNumberLabel(pageIndex);
+    if (pageLabel) {
+      const pos = furniture.pageNumber.position;
+      if (pos === 'header-left') {
+        this.drawSemanticViewportTextLine(page, vp, pageLabel, pad, 16, 'left', 12, sizePdf, font, ink, editW - pad * 2);
+      } else if (pos === 'header-right') {
+        this.drawSemanticViewportTextLine(page, vp, pageLabel, pad, 16, 'right', 12, sizePdf, font, ink, editW - pad * 2);
+      } else if (pos === 'footer-left') {
+        this.drawSemanticViewportTextLine(page, vp, pageLabel, pad, editH - 24, 'left', 12, sizePdf, font, ink, editW - pad * 2);
+      } else if (pos === 'footer-center') {
+        this.drawSemanticViewportTextLine(page, vp, pageLabel, editW / 2, editH - 24, 'center', 12, sizePdf, font, ink, editW - pad * 2);
+      } else {
+        this.drawSemanticViewportTextLine(page, vp, pageLabel, pad, editH - 24, 'right', 12, sizePdf, font, ink, editW - pad * 2);
+      }
     }
   }
 
@@ -10232,6 +10551,8 @@ export class PdfEditorComponent implements AfterViewInit {
           await this.putPersistedVideoDataUrl(ref, persistedVideoSrc);
           persistedVideoSrc = ref;
         }
+        const persistImage =
+          w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
         widgets.push({
           id: w.id,
           kind: w.kind,
@@ -10239,7 +10560,7 @@ export class PdfEditorComponent implements AfterViewInit {
           y: w.y,
           w: w.w,
           h: w.h,
-          imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
+          imageSrc: persistImage ? w.imageSrc : undefined,
           imageNaturalW: w.kind === 'image' ? w.imageNaturalW : undefined,
           imageNaturalH: w.kind === 'image' ? w.imageNaturalH : undefined,
           imageCrop: w.kind === 'image' ? w.imageCrop : undefined,
@@ -10314,6 +10635,8 @@ export class PdfEditorComponent implements AfterViewInit {
           if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
             resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
           }
+          const restoreImage =
+            w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
           widgets.push({
             id: w.id,
             kind: w.kind,
@@ -10321,7 +10644,7 @@ export class PdfEditorComponent implements AfterViewInit {
             y: Number.isFinite(w.y) ? w.y : 0,
             w: Number.isFinite(w.w) ? w.w : 220,
             h: Number.isFinite(w.h) ? w.h : 160,
-            imageSrc: w.kind === 'image' ? w.imageSrc : undefined,
+            imageSrc: restoreImage ? w.imageSrc : undefined,
             imageNaturalW: w.kind === 'image' && Number.isFinite(w.imageNaturalW as number) ? w.imageNaturalW : undefined,
             imageNaturalH: w.kind === 'image' && Number.isFinite(w.imageNaturalH as number) ? w.imageNaturalH : undefined,
             imageCrop:
