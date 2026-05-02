@@ -363,6 +363,11 @@ type DetectedPdfMedia = {
   h: number;
 };
 
+/** One reading-order region: grouped text or embedded image / video (viewport CSS px). */
+type PdfLayoutRegion =
+  | { regionKind: 'text'; block: DetectedBlock }
+  | { regionKind: 'media'; media: DetectedPdfMedia };
+
 type SidebarSectionType = 'section' | 'imageHeader';
 type EditHistoryEventKind = 'apply' | 'undo' | 'redo' | 'clear';
 type EditHistoryEvent = {
@@ -423,6 +428,28 @@ type PageEdits = {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function pdfLayoutRegionSortKey(r: PdfLayoutRegion): [number, number] {
+  const b = r.regionKind === 'text' ? r.block : r.media;
+  return [b.y, b.x];
+}
+
+/** Merges detected text blocks and embedded media, sorted top-to-bottom then left-to-right (LTR). */
+function buildPdfLayoutRegions(blocks: DetectedBlock[], media: DetectedPdfMedia[]): PdfLayoutRegion[] {
+  const out: PdfLayoutRegion[] = blocks.map((block) => ({ regionKind: 'text' as const, block }));
+  for (const m of media) {
+    out.push({ regionKind: 'media', media: m });
+  }
+  out.sort((a, b) => {
+    const [ay, ax] = pdfLayoutRegionSortKey(a);
+    const [by, bx] = pdfLayoutRegionSortKey(b);
+    if (ay !== by) return ay - by;
+    if (ax !== bx) return ax - bx;
+    if (a.regionKind !== b.regionKind) return a.regionKind === 'text' ? -1 : 1;
+    return 0;
+  });
+  return out;
 }
 
 function hexToRgb01(hex: string): { r: number; g: number; b: number } {
@@ -918,6 +945,17 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly detectedTextByPage = signal<Record<number, DetectedText[]>>({});
   protected readonly detectedBlocksByPage = signal<Record<number, DetectedBlock[]>>({});
   protected readonly detectedMediaByPage = signal<Record<number, DetectedPdfMedia[]>>({});
+  /** Text blocks and embedded media in document reading order per page (for layout-aware tools / UI). */
+  protected readonly layoutRegionsByPage = computed<Record<number, PdfLayoutRegion[]>>(() => {
+    const n = this.pageCount();
+    const blocksByPage = this.detectedBlocksByPage();
+    const mediaByPage = this.detectedMediaByPage();
+    const out: Record<number, PdfLayoutRegion[]> = {};
+    for (let i = 0; i < n; i++) {
+      out[i] = buildPdfLayoutRegions(blocksByPage[i] ?? [], mediaByPage[i] ?? []);
+    }
+    return out;
+  });
   private readonly baseSnapshotByPage = new Map<number, ImageData>();
   private readonly pageRotateByPage = new Map<number, number>();
 
@@ -6641,6 +6679,8 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         const hit = this.hitTestDetectedBlock(pageIndex, p.x, p.y);
+        console.log("hit",hit);
+        
         if (hit) {
           this.editingReplace = null;
           const { fg, bg } = this.sampleTextAndBgColors(pageIndex, hit);
