@@ -119,9 +119,15 @@ type AssetLibraryRow =
   | { rowKind: 'local'; asset: ReusableAsset }
   | { rowKind: 'crm'; item: CrmAssetLibraryItem };
 
-type PersistedMediaWidget = {
+type PersistedEditorState = {
+  version: 2;
+  editsByPage: Record<number, PageEdits>;
+  widgetsByPage: Record<number, PersistedWidget[]>;
+};
+
+type PersistedWidget = {
   id: string;
-  kind: 'image' | 'video';
+  kind: WidgetKind;
   x: number;
   y: number;
   w: number;
@@ -131,9 +137,13 @@ type PersistedMediaWidget = {
   imageNaturalH?: number;
   imageCrop?: { x: number; y: number; w: number; h: number };
   videoSrc?: string;
+  textValue?: string;
+  signatureSrc?: string;
+  layeredTextValue?: string;
+  table?: { rows: number; cols: number; cells: string[][] };
 };
 
-type PersistedMediaWidgetsByPage = Record<number, PersistedMediaWidget[]>;
+type PersistedMediaWidgetsByPage = Record<number, PersistedWidget[]>;
 
 type FurnitureAlignment = 'left' | 'center' | 'right';
 type PageNumberFormat = '1' | '1 / N' | 'Page 1 of N';
@@ -291,6 +301,8 @@ type ToolbarItem =
 type InkPoint = { x: number; y: number };
 type InkStroke = { color: string; width: number; points: InkPoint[] };
 type TextAnno = {
+  /** Stable id for selection / delete (overlay text boxes). */
+  id: string;
   color: string;
   fontSize: number;
   fontStyle: FontStyle;
@@ -399,10 +411,16 @@ type GlobalTypographySettings = {
 };
 
 type TextReplace = {
+  /** Mask rectangle used to erase original/previous text. */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Text draw anchor. Older saved edits fall back to x/y. */
+  textX?: number;
+  textY?: number;
+  /** Max line width for wrapped replacement text. Older saved edits fall back to w. */
+  textWrapWidth?: number;
   oldText: string;
   newText: string;
   // For scanned/image PDFs, solid bg fills look wrong. We support:
@@ -809,8 +827,11 @@ export class PdfEditorComponent implements AfterViewInit {
   private activePlacedImageOp: ActivePlacedImageOp | null = null;
   private static readonly placedImageHandlePx = 7;
   private static readonly placedImageHandleHit = 10;
+  private static readonly placedTextClosePx = 26;
+  private static readonly placedTextCloseHitPad = 4;
 
   protected readonly selectedPlacedImageId = signal<string | null>(null);
+  protected readonly selectedPlacedTextId = signal<string | null>(null);
   protected readonly imageCropSession = signal<
     | {
         mode: 'placed';
@@ -1059,9 +1080,10 @@ export class PdfEditorComponent implements AfterViewInit {
 
     effect(() => {
       const id = this.docId();
+      const edits = this.editsByPage();
       const widgets = this.widgetsByPage();
       if (!id || this.isLoading()) return;
-      void this.persistMediaWidgetsForDoc(id, widgets);
+      void this.persistEditorStateForDoc(id, edits, widgets);
     });
 
     effect(() => {
@@ -2669,6 +2691,16 @@ export class PdfEditorComponent implements AfterViewInit {
     const w = this.getWidget(this.activePageIndex(), widgetId);
     if (w?.kind === 'text' && !this.textFeatureEnabled()) return;
 
+    if (w?.kind === 'text') {
+      this.syncToolbarFromTextStyle({
+        color: this.textColor(),
+        fontSize: this.textSize(),
+        fontStyle: this.textStyle(),
+        fontFamily: this.textFamily(),
+        bgEnabled: this.textBgEnabled(),
+        bgColor: this.textBgColor()
+      });
+    }
     this.selectedWidgetId.set(widgetId);
     this.editingWidgetId.set(widgetId);
     queueMicrotask(() => this.focusWidgetEditor(widgetId));
@@ -2996,6 +3028,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
+    this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
@@ -3005,6 +3038,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
+    this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
@@ -3019,6 +3053,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.preventDefault();
     this.selectedWidgetId.set(widgetId);
     this.selectedDetectedPdfMedia.set(null);
+    this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
 
     const { overlay } = this.getCanvasPair(pageIndex);
@@ -3323,6 +3358,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
       this.editsByPage.set({});
+      this.widgetsByPage.set({});
       this.embeddedImageReplacementByDetectedId.clear();
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
@@ -3431,7 +3467,8 @@ export class PdfEditorComponent implements AfterViewInit {
       this.openPageMenuIndex.set(null);
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
-      this.editsByPage.set({});
+      const persistedEditorState = await this.loadPersistedEditorStateForDoc(id, doc.numPages);
+      this.editsByPage.set(persistedEditorState.editsByPage);
       this.embeddedImageReplacementByDetectedId.clear();
       this.detectedTextByPage.set({});
       this.detectedBlocksByPage.set({});
@@ -3441,7 +3478,7 @@ export class PdfEditorComponent implements AfterViewInit {
       // Key slots are session-scoped (re-created on load).
       this.customKeySlots.set([]);
       this.ensureKeySlotSectionOverrides();
-      this.widgetsByPage.set(await this.loadPersistedMediaWidgetsForDoc(id, doc.numPages));
+      this.widgetsByPage.set(persistedEditorState.widgetsByPage);
       const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
       this.pageFurniture.set(
         this.normalizePageFurniture(localFurniture ?? furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
@@ -3511,6 +3548,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.replaceMediaTarget.set(null);
     this.pendingVideoWidgetDrop = null;
     this.selectedPlacedImageId.set(null);
+    this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
     this.activePlacedImageOp = null;
     // Restore original page renders (replaces are drawn directly onto the base canvas).
@@ -3825,8 +3863,25 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private restoreHistorySnapshot(snapshot: EditorHistorySnapshot) {
-    this.editsByPage.set(this.cloneEdits(snapshot.editsByPage));
+    this.editsByPage.set(this.patchTextAnnosMissingIds(this.cloneEdits(snapshot.editsByPage)));
     this.widgetsByPage.set(this.cloneWidgetsByPage(snapshot.widgetsByPage));
+  }
+
+  /** Older history snapshots omit {@link TextAnno.id}; assign so selection/delete still work after undo. */
+  private patchTextAnnosMissingIds(edits: Record<number, PageEdits>): Record<number, PageEdits> {
+    const out: Record<number, PageEdits> = { ...edits };
+    for (const [k, e] of Object.entries(edits)) {
+      const pi = Number(k);
+      if (!Number.isFinite(pi) || !e?.text?.length) continue;
+      if (!e.text.some((t) => !t.id)) continue;
+      out[pi] = {
+        ...e,
+        text: e.text.map((t, i) =>
+          t.id ? t : { ...t, id: `txt_${pi}_${i}_${Math.random().toString(16).slice(2, 10)}` }
+        )
+      };
+    }
+    return out;
   }
 
   private afterHistoryRestore() {
@@ -3843,6 +3898,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.pendingVideoWidgetDrop = null;
     this.activePlacedImageOp = null;
     this.selectedPlacedImageId.set(null);
+    this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
 
     // Restore base pages then re-apply replaces based on restored state.
@@ -3868,6 +3924,11 @@ export class PdfEditorComponent implements AfterViewInit {
     );
     if (hasFlattenOnlyWidgets) return true;
     return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
+  }
+
+  private buildEditorStateBaseBytes(): Uint8Array {
+    if (!this.pdfBytes) throw new Error('PDF not loaded.');
+    return this.clonePdfBytes(this.pdfBytes);
   }
 
   /** Semantic PDF with annotations (pen, text, images, etc.). Not used when `exportNeedsFlatten()`. */
@@ -3938,13 +3999,22 @@ export class PdfEditorComponent implements AfterViewInit {
               const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
               const family = normalizePdfExportFontFamily(familyRaw);
               const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
-              page.drawText(r.newText, {
-                x: r.x * sx,
-                y: height - r.y * sy - r.fontSize * sy,
-                size: r.fontSize * sy,
-                font,
-                color: rgb(c.r, c.g, c.b)
-              });
+              const textX = r.textX ?? r.x;
+              const textY = r.textY ?? r.y;
+              const size = r.fontSize * sy;
+              const lines = this.wrapTextLinesByWidth(r.newText, r.textWrapWidth ?? r.w, (line) =>
+                font.widthOfTextAtSize(line, r.fontSize)
+              );
+              const lh = Math.max(1, Math.round(r.fontSize * 1.2)) * sy;
+              for (let i = 0; i < lines.length; i++) {
+                page.drawText(lines[i] ?? '', {
+                  x: textX * sx,
+                  y: height - textY * sy - size - i * lh,
+                  size,
+                  font,
+                  color: rgb(c.r, c.g, c.b)
+                });
+              }
             }
           }
 
@@ -4163,7 +4233,7 @@ export class PdfEditorComponent implements AfterViewInit {
           const rw = r.w * fx;
           const rh = r.h * fy;
 
-          if (r.maskMode === 'inpaint') {
+          if (r.maskMode === 'inpaint' && r.source !== 'textEdit') {
             this.inpaintRect(ctx, canvas, rx, ry, rw, rh);
           } else {
             ctx.fillStyle = r.bgColor;
@@ -4176,10 +4246,13 @@ export class PdfEditorComponent implements AfterViewInit {
             const weight = r.fontStyle.includes('bold') ? '700' : '400';
             ctx.font = `${style} ${weight} ${r.fontSize * fy}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`;
             ctx.textBaseline = 'top';
-            const lines = r.newText.split('\n');
+            const wrapWidth = (r.textWrapWidth ?? r.w) * fx;
+            const lines = this.wrapTextLinesByWidth(r.newText, wrapWidth, (line) => ctx.measureText(line).width);
             const lh = Math.max(1, Math.round(r.fontSize * fy * 1.2));
+            const textX = (r.textX ?? r.x) * fx;
+            const textY = (r.textY ?? r.y) * fy;
             for (let i = 0; i < lines.length; i++) {
-              ctx.fillText(lines[i], rx, ry + i * lh);
+              ctx.fillText(lines[i], textX, textY + i * lh);
             }
           }
         }
@@ -4474,13 +4547,10 @@ export class PdfEditorComponent implements AfterViewInit {
         ? await this.buildFlattenedExportBytes()
         : await this.buildSemanticExportBytes();
 
-      // Best-effort: persist the exported result for library documents.
+      // Download is an export action. Keep the editable editor document state separate
+      // so a refresh does not turn layers into baked, non-editable PDF pixels.
       const id = this.docId();
-      if (id) {
-        void this.api.saveBytes(id, safeBytes).catch(() => {
-          // ignore
-        });
-      }
+      if (id) void this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
 
       // Some builds type pdf-lib output buffers as ArrayBufferLike (SharedArrayBuffer),
       // which TS won't accept as BlobPart. Force a real ArrayBuffer-backed copy.
@@ -4626,9 +4696,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isSaving.set(true);
     try {
-      const safeBytes = this.exportNeedsFlatten()
-        ? await this.buildFlattenedExportBytes()
-        : await this.buildSemanticExportBytes();
+      const safeBytes = this.buildEditorStateBaseBytes();
       const nextName = this.buildVersionName(this.fileName() ?? 'Proposal.pdf');
       const currentWidgets = this.widgetsByPage();
       const currentFurniture = this.pageFurniture();
@@ -4640,9 +4708,9 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!created?.id || typeof created.id !== 'string') {
         throw new Error('Save did not return a new document id. Check the API and try again.');
       }
-      // New version gets a new doc id; carry local widget/furniture/title state forward
-      // so image/video overlays remain editable after navigation/refresh.
-      await this.persistMediaWidgetsForDoc(created.id, currentWidgets);
+      // New version gets a new doc id; carry local editor state forward
+      // so layers remain editable after navigation/refresh.
+      await this.persistEditorStateForDoc(created.id, this.editsByPage(), currentWidgets);
       this.persistPageFurnitureForDoc(created.id, currentFurniture);
       if (currentTitle) this.persistTitleForDoc(created.id, currentTitle);
       try {
@@ -4693,11 +4761,9 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isSaving.set(true);
     try {
-      const safeBytes = this.exportNeedsFlatten()
-        ? await this.buildFlattenedExportBytes()
-        : await this.buildSemanticExportBytes();
+      const safeBytes = this.buildEditorStateBaseBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
-      await this.persistMediaWidgetsForDoc(id, this.widgetsByPage());
+      await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
       try {
         await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
       } catch {
@@ -4786,11 +4852,9 @@ export class PdfEditorComponent implements AfterViewInit {
     this.autoVersionSaveInFlight = true;
     this.isAutoVersionSaving.set(true);
     try {
-      const safeBytes = this.exportNeedsFlatten()
-        ? await this.buildFlattenedExportBytes()
-        : await this.buildSemanticExportBytes();
+      const safeBytes = this.buildEditorStateBaseBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
-      await this.persistMediaWidgetsForDoc(id, this.widgetsByPage());
+      await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
       await this.loadProposalVersions(id);
     } catch {
       // Avoid blocking editing flow for auto-version failures.
@@ -5047,6 +5111,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.openPageMenuIndex() !== null) this.openPageMenuIndex.set(null);
     if (this.sidebarSlideMenuOpenIndex() !== null) this.sidebarSlideMenuOpenIndex.set(null);
     if (this.selectedPlacedImageId() !== null) this.selectedPlacedImageId.set(null);
+    if (this.selectedPlacedTextId() !== null) this.selectedPlacedTextId.set(null);
     if (this.imageCropSession() !== null) this.imageCropSession.set(null);
     if (this.insertSourceMenu() !== null) this.insertSourceMenu.set(null);
   }
@@ -6560,6 +6625,24 @@ export class PdfEditorComponent implements AfterViewInit {
       const { overlay } = this.getCanvasPair(pageIndex);
       if (overlay) {
         const p = this.eventToPoint(overlay, ev);
+        const textHit = this.hitTestPlacedText(pageIndex, p.x, p.y);
+        if (textHit?.part === 'close') {
+          this.removePlacedTextAnno(pageIndex, textHit.id);
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
+        if (textHit?.part === 'body') {
+          this.selectedWidgetId.set(null);
+          this.selectedDetectedPdfMedia.set(null);
+          this.selectedPlacedImageId.set(null);
+          this.selectedPlacedTextId.set(textHit.id);
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.redrawOverlay(pageIndex);
+          return;
+        }
+
         const hit = this.hitTestPlacedImage(pageIndex, p.x, p.y);
         if (hit) {
           const anno = this.getImageAnno(pageIndex, hit.id);
@@ -6570,6 +6653,7 @@ export class PdfEditorComponent implements AfterViewInit {
           }
           this.selectedWidgetId.set(null);
           this.selectedDetectedPdfMedia.set(null);
+          this.selectedPlacedTextId.set(null);
           this.beginHistoryStep();
           this.selectedPlacedImageId.set(hit.id);
           (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
@@ -6589,6 +6673,7 @@ export class PdfEditorComponent implements AfterViewInit {
           return;
         }
         this.selectedPlacedImageId.set(null);
+        this.selectedPlacedTextId.set(null);
         this.imageCropSession.set(null);
         this.redrawOverlay(pageIndex);
       }
@@ -6602,6 +6687,7 @@ export class PdfEditorComponent implements AfterViewInit {
         if (hitMedia) {
           this.selectedWidgetId.set(null);
           this.selectedPlacedImageId.set(null);
+          this.selectedPlacedTextId.set(null);
           this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
           this.focusRightbarInsertPanel();
           ev.preventDefault();
@@ -6648,26 +6734,28 @@ export class PdfEditorComponent implements AfterViewInit {
         const hitReplace = this.hitTestExistingReplace(pageIndex, p.x, p.y);
         if (hitReplace) {
           const { r, idx } = hitReplace;
+          const bounds = this.textReplaceEditBounds(pageIndex, r);
           this.editingReplace = { pageIndex, idx };
           this.isTextPlacing.set(true);
           this.textDraft.set(r.newText);
           this.textDraftPageIndex.set(pageIndex);
-          this.textDraftX.set(r.x);
-          this.textDraftY.set(r.y);
-          // Sync toolbar with selected replace.
-          this.textColor.set(r.color);
-          this.textSize.set(Math.round(r.fontSize));
-          this.textStyle.set(r.fontStyle);
-          this.textFamily.set(r.fontFamily ?? 'helvetica');
-          this.textBgEnabled.set(true);
-          this.textBgColor.set(r.bgColor);
+          this.textDraftX.set(r.textX ?? r.x);
+          this.textDraftY.set(r.textY ?? r.y);
+          this.syncToolbarFromTextStyle({
+            color: r.color,
+            fontSize: r.fontSize,
+            fontStyle: r.fontStyle,
+            fontFamily: r.fontFamily ?? 'helvetica',
+            bgEnabled: true,
+            bgColor: r.bgColor
+          });
           this.textDraftBox = {
-            w: r.w,
-            h: r.h,
+            w: bounds.w,
+            h: bounds.h,
             oldText: r.newText,
             bgColor: r.bgColor,
             color: r.color,
-            maskMode: r.maskMode,
+            maskMode: 'color',
             fontSize: r.fontSize,
             fontStyle: r.fontStyle,
             fontFamily: r.fontFamily ?? 'helvetica'
@@ -6679,37 +6767,45 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         const hit = this.hitTestDetectedBlock(pageIndex, p.x, p.y);
-        console.log("hit",hit);
-        
+
         if (hit) {
           this.editingReplace = null;
-          const { fg, bg } = this.sampleTextAndBgColors(pageIndex, hit);
+          const sameStyleBounds = this.sameStyleTextBoundsForBlock(pageIndex, hit);
+          const editBounds = {
+            x: Math.min(hit.x, sameStyleBounds.x),
+            y: Math.min(hit.y, sameStyleBounds.y),
+            w: Math.max(hit.x + hit.w, sameStyleBounds.x + sameStyleBounds.w) - Math.min(hit.x, sameStyleBounds.x),
+            h: Math.max(hit.y + hit.h, sameStyleBounds.y + sameStyleBounds.h) - Math.min(hit.y, sameStyleBounds.y)
+          };
+          const { fg } = this.sampleTextAndBgColors(pageIndex, editBounds);
+          const bg = '#ffffff';
           // Preserve sampled background so replace/edit keeps the original look.
           this.isTextPlacing.set(true);
           this.textDraft.set(hit.text);
           this.textDraftPageIndex.set(pageIndex);
-          // Pad mask bbox to fully cover anti-aliased glyph edges.
-          const pad = 0;
-          this.textDraftX.set(Math.max(0, hit.x - pad));
-          this.textDraftY.set(Math.max(0, hit.y - pad));
+          // Pad mask bbox to fully cover anti-aliased glyph edges and descenders.
+          const pad = Math.max(2, Math.ceil(hit.fontSize * 0.18));
+          this.textDraftX.set(hit.x);
+          this.textDraftY.set(hit.y);
           const hitFontSize = Math.round(hit.fontSize);
-          this.textSize.set(hitFontSize);
-          // Start from the original look instead of switching colors.
-          this.textColor.set(fg);
-          // Preserve detected font style (bold/italic) so edits don't change formatting.
-          this.textStyle.set(hit.fontStyle);
-          this.textFamily.set(hit.fontFamily);
-          this.textBgEnabled.set(true);
-          this.textBgColor.set(bg);
+          this.syncToolbarFromTextStyle({
+            color: fg,
+            fontSize: hitFontSize,
+            fontStyle: hit.fontStyle,
+            fontFamily: hit.fontFamily,
+            bgEnabled: true,
+            bgColor: bg
+          });
+          const wrapWidth = this.textEditWrapWidthForPage(pageIndex, hit.x, editBounds.y, editBounds.w, editBounds.h);
           this.textDraftBox = {
-            w: hit.w + pad * 2,
-            h: hit.h + pad * 2,
+            w: wrapWidth + pad * 2,
+            h: editBounds.h + pad * 2,
             oldText: hit.text,
             bgColor: bg,
             color: fg,
-            // Preserve the underlying PDF background when committing edits (Enter/click),
-            // so we don't introduce a flat gray patch behind replaced text.
-            maskMode: 'inpaint',
+            // Text-heavy PDF regions must erase with the sampled background color.
+            // Inpainting can copy nearby words into the mask and create ghost text.
+            maskMode: 'color',
             fontSize: hitFontSize,
             fontStyle: hit.fontStyle,
             fontFamily: hit.fontFamily
@@ -6810,11 +6906,32 @@ export class PdfEditorComponent implements AfterViewInit {
         return;
       }
 
+      const anchorX = this.textDraftX();
+      const anchorY = this.textDraftY();
+      const wrapWidth = this.textEditWrapWidthForPage(
+        pageIndex,
+        anchorX,
+        anchorY,
+        this.textDraftBox.w,
+        this.textDraftBox.h
+      );
+      const bounds = this.textReplaceCommitBounds(
+        anchorX,
+        anchorY,
+        text,
+        { ...this.textDraftBox, w: wrapWidth },
+        this.textSize(),
+        this.textStyle(),
+        this.textFamily()
+      );
       const r: TextReplace = {
-        x: this.textDraftX(),
-        y: this.textDraftY(),
-        w: this.textDraftBox.w,
-        h: this.textDraftBox.h,
+        x: bounds.x,
+        y: bounds.y,
+        w: bounds.w,
+        h: bounds.h,
+        textX: anchorX,
+        textY: anchorY,
+        textWrapWidth: wrapWidth,
         oldText: this.textDraftBox.oldText,
         newText: text,
         maskMode: this.textDraftBox.maskMode,
@@ -6835,6 +6952,7 @@ export class PdfEditorComponent implements AfterViewInit {
     } else if (text.trim().length > 0) {
       // New text: ignore empty
       const anno: TextAnno = {
+        id: `txt_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`,
         x: this.textDraftX(),
         y: this.textDraftY(),
         text: text.trim(),
@@ -6929,6 +7047,164 @@ export class PdfEditorComponent implements AfterViewInit {
     };
   }
 
+  private textReplaceEditBounds(pageIndex: number, r: TextReplace) {
+    const pad = Math.max(2, Math.ceil(r.fontSize * 0.18));
+    const textX = r.textX ?? r.x;
+    const textY = r.textY ?? r.y;
+    const wrapWidth = this.textEditWrapWidthForPage(pageIndex, textX, textY, r.textWrapWidth ?? r.w, r.h);
+    const measured = this.measureTextBlockCss(r.newText, r.fontSize, r.fontStyle, r.fontFamily ?? 'helvetica', wrapWidth);
+    const right = this.textEditRightBoundary(pageIndex, textX, textY, r.h, textX + Math.max(wrapWidth, measured.w) + pad);
+    const bottom = Math.max(r.y + r.h, textY + measured.h + pad);
+    return {
+      x: Math.max(0, Math.min(r.x, textX) - pad),
+      y: Math.max(0, Math.min(r.y, textY) - pad),
+      w: Math.max(1, right - Math.max(0, Math.min(r.x, textX) - pad)),
+      h: Math.max(1, bottom - Math.max(0, Math.min(r.y, textY) - pad))
+    };
+  }
+
+  private textEditWrapWidthForPage(pageIndex: number, x: number, y: number, requestedWidth: number, height: number) {
+    const pad = 8;
+    const mediaRight = this.nearestMediaBoundaryRight(pageIndex, x, y, height);
+    const requestedRight = x + Math.max(8, requestedWidth);
+    const right = mediaRight ?? requestedRight;
+    return Math.max(8, right - x - pad);
+  }
+
+  private sameStyleTextBoundsForBlock(pageIndex: number, block: DetectedBlock) {
+    const rightLimit = this.nearestMediaBoundaryRight(pageIndex, block.x, block.y, block.h) ?? Number.POSITIVE_INFINITY;
+    const yPad = Math.max(2, block.fontSize * 0.35);
+    const xPad = Math.max(16, block.fontSize);
+    const y0 = block.y - yPad;
+    const y1 = block.y + block.h + yPad;
+    const sizeTol = Math.max(1, block.fontSize * 0.12);
+    let x0 = block.x;
+    let yMin = block.y;
+    let x1 = block.x + block.w;
+    let yMax = block.y + block.h;
+
+    for (const item of this.detectedTextByPage()[pageIndex] ?? []) {
+      const sameStyle =
+        item.fontStyle === block.fontStyle &&
+        item.fontFamily === block.fontFamily &&
+        Math.abs(item.fontSize - block.fontSize) <= sizeTol;
+      if (!sameStyle) continue;
+      const overlapsY = item.y + item.h >= y0 && item.y <= y1;
+      if (!overlapsY) continue;
+      if (item.x < block.x - xPad || item.x >= rightLimit) continue;
+
+      x0 = Math.min(x0, item.x);
+      yMin = Math.min(yMin, item.y);
+      x1 = Math.max(x1, Math.min(item.x + item.w, rightLimit));
+      yMax = Math.max(yMax, item.y + item.h);
+    }
+
+    return { x: x0, y: yMin, w: Math.max(1, x1 - x0), h: Math.max(1, yMax - yMin) };
+  }
+
+  private textEditRightBoundary(
+    pageIndex: number,
+    x: number,
+    y: number,
+    height: number,
+    requestedRight: number
+  ) {
+    return Math.min(requestedRight, this.nearestMediaBoundaryRight(pageIndex, x, y, height) ?? requestedRight);
+  }
+
+  private nearestMediaBoundaryRight(pageIndex: number, x: number, y: number, height: number): number | null {
+    let right: number | null = null;
+    const y0 = y;
+    const y1 = y + Math.max(1, height);
+    for (const media of this.detectedMediaByPage()[pageIndex] ?? []) {
+      const overlapsY = y1 >= media.y && y0 <= media.y + media.h;
+      if (!overlapsY) continue;
+      if (media.x <= x) continue;
+      const candidate = Math.max(x + 8, media.x - 8);
+      right = right === null ? candidate : Math.min(right, candidate);
+    }
+    return right;
+  }
+
+  private textReplaceCommitBounds(
+    anchorX: number,
+    anchorY: number,
+    text: string,
+    originalBox: { w: number; h: number },
+    fontSize: number,
+    fontStyle: FontStyle,
+    fontFamily: FontFamily
+  ) {
+    const pad = Math.max(2, Math.ceil(fontSize * 0.18));
+    const measured = this.measureTextBlockCss(text, fontSize, fontStyle, fontFamily, originalBox.w);
+    return {
+      x: Math.max(0, anchorX - pad),
+      y: Math.max(0, anchorY - pad),
+      w: Math.max(originalBox.w + pad * 2, measured.w + pad * 2),
+      h: Math.max(originalBox.h + pad, measured.h + pad * 2)
+    };
+  }
+
+  private measureTextBlockCss(
+    text: string,
+    fontSize: number,
+    fontStyle: FontStyle,
+    fontFamily: FontFamily,
+    wrapWidth?: number
+  ) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const style = fontStyle.includes('italic') ? 'italic' : 'normal';
+    const weight = fontStyle.includes('bold') ? '700' : '400';
+    const lh = Math.max(1, Math.round(fontSize * 1.2));
+    const lines = text.split('\n');
+
+    if (!ctx) {
+      const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
+      const w = Math.min(wrapWidth ?? Infinity, longest * fontSize * 0.62);
+      return { w, h: Math.max(lh, lines.length * lh) };
+    }
+
+    ctx.font = `${style} ${weight} ${fontSize}px ${cssFontFamily(fontFamily)}`;
+    const wrapped = wrapWidth
+      ? this.wrapTextLinesByWidth(text, wrapWidth, (line) => ctx.measureText(line).width)
+      : lines;
+    const w = wrapped.reduce((max, line) => Math.max(max, ctx.measureText(line).width), 0);
+    return { w, h: Math.max(lh, wrapped.length * lh) };
+  }
+
+  private wrapTextLinesByWidth(text: string, maxWidth: number, measure: (line: string) => number): string[] {
+    const limit = Math.max(8, Number.isFinite(maxWidth) ? maxWidth : 0);
+    const out: string[] = [];
+    for (const paragraph of text.split('\n')) {
+      if (!paragraph) {
+        out.push('');
+        continue;
+      }
+
+      let line = '';
+      for (const word of paragraph.split(/(\s+)/)) {
+        if (!word) continue;
+        const next = line + word;
+        if (line.trim().length > 0 && measure(next) > limit) {
+          out.push(line.trimEnd());
+          line = word.trimStart();
+        } else {
+          line = next;
+        }
+
+        while (line && measure(line) > limit) {
+          let cut = line.length - 1;
+          while (cut > 1 && measure(line.slice(0, cut)) > limit) cut--;
+          out.push(line.slice(0, cut));
+          line = line.slice(cut);
+        }
+      }
+      out.push(line.trimEnd());
+    }
+    return out.length > 0 ? out : [''];
+  }
+
   private pushInkStroke(pageIndex: number, stroke: InkStroke) {
     this.beginHistoryStep();
     this.editsByPage.update((prev) => {
@@ -6986,6 +7262,24 @@ export class PdfEditorComponent implements AfterViewInit {
     this.applyTextToolbarChange(() => {
       this.textSize.set(size);
     });
+  }
+
+  private syncToolbarFromTextStyle(style: {
+    color: string;
+    fontSize: number;
+    fontStyle: FontStyle;
+    fontFamily: FontFamily;
+    bgEnabled: boolean;
+    bgColor: string;
+  }) {
+    const size = Math.max(1, Math.round(style.fontSize));
+    this.textColor.set(style.color);
+    this.textSize.set(size);
+    this.textSizeInput.set(String(size));
+    this.textStyle.set(style.fontStyle);
+    this.textFamily.set(style.fontFamily);
+    this.textBgEnabled.set(style.bgEnabled);
+    this.textBgColor.set(style.bgColor);
   }
 
   protected setTextSizeFromInput(raw: string) {
@@ -7152,6 +7446,124 @@ export class PdfEditorComponent implements AfterViewInit {
     return { sx: 0, sy: 0, sw, sh, natW, natH };
   }
 
+  private ensureTextAnnosHaveIds(pageIndex: number) {
+    this.editsByPage.update((prev) => {
+      const e = prev[pageIndex];
+      if (!e?.text?.length || !e.text.some((t) => !t.id)) return prev;
+      return {
+        ...prev,
+        [pageIndex]: {
+          ...e,
+          text: e.text.map((t, i) =>
+            t.id ? t : { ...t, id: `txt_${pageIndex}_${i}_${Math.random().toString(16).slice(2, 10)}` }
+          )
+        }
+      };
+    });
+  }
+
+  private measureTextAnnoBounds(
+    ctx: CanvasRenderingContext2D,
+    t: TextAnno
+  ): { x: number; y: number; w: number; h: number } {
+    const style = t.fontStyle.includes('italic') ? 'italic' : 'normal';
+    const weight = t.fontStyle.includes('bold') ? '700' : '400';
+    ctx.textBaseline = 'top';
+    ctx.font = `${style} ${weight} ${t.fontSize}px ${cssFontFamily(t.fontFamily ?? 'helvetica')}`;
+    const lines = t.text.split('\n');
+    const lh = Math.max(1, Math.round(t.fontSize * 1.2));
+    let maxW = 0;
+    for (const line of lines) {
+      maxW = Math.max(maxW, ctx.measureText(line).width);
+    }
+    return { x: t.x, y: t.y, w: maxW, h: Math.max(lh, lines.length * lh) };
+  }
+
+  private placedTextCloseScreenRect(bounds: { x: number; y: number; w: number; h: number }) {
+    const cw = PdfEditorComponent.placedTextClosePx;
+    const pad = 6;
+    const cx = bounds.x + Math.max(0, bounds.w - cw - pad);
+    const cy = bounds.y + pad;
+    return { x: cx, y: cy, w: cw, h: cw };
+  }
+
+  private hitTestPlacedText(
+    pageIndex: number,
+    x: number,
+    y: number
+  ): { id: string; part: 'close' | 'body' } | null {
+    this.ensureTextAnnosHaveIds(pageIndex);
+    const edit = this.editsByPage()[pageIndex];
+    const list = edit?.text ?? [];
+    if (list.length === 0) return null;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return null;
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return null;
+    const pad = PdfEditorComponent.placedTextCloseHitPad;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const t = list[i]!;
+      const b = this.measureTextAnnoBounds(ctx, t);
+      const cr = this.placedTextCloseScreenRect(b);
+      if (
+        x >= cr.x - pad &&
+        x <= cr.x + cr.w + pad &&
+        y >= cr.y - pad &&
+        y <= cr.y + cr.h + pad
+      ) {
+        return { id: t.id, part: 'close' };
+      }
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+        return { id: t.id, part: 'body' };
+      }
+    }
+    return null;
+  }
+
+  private drawPlacedTextChrome(ctx: CanvasRenderingContext2D, t: TextAnno) {
+    if (this.selectedPlacedTextId() !== t.id) return;
+    const b = this.measureTextAnnoBounds(ctx, t);
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.setLineDash([]);
+    const cr = this.placedTextCloseScreenRect(b);
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const rr = ctx as CanvasRenderingContext2D & { roundRect?: (x: number, y: number, w: number, h: number, r: number) => void };
+    if (typeof rr.roundRect === 'function') {
+      rr.roundRect(cr.x, cr.y, cr.w, cr.h, 8);
+    } else {
+      ctx.rect(cr.x, cr.y, cr.w, cr.h);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+    ctx.font = '900 13px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✕', cr.x + cr.w / 2, cr.y + cr.h / 2 + 0.5);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  private removePlacedTextAnno(pageIndex: number, id: string) {
+    this.beginHistoryStep('Remove text box');
+    this.editsByPage.update((prev) => {
+      const ex = prev[pageIndex];
+      if (!ex) return prev;
+      return {
+        ...prev,
+        [pageIndex]: { ...ex, text: (ex.text ?? []).filter((anno) => anno.id !== id) }
+      };
+    });
+    if (this.selectedPlacedTextId() === id) this.selectedPlacedTextId.set(null);
+    this.redrawOverlay(pageIndex);
+  }
+
   private hitTestPlacedImage(
     pageIndex: number,
     x: number,
@@ -7280,7 +7692,13 @@ export class PdfEditorComponent implements AfterViewInit {
       }
 
       ctx.fillStyle = t.color;
-      ctx.fillText(t.text, t.x, t.y);
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i] ?? '', t.x, t.y + i * lh);
+      }
+    }
+
+    for (const t of edit.text) {
+      this.drawPlacedTextChrome(ctx, t);
     }
 
     for (const img of edit.images) {
@@ -7308,7 +7726,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     for (const r of edit.replaces) {
-      if (r.maskMode === 'inpaint') {
+      if (r.maskMode === 'inpaint' && r.source !== 'textEdit') {
         // Opaque erase first (prevents ghosting of previous glyphs),
         // then inpaint texture from nearby pixels.
         ctx.fillStyle = r.bgColor;
@@ -7326,10 +7744,12 @@ export class PdfEditorComponent implements AfterViewInit {
         const weight = r.fontStyle.includes('bold') ? '700' : '400';
         ctx.font = `${style} ${weight} ${r.fontSize}px ${cssFontFamily(r.fontFamily ?? 'helvetica')}`;
         ctx.textBaseline = 'top';
-        const lines = r.newText.split('\n');
+        const lines = this.wrapTextLinesByWidth(r.newText, r.textWrapWidth ?? r.w, (line) => ctx.measureText(line).width);
         const lh = Math.max(1, Math.round(r.fontSize * 1.2));
+        const textX = r.textX ?? r.x;
+        const textY = r.textY ?? r.y;
         for (let i = 0; i < lines.length; i++) {
-          ctx.fillText(lines[i], r.x, r.y + i * lh);
+          ctx.fillText(lines[i], textX, textY + i * lh);
         }
       }
     }
@@ -7984,8 +8404,6 @@ export class PdfEditorComponent implements AfterViewInit {
       // Large vertical gaps stay in the same block; paragraphGapBefore adds \n\n in merged text.
       const newBlock = indentDelta > indentTol || sizeChanged || fillChanged;
       if (newBlock) {
-        console.log("indentDelta > indentTol",indentDelta > indentTol , indentDelta , indentTol, "sizeChanged" , sizeChanged , "fillChanged" , fillChanged);
-        console.log("ln.text",ln.text);
         pushCur();
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
       } else {
@@ -8778,14 +9196,17 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private async persistMediaWidgetsForDoc(id: string, widgetsByPage: Record<number, Widget[]>) {
-    const key = this.mediaWidgetsStorageKey(id);
-    const out: PersistedMediaWidgetsByPage = {};
+  private async persistEditorStateForDoc(
+    id: string,
+    editsByPage: Record<number, PageEdits>,
+    widgetsByPage: Record<number, Widget[]>
+  ) {
+    const key = this.editorStateStorageKey(id);
+    const widgetsOut: PersistedMediaWidgetsByPage = {};
     for (const [k, list] of Object.entries(widgetsByPage)) {
       const pageIndex = Number(k);
-      const media: PersistedMediaWidget[] = [];
+      const widgets: PersistedWidget[] = [];
       for (const w of list ?? []) {
-        if (w.kind !== 'image' && w.kind !== 'video') continue;
         let persistedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
         if (w.kind === 'video' && persistedVideoSrc?.startsWith('blob:')) {
           const blobDataUrl = await this.blobUrlToDataUrl(persistedVideoSrc);
@@ -8796,9 +9217,9 @@ export class PdfEditorComponent implements AfterViewInit {
           await this.putPersistedVideoDataUrl(ref, persistedVideoSrc);
           persistedVideoSrc = ref;
         }
-        media.push({
+        widgets.push({
           id: w.id,
-          kind: (w.kind === 'image' ? 'image' : 'video') as 'image' | 'video',
+          kind: w.kind,
           x: w.x,
           y: w.y,
           w: w.w,
@@ -8807,31 +9228,73 @@ export class PdfEditorComponent implements AfterViewInit {
           imageNaturalW: w.kind === 'image' ? w.imageNaturalW : undefined,
           imageNaturalH: w.kind === 'image' ? w.imageNaturalH : undefined,
           imageCrop: w.kind === 'image' ? w.imageCrop : undefined,
-          videoSrc: persistedVideoSrc
+          videoSrc: persistedVideoSrc,
+          textValue: w.kind === 'text' ? w.textValue : undefined,
+          signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
+          layeredTextValue:
+            w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? w.layeredTextValue : undefined,
+          table: w.kind === 'table' && w.table ? this.cloneTable(w.table) : undefined
         });
       }
-      if (media.length > 0) out[pageIndex] = media;
+      if (widgets.length > 0) widgetsOut[pageIndex] = widgets;
     }
     try {
-      localStorage.setItem(key, JSON.stringify(out));
+      const state: PersistedEditorState = {
+        version: 2,
+        editsByPage: this.cloneEdits(editsByPage),
+        widgetsByPage: widgetsOut
+      };
+      localStorage.setItem(key, JSON.stringify(state));
     } catch {
       // ignore storage issues
     }
   }
 
-  private async loadPersistedMediaWidgetsForDoc(id: string, pageCount: number): Promise<Record<number, Widget[]>> {
-    const key = this.mediaWidgetsStorageKey(id);
+  private async loadPersistedEditorStateForDoc(
+    id: string,
+    pageCount: number
+  ): Promise<{ editsByPage: Record<number, PageEdits>; widgetsByPage: Record<number, Widget[]> }> {
+    const key = this.editorStateStorageKey(id);
     try {
       const raw = localStorage.getItem(key);
+      if (!raw) return { editsByPage: {}, widgetsByPage: await this.loadLegacyPersistedMediaWidgetsForDoc(id, pageCount) };
+      const parsed = JSON.parse(raw) as Partial<PersistedEditorState> | PersistedMediaWidgetsByPage;
+      const stateWidgets =
+        typeof (parsed as Partial<PersistedEditorState>).version === 'number'
+          ? ((parsed as Partial<PersistedEditorState>).widgetsByPage ?? {})
+          : (parsed as PersistedMediaWidgetsByPage);
+      const editsByPage =
+        typeof (parsed as Partial<PersistedEditorState>).version === 'number'
+          ? this.normalizePersistedEdits((parsed as Partial<PersistedEditorState>).editsByPage, pageCount)
+          : {};
+      const widgetsByPage = await this.normalizePersistedWidgets(stateWidgets, pageCount);
+      return { editsByPage, widgetsByPage };
+    } catch {
+      return { editsByPage: {}, widgetsByPage: {} };
+    }
+  }
+
+  private async loadLegacyPersistedMediaWidgetsForDoc(id: string, pageCount: number): Promise<Record<number, Widget[]>> {
+    try {
+      const raw = localStorage.getItem(this.legacyMediaWidgetsStorageKey(id));
       if (!raw) return {};
-      const parsed = JSON.parse(raw) as PersistedMediaWidgetsByPage;
-      const out: Record<number, Widget[]> = {};
-      for (const [k, list] of Object.entries(parsed ?? {})) {
+      return await this.normalizePersistedWidgets(JSON.parse(raw) as PersistedMediaWidgetsByPage, pageCount);
+    } catch {
+      return {};
+    }
+  }
+
+  private async normalizePersistedWidgets(
+    parsed: Record<number, PersistedWidget[]> | undefined,
+    pageCount: number
+  ): Promise<Record<number, Widget[]>> {
+    const out: Record<number, Widget[]> = {};
+    for (const [k, list] of Object.entries(parsed ?? {})) {
         const pageIndex = Number(k);
         if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) continue;
         const widgets: Widget[] = [];
         for (const w of list ?? []) {
-          if (!w || (w.kind !== 'image' && w.kind !== 'video')) continue;
+          if (!w || !this.isPersistableWidgetKind(w.kind)) continue;
           let resolvedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
           if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
             resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
@@ -8855,18 +9318,81 @@ export class PdfEditorComponent implements AfterViewInit {
                     h: Number.isFinite(w.imageCrop.h) ? w.imageCrop.h : 1
                   }
                 : undefined,
-            videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined
+            videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined,
+            textValue: w.kind === 'text' ? String(w.textValue ?? '') : undefined,
+            signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
+            layeredTextValue:
+              w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? String(w.layeredTextValue ?? '') : undefined,
+            table: w.kind === 'table' ? this.normalizePersistedTable(w.table) : undefined
           });
         }
         if (widgets.length > 0) out[pageIndex] = widgets;
       }
       return out;
-    } catch {
-      return {};
-    }
   }
 
-  private mediaWidgetsStorageKey(id: string): string {
+  private normalizePersistedEdits(raw: Record<number, PageEdits> | undefined, pageCount: number): Record<number, PageEdits> {
+    const out: Record<number, PageEdits> = {};
+    for (const [k, edit] of Object.entries(raw ?? {})) {
+      const pageIndex = Number(k);
+      if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount || !edit) continue;
+      out[pageIndex] = {
+        viewportWidth: Number.isFinite(edit.viewportWidth) ? edit.viewportWidth : 1,
+        viewportHeight: Number.isFinite(edit.viewportHeight) ? edit.viewportHeight : 1,
+        ink: Array.isArray(edit.ink) ? edit.ink : [],
+        text: Array.isArray(edit.text)
+          ? edit.text.map((t, i) =>
+              t && typeof (t as TextAnno).id === 'string' && (t as TextAnno).id
+                ? t
+                : { ...(t as TextAnno), id: `txt_${pageIndex}_${i}_${Math.random().toString(16).slice(2, 10)}` }
+            )
+          : [],
+        images: Array.isArray(edit.images) ? edit.images : [],
+        replaces: Array.isArray(edit.replaces)
+          ? edit.replaces.map((r) =>
+              r?.source === 'textEdit' ? { ...r, maskMode: 'color' as const, bgColor: '#ffffff' } : r
+            )
+          : []
+      };
+    }
+    return out;
+  }
+
+  private cloneTable(table: { rows: number; cols: number; cells: string[][] }) {
+    return {
+      rows: table.rows,
+      cols: table.cols,
+      cells: table.cells.map((row) => row.map((cell) => String(cell ?? '')))
+    };
+  }
+
+  private normalizePersistedTable(table: PersistedWidget['table']) {
+    const rows = clamp(Math.floor(Number(table?.rows ?? 3)), 1, 80);
+    const cols = clamp(Math.floor(Number(table?.cols ?? 3)), 1, 40);
+    const rawCells = Array.isArray(table?.cells) ? table.cells : [];
+    const cells = Array.from({ length: rows }, (_, r) =>
+      Array.from({ length: cols }, (_, c) => String(rawCells[r]?.[c] ?? ''))
+    );
+    return { rows, cols, cells };
+  }
+
+  private isPersistableWidgetKind(kind: unknown): kind is WidgetKind {
+    return (
+      kind === 'table' ||
+      kind === 'image' ||
+      kind === 'text' ||
+      kind === 'video' ||
+      kind === 'signature' ||
+      kind === 'textOverImage' ||
+      kind === 'imageBackgroundText'
+    );
+  }
+
+  private editorStateStorageKey(id: string): string {
+    return `avyro:pdf-editor-state:v2:${id}`;
+  }
+
+  private legacyMediaWidgetsStorageKey(id: string): string {
     return `avyro:pdf-media-widgets:v1:${id}`;
   }
 
@@ -8948,4 +9474,3 @@ export class PdfEditorComponent implements AfterViewInit {
     return { bytes, kind: mime.includes('png') ? 'png' : 'jpg' };
   }
 }
-
