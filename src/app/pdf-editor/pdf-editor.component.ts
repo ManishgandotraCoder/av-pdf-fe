@@ -7813,6 +7813,9 @@ export class PdfEditorComponent implements AfterViewInit {
       fontStyle: FontStyle;
       fontFamily: FontFamily;
       text: string;
+      fillColor?: string;
+      /** Large PDF vertical gap before this line → blank line in merged block text */
+      paragraphGapBefore?: boolean;
     }[] = [];
 
     // Build lines by clustering spans with similar vertical centers.
@@ -7915,7 +7918,6 @@ export class PdfEditorComponent implements AfterViewInit {
     lines.push(...finalizedLines);
 
     // Group lines into blocks (paragraph/list/heading-ish).
-    const lineGapTol = Math.max(6, medianFont * 1.15);
     const indentTol = Math.max(10, medianFont * 0.9);
 
     const blocks: DetectedBlock[] = [];
@@ -7925,10 +7927,18 @@ export class PdfEditorComponent implements AfterViewInit {
 
     const pushCur = () => {
       if (!cur || cur.lines.length === 0) return;
-      const allText = cur.lines
-        .map((l) => l.text)
-        .filter(Boolean)
-        .join('\n');
+      const chunks: string[] = [];
+      for (const l of cur.lines) {
+        const t = l.text?.trim();
+        if (!t) continue;
+        if (chunks.length === 0) {
+          chunks.push(t);
+        } else {
+          const sep = l.paragraphGapBefore ? '\n\n' : '\n';
+          chunks.push(`${sep}${t}`);
+        }
+      }
+      const allText = chunks.join('');
       const firstText = cur.lines[0]?.text ?? '';
       const isList = /^(\s*([-•]|(\d+)[.)]))\s+/.test(firstText);
       const isHeading = cur.fontSize >= medianFont * 1.25 && allText.length <= 120;
@@ -7947,33 +7957,39 @@ export class PdfEditorComponent implements AfterViewInit {
         kind
       });
     };
-
+    function normalizeFillColorKey(c: string | undefined): string {
+      if (!c || typeof c !== 'string') return '';
+      return c.trim().toLowerCase();
+    }
     for (const ln of lines) {
       if (!ln.text) continue;
-      const isListStart = /^(\s*([-•]|(\d+)[.)]))\s+/.test(ln.text);
       if (!cur) {
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
         continue;
       }
       const prev = cur.lines[cur.lines.length - 1]!;
-      const gapY = ln.y0 - prev.y1;
       const indentDelta = Math.abs(ln.x0 - cur.lines[0]!.x0);
+      // Viewport y grows downward: extra space between line bottoms and the next line top
+      // means a paragraph / section gap; wrapped lines stay within ~one line advance.
+      const verticalGap = ln.y0 - prev.y1;
+      const lineAdvance = Math.max(prev.fontSize, ln.fontSize, medianFont * 0.5);
+      const paragraphVerticalGap =
+        verticalGap > Math.max(6, lineAdvance * 0.65);
 
-      const curIsList = /^(\s*([-•]|(\d+)[.)]))\s+/.test(cur.lines[0]!.text);
+      const sizeChanged = Math.round(ln.fontSize) !== Math.round(prev.fontSize);
+      const fillChanged =
+        normalizeFillColorKey(ln.fillColor) !== normalizeFillColorKey(prev.fillColor);
       // Lists: each bullet/number starts a new block; wrapped lines belong to the same item
       // if they are indented to the right of the bullet start.
-      const listWrappedLine = curIsList && !isListStart && ln.x0 > cur.lines[0]!.x0 + medianFont * 0.8;
-      const newBlock =
-        gapY > lineGapTol ||
-        indentDelta > indentTol ||
-        (isListStart && curIsList) ||
-        (isListStart && !curIsList) ||
-        (!listWrappedLine && curIsList && !isListStart && indentDelta > medianFont * 0.6);
+      // Large vertical gaps stay in the same block; paragraphGapBefore adds \n\n in merged text.
+      const newBlock = indentDelta > indentTol || sizeChanged || fillChanged;
       if (newBlock) {
+        console.log("indentDelta > indentTol",indentDelta > indentTol , indentDelta , indentTol, "sizeChanged" , sizeChanged , "fillChanged" , fillChanged);
+        console.log("ln.text",ln.text);
         pushCur();
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
       } else {
-        cur.lines.push(ln as any);
+        cur.lines.push({ ...ln, paragraphGapBefore: paragraphVerticalGap } as any);
         cur.x0 = Math.min(cur.x0, ln.x0);
         cur.y0 = Math.min(cur.y0, ln.y0);
         cur.x1 = Math.max(cur.x1, ln.x1);
