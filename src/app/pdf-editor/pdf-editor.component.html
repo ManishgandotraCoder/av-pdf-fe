@@ -750,15 +750,7 @@
             }
           </div>
 
-          <button
-            type="button"
-            class="keySlots__add"
-            (click)="addCustomKeySlot()"
-            [disabled]="readonlyMode() || isLoading() || isSaving()"
-            title="Add a new custom section"
-          >
-            + Add section
-          </button>
+        
         </div>
 
         <div class="sidebar__scroll">
@@ -1780,16 +1772,26 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-heading-weight">Weight</label>
-                  <select id="global-typo-heading-weight" class="pageSettings__select" [ngModel]="globalTypography().heading.bold" (ngModelChange)="updateGlobalTypography('heading', { bold: $event })">
-                    <option [ngValue]="false">Normal</option>
-                    <option [ngValue]="true">Bold</option>
+                  <select
+                    id="global-typo-heading-weight"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().heading.bold ? 'bold' : 'normal'"
+                    (ngModelChange)="updateGlobalTypography('heading', { bold: $event === 'bold' })"
+                  >
+                    <option ngValue="normal">Normal</option>
+                    <option ngValue="bold">Bold</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-heading-variant">Variant</label>
-                  <select id="global-typo-heading-variant" class="pageSettings__select" [ngModel]="globalTypography().heading.italic" (ngModelChange)="updateGlobalTypography('heading', { italic: $event })">
-                    <option [ngValue]="false">Regular</option>
-                    <option [ngValue]="true">Italic</option>
+                  <select
+                    id="global-typo-heading-variant"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().heading.italic ? 'italic' : 'regular'"
+                    (ngModelChange)="updateGlobalTypography('heading', { italic: $event === 'italic' })"
+                  >
+                    <option ngValue="regular">Regular</option>
+                    <option ngValue="italic">Italic</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">
@@ -1826,16 +1828,26 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-subheading-weight">Weight</label>
-                  <select id="global-typo-subheading-weight" class="pageSettings__select" [ngModel]="globalTypography().subheading.bold" (ngModelChange)="updateGlobalTypography('subheading', { bold: $event })">
-                    <option [ngValue]="false">Normal</option>
-                    <option [ngValue]="true">Bold</option>
+                  <select
+                    id="global-typo-subheading-weight"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().subheading.bold ? 'bold' : 'normal'"
+                    (ngModelChange)="updateGlobalTypography('subheading', { bold: $event === 'bold' })"
+                  >
+                    <option ngValue="normal">Normal</option>
+                    <option ngValue="bold">Bold</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-subheading-variant">Variant</label>
-                  <select id="global-typo-subheading-variant" class="pageSettings__select" [ngModel]="globalTypography().subheading.italic" (ngModelChange)="updateGlobalTypography('subheading', { italic: $event })">
-                    <option [ngValue]="false">Regular</option>
-                    <option [ngValue]="true">Italic</option>
+                  <select
+                    id="global-typo-subheading-variant"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().subheading.italic ? 'italic' : 'regular'"
+                    (ngModelChange)="updateGlobalTypography('subheading', { italic: $event === 'italic' })"
+                  >
+                    <option ngValue="regular">Regular</option>
+                    <option ngValue="italic">Italic</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">
@@ -1872,16 +1884,26 @@
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-body-weight">Weight</label>
-                  <select id="global-typo-body-weight" class="pageSettings__select" [ngModel]="globalTypography().body.bold" (ngModelChange)="updateGlobalTypography('body', { bold: $event })">
-                    <option [ngValue]="false">Normal</option>
-                    <option [ngValue]="true">Bold</option>
+                  <select
+                    id="global-typo-body-weight"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().body.bold ? 'bold' : 'normal'"
+                    (ngModelChange)="updateGlobalTypography('body', { bold: $event === 'bold' })"
+                  >
+                    <option ngValue="normal">Normal</option>
+                    <option ngValue="bold">Bold</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">
                   <label class="pageSettings__label" for="global-typo-body-variant">Variant</label>
-                  <select id="global-typo-body-variant" class="pageSettings__select" [ngModel]="globalTypography().body.italic" (ngModelChange)="updateGlobalTypography('body', { italic: $event })">
-                    <option [ngValue]="false">Regular</option>
-                    <option [ngValue]="true">Italic</option>
+                  <select
+                    id="global-typo-body-variant"
+                    class="pageSettings__select"
+                    [ngModel]="globalTypography().body.italic ? 'italic' : 'regular'"
+                    (ngModelChange)="updateGlobalTypography('body', { italic: $event === 'italic' })"
+                  >
+                    <option ngValue="regular">Regular</option>
+                    <option ngValue="italic">Italic</option>
                   </select>
                 </div>
                 <div class="pageSettings__field">

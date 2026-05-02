@@ -965,6 +965,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const byPage = this.detectedBlocksByPage();
       const overrides = this.sectionOverridesByPage();
       const removed = this.removedSectionsByPage();
+      const edits = this.editsByPage();
       const out: Record<number, { title: string; type: SidebarSectionType } | null> = {};
       for (let pageIndex = 0; pageIndex < count; pageIndex++) {
         if (removed[pageIndex]) {
@@ -976,7 +977,10 @@ export class PdfEditorComponent implements AfterViewInit {
           out[pageIndex] = override;
           continue;
         }
-        out[pageIndex] = this.resolveSidebarSectionMeta(byPage[pageIndex] ?? []);
+        const rawBlocks = byPage[pageIndex] ?? [];
+        const replaces = edits[pageIndex]?.replaces ?? [];
+        const merged = this.detectedBlocksWithTextReplacesApplied(rawBlocks, replaces);
+        out[pageIndex] = this.resolveSidebarSectionMeta(merged);
       }
       return out;
     }
@@ -1942,7 +1946,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const kept: TextReplace[] = [];
     for (const r of existing) {
       if (r.source === 'globalTypography') continue;
-      if (this.isLegacyAutoTypographyReplace(r, blocks)) continue;
+      if (this.shouldDiscardStaleTypographyMaskReplace(r, blocks)) continue;
       kept.push(r);
     }
 
@@ -1951,12 +1955,21 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!block.text.trim()) continue;
       if (out.some((r) => this.blockPrimarilyCoveredByReplace(block, r))) continue;
       const section = typography[this.blockSectionForDetected(block)];
-      const { w, h } = this.globalTypographyMaskSize(block, section);
+      const { innerW, innerH } = this.globalTypographyMaskSize(block, section);
+      const padX = Math.max(2, Math.round(section.size * (section.bold ? 0.16 : 0.11)));
+      const padY = Math.max(2, Math.round(section.size * (section.italic ? 0.14 : 0.1)));
+      const x = block.x - padX;
+      const y = block.y - padY;
+      const w = Math.max(1, innerW + 2 * padX);
+      const h = Math.max(1, innerH + 2 * padY);
       out.push({
-        x: block.x,
-        y: block.y,
+        x,
+        y,
         w,
         h,
+        textX: block.x,
+        textY: block.y,
+        textWrapWidth: Math.max(1, innerW),
         oldText: block.text,
         newText: block.text,
         maskMode: 'color',
@@ -1974,14 +1987,15 @@ export class PdfEditorComponent implements AfterViewInit {
   private globalTypographyMaskSize(
     block: DetectedBlock,
     section: GlobalTypographySection
-  ): { w: number; h: number } {
+  ): { innerW: number; innerH: number } {
     const lineCount = Math.max(1, block.text.split('\n').length);
     const lh = Math.max(1, Math.round(section.size * 1.2));
-    const minH = lineCount * lh + 6;
-    const h = Math.max(block.h, minH, Math.round(section.size * 1.35));
+    const minH = lineCount * lh + Math.round(section.size * 0.35);
+    const innerH = Math.max(block.h, minH, Math.round(section.size * 1.45));
     const fontRatio = section.size / Math.max(6, block.fontSize);
-    const w = Math.max(block.w, Math.round(block.w * Math.max(1, fontRatio * 1.08)));
-    return { w: Math.max(1, w), h: Math.max(1, h) };
+    const widthBoost = section.bold ? 1.12 : 1.0;
+    const innerW = Math.max(block.w, Math.round(block.w * Math.max(1, fontRatio * 1.14 * widthBoost)));
+    return { innerW: Math.max(1, innerW), innerH: Math.max(1, innerH) };
   }
 
   private blockPrimarilyCoveredByReplace(block: DetectedBlock, r: TextReplace): boolean {
@@ -1991,19 +2005,52 @@ export class PdfEditorComponent implements AfterViewInit {
     const bottom = Math.min(block.y + block.h, r.y + r.h);
     const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
     const blockArea = Math.max(1, block.w * block.h);
-    return overlapArea / blockArea >= 0.62;
+    return overlapArea / blockArea >= 0.48;
   }
 
-  /** Older sessions stacked anonymous replaces (newText === oldText); strip when re-applying global typography. */
-  private isLegacyAutoTypographyReplace(r: TextReplace, blocks: DetectedBlock[]): boolean {
+  /**
+   * Sidebar section titles are derived from PDF text detection, but in-place edits are stored as
+   * `TextReplace` masks + `newText` (the PDF text layer is not rewritten). Merge those into a
+   * copy of detected blocks so the left nav tracks what the user actually sees.
+   */
+  private detectedBlocksWithTextReplacesApplied(blocks: DetectedBlock[], replaces: TextReplace[]): DetectedBlock[] {
+    if (!blocks.length || !replaces.length) return blocks;
+    const out = blocks.map((b) => ({ ...b }));
+    for (const r of replaces) {
+      if (r.source === 'mediaErase') continue;
+      for (let i = 0; i < out.length; i++) {
+        const b = out[i]!;
+        if (!this.blockPrimarilyCoveredByReplace(b, r)) continue;
+        out[i] = { ...b, text: r.newText };
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Removes identity mask replaces (no text change) that belong to a prior typography pass,
+   * including legacy saves with no `source`, so re-applying global typography does not stack duplicates.
+   */
+  private shouldDiscardStaleTypographyMaskReplace(r: TextReplace, blocks: DetectedBlock[]): boolean {
     if (r.source === 'textEdit' || r.source === 'mediaErase') return false;
     if (r.newText !== r.oldText) return false;
     if (r.maskMode !== 'color') return false;
     return blocks.some(
-      (b) =>
-        b.text.trim() === r.oldText.trim() &&
-        this.isSameReplaceRegion(r, { x: b.x, y: b.y, w: b.w, h: b.h })
+      (b) => b.text.trim() === r.oldText.trim() && this.typographyMaskReplaceMatchesBlock(r, b)
     );
+  }
+
+  private typographyMaskReplaceMatchesBlock(r: TextReplace, b: DetectedBlock): boolean {
+    if (this.isSameReplaceRegion(r, { x: b.x, y: b.y, w: b.w, h: b.h })) return true;
+    const left = Math.max(b.x, r.x);
+    const top = Math.max(b.y, r.y);
+    const right = Math.min(b.x + b.w, r.x + r.w);
+    const bottom = Math.min(b.y + b.h, r.y + r.h);
+    const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+    if (overlapArea <= 0) return false;
+    const blockArea = Math.max(1, b.w * b.h);
+    const replaceArea = Math.max(1, r.w * r.h);
+    return overlapArea / blockArea >= 0.28 || overlapArea / replaceArea >= 0.28;
   }
 
   protected furnitureAlignOptions: FurnitureAlignment[] = ['left', 'center', 'right'];
