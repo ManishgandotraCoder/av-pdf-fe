@@ -297,45 +297,45 @@ type ToolbarIcon =
 type ToolbarItem =
   | { kind: 'sep'; id: string }
   | {
-      kind: 'button';
-      id: string;
-      title: string;
-      icon: ToolbarIcon;
-      onClick: () => void;
-      disabled?: () => boolean;
-      active?: () => boolean;
-    }
+    kind: 'button';
+    id: string;
+    title: string;
+    icon: ToolbarIcon;
+    onClick: () => void;
+    disabled?: () => boolean;
+    active?: () => boolean;
+  }
   | {
-      kind: 'select';
-      id: string;
-      title: string;
-      value: () => any;
-      setValue: (v: any) => void;
-      options: { label: string; value: any }[];
-      disabled?: () => boolean;
-    }
+    kind: 'select';
+    id: string;
+    title: string;
+    value: () => any;
+    setValue: (v: any) => void;
+    options: { label: string; value: any }[];
+    disabled?: () => boolean;
+  }
   | {
-      kind: 'color';
-      id: string;
-      title: string;
-      value: () => string;
-      setValue: (v: string) => void;
-      disabled?: () => boolean;
-    }
+    kind: 'color';
+    id: string;
+    title: string;
+    value: () => string;
+    setValue: (v: string) => void;
+    disabled?: () => boolean;
+  }
   | {
-      kind: 'file';
-      id: string;
-      title: string;
-      icon: ToolbarIcon;
-      accept: string;
-      onChange: (ev: Event) => void;
-      disabled?: () => boolean;
-    }
+    kind: 'file';
+    id: string;
+    title: string;
+    icon: ToolbarIcon;
+    accept: string;
+    onChange: (ev: Event) => void;
+    disabled?: () => boolean;
+  }
   | {
-      kind: 'group';
-      id: string;
-      items: ToolbarItem[];
-    };
+    kind: 'group';
+    id: string;
+    items: ToolbarItem[];
+  };
 
 type InkPoint = { x: number; y: number };
 type InkStroke = { color: string; width: number; points: InkPoint[] };
@@ -373,26 +373,26 @@ type TextDraftResizeEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
 type ActiveTextDraftGesture =
   | {
-      pageIndex: number;
-      pointerId: number;
-      kind: 'move';
-      startX: number;
-      startY: number;
-      origX: number;
-      origY: number;
-    }
+    pageIndex: number;
+    pointerId: number;
+    kind: 'move';
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+  }
   | {
-      pageIndex: number;
-      pointerId: number;
-      kind: 'resize';
-      edge: TextDraftResizeEdge;
-      startX: number;
-      startY: number;
-      origX: number;
-      origY: number;
-      origW: number;
-      origH: number;
-    };
+    pageIndex: number;
+    pointerId: number;
+    kind: 'resize';
+    edge: TextDraftResizeEdge;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    origW: number;
+    origH: number;
+  };
 type WidgetResizeEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | 'br';
 type ActivePlacedImageOp = {
   pageIndex: number;
@@ -860,12 +860,12 @@ export class PdfEditorComponent implements AfterViewInit {
   private imageUploadCropResolve: ((value: string | null) => void) | null = null;
   private activeUploadCropHandle:
     | {
-        pointerId: number;
-        handle: 'tl' | 'tr' | 'bl' | 'br';
-        startClientX: number;
-        startClientY: number;
-        start: { leftPct: number; topPct: number; rightPct: number; bottomPct: number };
-      }
+      pointerId: number;
+      handle: 'tl' | 'tr' | 'bl' | 'br';
+      startClientX: number;
+      startClientY: number;
+      start: { leftPct: number; topPct: number; rightPct: number; bottomPct: number };
+    }
     | null = null;
 
   protected readonly openDocsMenu = signal<'Insert' | null>(null);
@@ -906,19 +906,19 @@ export class PdfEditorComponent implements AfterViewInit {
   private activeWidgetOp:
     | null
     | {
-        pageIndex: number;
-        id: string;
-        pointerId: number;
-        mode: 'move' | 'resize';
-        /** Set when `mode === 'resize'`. */
-        resizeEdge: WidgetResizeEdge | null;
-        startX: number;
-        startY: number;
-        origX: number;
-        origY: number;
-        origW: number;
-        origH: number;
-      } = null;
+      pageIndex: number;
+      id: string;
+      pointerId: number;
+      mode: 'move' | 'resize';
+      /** Set when `mode === 'resize'`. */
+      resizeEdge: WidgetResizeEdge | null;
+      startX: number;
+      startY: number;
+      origX: number;
+      origY: number;
+      origW: number;
+      origH: number;
+    } = null;
 
   private activePlacedImageOp: ActivePlacedImageOp | null = null;
   private activePlacedTextOp: ActivePlacedTextOp | null = null;
@@ -934,23 +934,23 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly selectedPlacedTextId = signal<string | null>(null);
   protected readonly imageCropSession = signal<
     | {
-        mode: 'placed';
-        pageIndex: number;
-        id: string;
-        leftPct: number;
-        topPct: number;
-        rightPct: number;
-        bottomPct: number;
-      }
+      mode: 'placed';
+      pageIndex: number;
+      id: string;
+      leftPct: number;
+      topPct: number;
+      rightPct: number;
+      bottomPct: number;
+    }
     | {
-        mode: 'widget';
-        pageIndex: number;
-        widgetId: string;
-        leftPct: number;
-        topPct: number;
-        rightPct: number;
-        bottomPct: number;
-      }
+      mode: 'widget';
+      pageIndex: number;
+      widgetId: string;
+      leftPct: number;
+      topPct: number;
+      rightPct: number;
+      bottomPct: number;
+    }
     | null
   >(null);
 
@@ -1102,20 +1102,20 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly textDraftY = signal(0);
   private textDraftBox:
     | {
-        w: number;
-        h: number;
-        maskX: number;
-        maskY: number;
-        maskW: number;
-        maskH: number;
-        oldText: string;
-        bgColor: string;
-        color: string;
-        maskMode: 'color' | 'inpaint';
-        fontSize: number;
-        fontStyle: FontStyle;
-        fontFamily: FontFamily;
-      }
+      w: number;
+      h: number;
+      maskX: number;
+      maskY: number;
+      maskW: number;
+      maskH: number;
+      oldText: string;
+      bgColor: string;
+      color: string;
+      maskMode: 'color' | 'inpaint';
+      fontSize: number;
+      fontStyle: FontStyle;
+      fontFamily: FontFamily;
+    }
     | null = null;
   /** When adding new overlay text (no mask box), layout size for the in-page editor. */
   private readonly textDraftFreeRect = signal<{ w: number; h: number }>({ w: 320, h: 44 });
@@ -2316,7 +2316,9 @@ export class PdfEditorComponent implements AfterViewInit {
       const dt = ev.dataTransfer;
       if (!dt) return;
       dt.setData('application/x-avyro-widget-kind', kind);
-      dt.setData('text/plain', kind);
+      // Avoid putting the raw kind (e.g. "text") on text/plain — some environments surface
+      // that as a bogus clipboard/plain payload; drops still read application/x-avyro-widget-kind first.
+      dt.setData('text/plain', '');
       dt.effectAllowed = 'copy';
     } catch {
       // ignore
@@ -2508,10 +2510,10 @@ export class PdfEditorComponent implements AfterViewInit {
           return {
             ...a,
             ...nextBounds,
-          dataUrl,
-          srcW: Math.max(1, img.naturalWidth),
-          srcH: Math.max(1, img.naturalHeight),
-          crop: undefined
+            dataUrl,
+            srcW: Math.max(1, img.naturalWidth),
+            srcH: Math.max(1, img.naturalHeight),
+            crop: undefined
           };
         });
         this.redrawOverlay(placedReplace.pageIndex);
@@ -2838,11 +2840,11 @@ export class PdfEditorComponent implements AfterViewInit {
         this.updateWidget(pageIndex, id, (w) =>
           w.kind === 'image'
             ? {
-                ...w,
-                imageNaturalW: Math.max(1, img.naturalWidth),
-                imageNaturalH: Math.max(1, img.naturalHeight),
-                imageCrop: undefined
-              }
+              ...w,
+              imageNaturalW: Math.max(1, img.naturalWidth),
+              imageNaturalH: Math.max(1, img.naturalHeight),
+              imageCrop: undefined
+            }
             : w
         );
       });
@@ -3519,7 +3521,7 @@ export class PdfEditorComponent implements AfterViewInit {
       id: 'paragraph-style',
       title: 'Paragraph style',
       value: () => 'Normal text',
-      setValue: () => {},
+      setValue: () => { },
       options: [{ label: 'Normal text', value: 'Normal text' }],
       disabled: () => !this.textFeatureEnabled()
     },
@@ -3582,7 +3584,7 @@ export class PdfEditorComponent implements AfterViewInit {
       id: 'text-color-icon',
       title: 'Text color',
       icon: 'textColor',
-      onClick: () => {},
+      onClick: () => { },
       disabled: () => !this.textFeatureEnabled()
     },
     {
@@ -4149,10 +4151,10 @@ export class PdfEditorComponent implements AfterViewInit {
       (this.tool() === 'pen'
         ? 'Pen stroke'
         : this.tool() === 'text'
-        ? 'Text edit'
-        : this.tool() === 'image'
-        ? 'Image edit'
-        : 'Canvas edit');
+          ? 'Text edit'
+          : this.tool() === 'image'
+            ? 'Image edit'
+            : 'Canvas edit');
     // Save the current state so Undo can restore it.
     const snap = this.createHistorySnapshot();
     this.undoStack.push(snap);
@@ -4351,148 +4353,87 @@ export class PdfEditorComponent implements AfterViewInit {
     this.assertReadablePdfHeader(this.pdfBytes);
     const edits = editsOverride ?? this.editsByPage();
     const pdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
-      const fontsByFamily: Record<PdfExportFontFamily, Record<FontStyle, PDFFont>> = {
-        helvetica: {
-          regular: await pdf.embedFont(StandardFonts.Helvetica),
-          bold: await pdf.embedFont(StandardFonts.HelveticaBold),
-          italic: await pdf.embedFont(StandardFonts.HelveticaOblique),
-          boldItalic: await pdf.embedFont(StandardFonts.HelveticaBoldOblique)
-        },
-        times: {
-          regular: await pdf.embedFont(StandardFonts.TimesRoman),
-          bold: await pdf.embedFont(StandardFonts.TimesRomanBold),
-          italic: await pdf.embedFont(StandardFonts.TimesRomanItalic),
-          boldItalic: await pdf.embedFont(StandardFonts.TimesRomanBoldItalic)
-        },
-        courier: {
-          regular: await pdf.embedFont(StandardFonts.Courier),
-          bold: await pdf.embedFont(StandardFonts.CourierBold),
-          italic: await pdf.embedFont(StandardFonts.CourierOblique),
-          boldItalic: await pdf.embedFont(StandardFonts.CourierBoldOblique)
+    const fontsByFamily: Record<PdfExportFontFamily, Record<FontStyle, PDFFont>> = {
+      helvetica: {
+        regular: await pdf.embedFont(StandardFonts.Helvetica),
+        bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+        italic: await pdf.embedFont(StandardFonts.HelveticaOblique),
+        boldItalic: await pdf.embedFont(StandardFonts.HelveticaBoldOblique)
+      },
+      times: {
+        regular: await pdf.embedFont(StandardFonts.TimesRoman),
+        bold: await pdf.embedFont(StandardFonts.TimesRomanBold),
+        italic: await pdf.embedFont(StandardFonts.TimesRomanItalic),
+        boldItalic: await pdf.embedFont(StandardFonts.TimesRomanBoldItalic)
+      },
+      courier: {
+        regular: await pdf.embedFont(StandardFonts.Courier),
+        bold: await pdf.embedFont(StandardFonts.CourierBold),
+        italic: await pdf.embedFont(StandardFonts.CourierOblique),
+        boldItalic: await pdf.embedFont(StandardFonts.CourierBoldOblique)
+      }
+    };
+
+    const pages = pdf.getPages();
+
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const page = pages[pageIndex];
+      const edit = edits[pageIndex];
+      const pageWidgets = this.widgetsByPage()[pageIndex] ?? [];
+
+      // If we neutralized a bogus 180° page rotation in the editor view,
+      // do the same in the exported PDF so it doesn't re-flip in viewers.
+      const originalRotate = this.pageRotateByPage.get(pageIndex) ?? 0;
+      if (((originalRotate % 360) + 360) % 360 === 180) {
+        try {
+          page.setRotation(degrees(0));
+        } catch {
+          // ignore
         }
-      };
+      }
 
-      const pages = pdf.getPages();
+      if (!this.pdfDoc) throw new Error('PDF not loaded.');
+      const pdfjsPage = await this.pdfDoc.getPage(pageIndex + 1);
+      const vp = pdfjsPage.getViewport({ scale: 1, rotation: this.pdfPageViewportRotation(pdfjsPage) });
 
-      for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-        const page = pages[pageIndex];
-        const edit = edits[pageIndex];
-        const pageWidgets = this.widgetsByPage()[pageIndex] ?? [];
+      const editW = Math.max(1, edit?.viewportWidth ?? vp.width);
+      const editH = Math.max(1, edit?.viewportHeight ?? vp.height);
+      const scalePub = Math.min(vp.width / editW, vp.height / editH);
 
-        // If we neutralized a bogus 180° page rotation in the editor view,
-        // do the same in the exported PDF so it doesn't re-flip in viewers.
-        const originalRotate = this.pageRotateByPage.get(pageIndex) ?? 0;
-        if (((originalRotate % 360) + 360) % 360 === 180) {
-          try {
-            page.setRotation(degrees(0));
-          } catch {
-            // ignore
-          }
-        }
+      if (edit) {
+        // Replace text first (cover original area, then draw new).
+        for (const r of edit.replaces) {
+          // NOTE: In semantic PDF export, we can only do a flat rectangle mask.
+          // For scanned/image PDFs we should prefer a flatten export instead of 'inpaint' masking.
+          const bg = hexToRgb01(r.bgColor);
+          const rect = this.editorRectToPdfAabb(vp, r.x, r.y, r.w, r.h);
+          page.drawRectangle({
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            color: rgb(bg.r, bg.g, bg.b)
+          });
 
-        if (!this.pdfDoc) throw new Error('PDF not loaded.');
-        const pdfjsPage = await this.pdfDoc.getPage(pageIndex + 1);
-        const vp = pdfjsPage.getViewport({ scale: 1, rotation: this.pdfPageViewportRotation(pdfjsPage) });
-
-        const editW = Math.max(1, edit?.viewportWidth ?? vp.width);
-        const editH = Math.max(1, edit?.viewportHeight ?? vp.height);
-        const scalePub = Math.min(vp.width / editW, vp.height / editH);
-
-        if (edit) {
-          // Replace text first (cover original area, then draw new).
-          for (const r of edit.replaces) {
-            // NOTE: In semantic PDF export, we can only do a flat rectangle mask.
-            // For scanned/image PDFs we should prefer a flatten export instead of 'inpaint' masking.
-            const bg = hexToRgb01(r.bgColor);
-            const rect = this.editorRectToPdfAabb(vp, r.x, r.y, r.w, r.h);
-            page.drawRectangle({
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-              color: rgb(bg.r, bg.g, bg.b)
-            });
-
-            if (r.newText.length > 0) {
-              const c = hexToRgb01(r.color);
-              const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
-              const family = normalizePdfExportFontFamily(familyRaw);
-              const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
-              const textX = r.textX ?? r.x;
-              const textY = r.textY ?? r.y;
-              const fontPdf = r.fontSize * scalePub;
-              const wrapPdf = (r.textWrapWidth ?? r.w) * (vp.width / editW);
-              const lines = this.wrapTextLinesByWidth(r.newText, wrapPdf, (line) =>
-                font.widthOfTextAtSize(line, fontPdf)
-              );
-              const lhVp = Math.max(1, Math.round(r.fontSize * 1.2));
-              for (let i = 0; i < lines.length; i++) {
-                const [bx, by] = vp.convertToPdfPoint(textX, textY + r.fontSize * 0.88 + i * lhVp);
-                page.drawText(lines[i] ?? '', {
-                  x: bx,
-                  y: by,
-                  size: fontPdf,
-                  font,
-                  color: rgb(c.r, c.g, c.b)
-                });
-              }
-            }
-          }
-
-          await this.drawImagesToPdf(pdf, page, edit, vp);
-
-          for (const stroke of edit.ink) {
-            const c = hexToRgb01(stroke.color);
-            const tthick = Math.max(0.5, stroke.width * (vp.width / editW));
-            for (let i = 1; i < stroke.points.length; i++) {
-              const a = stroke.points[i - 1];
-              const b = stroke.points[i];
-              const sa = vp.convertToPdfPoint(a.x, a.y);
-              const sb = vp.convertToPdfPoint(b.x, b.y);
-              page.drawLine({
-                start: { x: sa[0], y: sa[1] },
-                end: { x: sb[0], y: sb[1] },
-                thickness: tthick,
-                color: rgb(c.r, c.g, c.b)
-              });
-            }
-          }
-
-          for (const t of edit.text) {
-            const c = hexToRgb01(t.color);
-            const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
+          if (r.newText.length > 0) {
+            const c = hexToRgb01(r.color);
+            const familyRaw: FontFamily = r.fontFamily ?? 'helvetica';
             const family = normalizePdfExportFontFamily(familyRaw);
-            const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
-            const size = t.fontSize * scalePub;
-            const lhVp = Math.max(1, Math.round(t.fontSize * 1.2));
-            const lines = t.text.split('\n');
-
-            // Optional background fill behind text (best-effort bbox).
-            if (t.bgColor) {
-              const bg = hexToRgb01(t.bgColor);
-              for (let i = 0; i < lines.length; i++) {
-                const line = lines[i] ?? '';
-                const twPdf = font.widthOfTextAtSize(line, size);
-                const twVp = Math.max(1, twPdf / (vp.width / editW));
-                const rect = this.editorRectToPdfAabb(vp, t.x, t.y + i * lhVp, twVp, lhVp);
-                page.drawRectangle({
-                  x: rect.x,
-                  y: rect.y,
-                  width: rect.width,
-                  height: rect.height,
-                  color: rgb(bg.r, bg.g, bg.b)
-                });
-              }
-            }
-
+            const font = fontsByFamily[family]?.[r.fontStyle] ?? fontsByFamily.helvetica.regular;
+            const textX = r.textX ?? r.x;
+            const textY = r.textY ?? r.y;
+            const fontPdf = r.fontSize * scalePub;
+            const wrapPdf = (r.textWrapWidth ?? r.w) * (vp.width / editW);
+            const lines = this.wrapTextLinesByWidth(r.newText, wrapPdf, (line) =>
+              font.widthOfTextAtSize(line, fontPdf)
+            );
+            const lhVp = Math.max(1, Math.round(r.fontSize * 1.2));
             for (let i = 0; i < lines.length; i++) {
-              const line = lines[i] ?? '';
-              if (!line) continue;
-              const [bx, by] = vp.convertToPdfPoint(t.x, t.y + t.fontSize * 0.88 + i * lhVp);
-              page.drawText(line, {
+              const [bx, by] = vp.convertToPdfPoint(textX, textY + r.fontSize * 0.88 + i * lhVp);
+              page.drawText(lines[i] ?? '', {
                 x: bx,
                 y: by,
-                size,
+                size: fontPdf,
                 font,
                 color: rgb(c.r, c.g, c.b)
               });
@@ -4500,9 +4441,70 @@ export class PdfEditorComponent implements AfterViewInit {
           }
         }
 
-        await this.drawSemanticWidgetsToPdf(pdf, page, pageWidgets, vp);
-        await this.drawSemanticPageFurnitureToPdf(pdf, page, vp, pageIndex, edit, fontsByFamily.helvetica.regular);
+        await this.drawImagesToPdf(pdf, page, edit, vp);
+
+        for (const stroke of edit.ink) {
+          const c = hexToRgb01(stroke.color);
+          const tthick = Math.max(0.5, stroke.width * (vp.width / editW));
+          for (let i = 1; i < stroke.points.length; i++) {
+            const a = stroke.points[i - 1];
+            const b = stroke.points[i];
+            const sa = vp.convertToPdfPoint(a.x, a.y);
+            const sb = vp.convertToPdfPoint(b.x, b.y);
+            page.drawLine({
+              start: { x: sa[0], y: sa[1] },
+              end: { x: sb[0], y: sb[1] },
+              thickness: tthick,
+              color: rgb(c.r, c.g, c.b)
+            });
+          }
+        }
+
+        for (const t of edit.text) {
+          const c = hexToRgb01(t.color);
+          const familyRaw: FontFamily = t.fontFamily ?? 'helvetica';
+          const family = normalizePdfExportFontFamily(familyRaw);
+          const font = fontsByFamily[family]?.[t.fontStyle] ?? fontsByFamily.helvetica.regular;
+          const size = t.fontSize * scalePub;
+          const lhVp = Math.max(1, Math.round(t.fontSize * 1.2));
+          const lines = t.text.split('\n');
+
+          // Optional background fill behind text (best-effort bbox).
+          if (t.bgColor) {
+            const bg = hexToRgb01(t.bgColor);
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i] ?? '';
+              const twPdf = font.widthOfTextAtSize(line, size);
+              const twVp = Math.max(1, twPdf / (vp.width / editW));
+              const rect = this.editorRectToPdfAabb(vp, t.x, t.y + i * lhVp, twVp, lhVp);
+              page.drawRectangle({
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                color: rgb(bg.r, bg.g, bg.b)
+              });
+            }
+          }
+
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i] ?? '';
+            if (!line) continue;
+            const [bx, by] = vp.convertToPdfPoint(t.x, t.y + t.fontSize * 0.88 + i * lhVp);
+            page.drawText(line, {
+              x: bx,
+              y: by,
+              size,
+              font,
+              color: rgb(c.r, c.g, c.b)
+            });
+          }
+        }
       }
+
+      await this.drawSemanticWidgetsToPdf(pdf, page, pageWidgets, vp);
+      await this.drawSemanticPageFurnitureToPdf(pdf, page, vp, pageIndex, edit, fontsByFamily.helvetica.regular);
+    }
 
     const out = await pdf.save();
     const safeBytes = new Uint8Array(out.byteLength);
@@ -5546,20 +5548,20 @@ export class PdfEditorComponent implements AfterViewInit {
       const existing = prev[pageIndex];
       const next: PageEdits = existing
         ? {
-            ...existing,
-            viewportWidth: cssViewport.width,
-            viewportHeight: cssViewport.height,
-            images: existing.images ?? [],
-            replaces: existing.replaces ?? []
-          }
+          ...existing,
+          viewportWidth: cssViewport.width,
+          viewportHeight: cssViewport.height,
+          images: existing.images ?? [],
+          replaces: existing.replaces ?? []
+        }
         : {
-            viewportWidth: cssViewport.width,
-            viewportHeight: cssViewport.height,
-            ink: [],
-            text: [],
-            images: [],
-            replaces: []
-          };
+          viewportWidth: cssViewport.width,
+          viewportHeight: cssViewport.height,
+          ink: [],
+          text: [],
+          images: [],
+          replaces: []
+        };
       return { ...prev, [pageIndex]: next };
     });
 
@@ -7010,12 +7012,12 @@ export class PdfEditorComponent implements AfterViewInit {
       const header =
         nextBytes.byteLength >= 5
           ? String.fromCharCode(
-              nextBytes[0]!,
-              nextBytes[1]!,
-              nextBytes[2]!,
-              nextBytes[3]!,
-              nextBytes[4]!
-            )
+            nextBytes[0]!,
+            nextBytes[1]!,
+            nextBytes[2]!,
+            nextBytes[3]!,
+            nextBytes[4]!
+          )
           : '';
       if (!header.startsWith('%PDF-')) {
         throw new Error('Failed to reorder PDF (invalid PDF output).');
@@ -7120,12 +7122,12 @@ export class PdfEditorComponent implements AfterViewInit {
       const header =
         nextBytes.byteLength >= 5
           ? String.fromCharCode(
-              nextBytes[0]!,
-              nextBytes[1]!,
-              nextBytes[2]!,
-              nextBytes[3]!,
-              nextBytes[4]!
-            )
+            nextBytes[0]!,
+            nextBytes[1]!,
+            nextBytes[2]!,
+            nextBytes[3]!,
+            nextBytes[4]!
+          )
           : '';
       if (!header.startsWith('%PDF-')) {
         throw new Error('Failed to reorder PDF (invalid PDF output).');
@@ -7680,7 +7682,8 @@ export class PdfEditorComponent implements AfterViewInit {
   protected onOverlayPointerDown(pageIndex: number, ev: PointerEvent) {
     // Clicks on the PDF canvas do not always blur the floating textarea first; without
     // this flush, starting a new placement or hit-target would discard the draft.
-    if (this.isTextPlacing() && !this.activeTextDraftGesture) {
+    const closingFloatingTextDraft = this.isTextPlacing() && !this.activeTextDraftGesture;
+    if (closingFloatingTextDraft) {
       this.commitTextDraft();
     }
     this.flushInlineWidgetTextEditors(pageIndex);
@@ -7915,10 +7918,16 @@ export class PdfEditorComponent implements AfterViewInit {
           this.redrawOverlay(pageIndex);
           return;
         }
-
+        if (this.isTextPlacing()) {
+          this.cancelTextDraft();
+        }
         const hit = this.hitTestDetectedBlock(pageIndex, p.x, p.y);
 
         if (hit) {
+          if (this.isTextPlacing()) {
+            this.cancelTextDraft();
+          }
+
           this.editingReplace = null;
           const sameStyleBounds = this.sameStyleTextBoundsForBlock(pageIndex, hit);
           const editBounds = {
@@ -7971,6 +7980,10 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
       }
+
+      // Closing the inline editor via a canvas click should not immediately spawn an empty
+      // draft at the same coordinates (felt like a bad duplicate / wrong "copy").
+      if (closingFloatingTextDraft) return;
 
       // New text
       this.editingReplace = null;
@@ -8052,7 +8065,8 @@ export class PdfEditorComponent implements AfterViewInit {
         this.textStyle() !== this.textDraftBox.fontStyle ||
         this.textFamily() !== this.textDraftBox.fontFamily;
       // If user didn't change anything, don't create a replacement (avoids flashing/white patches).
-      if (text === this.textDraftBox.oldText && !styleChanged) {
+      const norm = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      if (norm(text) === norm(this.textDraftBox.oldText) && !styleChanged) {
         this.isTextPlacing.set(false);
         this.textDraft.set('');
         this.textDraftPageIndex.set(null);
@@ -8333,7 +8347,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
     const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
-    const text = this.textDraft();
+    const text = this.textDraftEditor?.nativeElement?.value ?? this.textDraft();
     const { w, h } = this.getTextDraftLayoutSize();
     const x0 = this.textDraftX();
     const y0 = this.textDraftY();
@@ -9953,13 +9967,36 @@ export class PdfEditorComponent implements AfterViewInit {
         previousIndentDelta > Math.max(indentTol * 2, medianFont * 2.5);
       // Keep same-style paragraph/list content together. Preserve section hierarchy by splitting on
       // clear style changes, new list items, column jumps, or very large indentation shifts.
+      const isListLine = (text: string) =>
+        /^(\s*([-•●◦▪]|\d+[.)]))\s+/.test(text ?? '');
+
+      const curIsList = cur.lines.some((l) => isListLine(l.text ?? ''));
+      const nextIsList = isListLine(ln.text ?? '');
+
+      const sameListFlow =
+        curIsList &&
+        nextIsList &&
+        sameStyle &&
+        verticalFlowContinues &&
+        Math.abs(ln.x0 - cur.lines[0]!.x0) <= Math.max(indentTol * 1.5, medianFont * 2);
+
+      const sameLeftFlow =
+        Math.abs(ln.x0 - cur.lines[0]!.x0) <= Math.max(3, medianFont * 0.35);
+
+      const continuingText =
+        sameLeftFlow &&
+        verticalFlowContinues &&
+        sameStyle &&
+        !likelyNewColumn;
+
       const newBlock =
         sizeChanged ||
         fillChanged ||
-        startsListItem ||
         likelyNewColumn ||
         !verticalFlowContinues ||
-        (sameStyle ? largeStylePreservingJump : indentDelta > indentTol);
+        (!continuingText && (sameStyle ? largeStylePreservingJump : indentDelta > indentTol));
+
+
       if (newBlock) {
         pushCur();
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
@@ -10958,47 +10995,47 @@ export class PdfEditorComponent implements AfterViewInit {
   ): Promise<Record<number, Widget[]>> {
     const out: Record<number, Widget[]> = {};
     for (const [k, list] of Object.entries(parsed ?? {})) {
-        const pageIndex = Number(k);
-        if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) continue;
-        const widgets: Widget[] = [];
-        for (const w of list ?? []) {
-          if (!w || !this.isPersistableWidgetKind(w.kind)) continue;
-          let resolvedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
-          if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
-            resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
-          }
-          const restoreImage =
-            w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
-          widgets.push({
-            id: w.id,
-            kind: w.kind,
-            x: Number.isFinite(w.x) ? w.x : 0,
-            y: Number.isFinite(w.y) ? w.y : 0,
-            w: Number.isFinite(w.w) ? w.w : 220,
-            h: Number.isFinite(w.h) ? w.h : 160,
-            imageSrc: restoreImage ? w.imageSrc : undefined,
-            imageNaturalW: w.kind === 'image' && Number.isFinite(w.imageNaturalW as number) ? w.imageNaturalW : undefined,
-            imageNaturalH: w.kind === 'image' && Number.isFinite(w.imageNaturalH as number) ? w.imageNaturalH : undefined,
-            imageCrop:
-              w.kind === 'image' && w.imageCrop && typeof w.imageCrop === 'object'
-                ? {
-                    x: Number.isFinite(w.imageCrop.x) ? w.imageCrop.x : 0,
-                    y: Number.isFinite(w.imageCrop.y) ? w.imageCrop.y : 0,
-                    w: Number.isFinite(w.imageCrop.w) ? w.imageCrop.w : 1,
-                    h: Number.isFinite(w.imageCrop.h) ? w.imageCrop.h : 1
-                  }
-                : undefined,
-            videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined,
-            textValue: w.kind === 'text' ? String(w.textValue ?? '') : undefined,
-            signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
-            layeredTextValue:
-              w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? String(w.layeredTextValue ?? '') : undefined,
-            table: w.kind === 'table' ? this.normalizePersistedTable(w.table) : undefined
-          });
+      const pageIndex = Number(k);
+      if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) continue;
+      const widgets: Widget[] = [];
+      for (const w of list ?? []) {
+        if (!w || !this.isPersistableWidgetKind(w.kind)) continue;
+        let resolvedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
+        if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
+          resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
         }
-        if (widgets.length > 0) out[pageIndex] = widgets;
+        const restoreImage =
+          w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
+        widgets.push({
+          id: w.id,
+          kind: w.kind,
+          x: Number.isFinite(w.x) ? w.x : 0,
+          y: Number.isFinite(w.y) ? w.y : 0,
+          w: Number.isFinite(w.w) ? w.w : 220,
+          h: Number.isFinite(w.h) ? w.h : 160,
+          imageSrc: restoreImage ? w.imageSrc : undefined,
+          imageNaturalW: w.kind === 'image' && Number.isFinite(w.imageNaturalW as number) ? w.imageNaturalW : undefined,
+          imageNaturalH: w.kind === 'image' && Number.isFinite(w.imageNaturalH as number) ? w.imageNaturalH : undefined,
+          imageCrop:
+            w.kind === 'image' && w.imageCrop && typeof w.imageCrop === 'object'
+              ? {
+                x: Number.isFinite(w.imageCrop.x) ? w.imageCrop.x : 0,
+                y: Number.isFinite(w.imageCrop.y) ? w.imageCrop.y : 0,
+                w: Number.isFinite(w.imageCrop.w) ? w.imageCrop.w : 1,
+                h: Number.isFinite(w.imageCrop.h) ? w.imageCrop.h : 1
+              }
+              : undefined,
+          videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined,
+          textValue: w.kind === 'text' ? String(w.textValue ?? '') : undefined,
+          signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
+          layeredTextValue:
+            w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? String(w.layeredTextValue ?? '') : undefined,
+          table: w.kind === 'table' ? this.normalizePersistedTable(w.table) : undefined
+        });
       }
-      return out;
+      if (widgets.length > 0) out[pageIndex] = widgets;
+    }
+    return out;
   }
 
   private normalizePersistedEdits(raw: Record<number, PageEdits> | undefined, pageCount: number): Record<number, PageEdits> {
@@ -11012,16 +11049,16 @@ export class PdfEditorComponent implements AfterViewInit {
         ink: Array.isArray(edit.ink) ? edit.ink : [],
         text: Array.isArray(edit.text)
           ? edit.text.map((t, i) =>
-              t && typeof (t as TextAnno).id === 'string' && (t as TextAnno).id
-                ? t
-                : { ...(t as TextAnno), id: `txt_${pageIndex}_${i}_${Math.random().toString(16).slice(2, 10)}` }
-            )
+            t && typeof (t as TextAnno).id === 'string' && (t as TextAnno).id
+              ? t
+              : { ...(t as TextAnno), id: `txt_${pageIndex}_${i}_${Math.random().toString(16).slice(2, 10)}` }
+          )
           : [],
         images: Array.isArray(edit.images) ? edit.images : [],
         replaces: Array.isArray(edit.replaces)
           ? edit.replaces.map((r) =>
-              r?.source === 'textEdit' ? { ...r, maskMode: 'color' as const, bgColor: '#ffffff' } : r
-            )
+            r?.source === 'textEdit' ? { ...r, maskMode: 'color' as const, bgColor: '#ffffff' } : r
+          )
           : []
       };
     }
