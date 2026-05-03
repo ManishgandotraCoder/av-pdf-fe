@@ -862,18 +862,6 @@
                       }
                     </div>
                   }
-                  <!-- @if (pageNumberLabel(activePageIndex())) {
-                    <div
-                      class="pageFurnitureNumber"
-                      [class.headerLeft]="pageFurniture().pageNumber.position === 'header-left'"
-                      [class.headerRight]="pageFurniture().pageNumber.position === 'header-right'"
-                      [class.footerLeft]="pageFurniture().pageNumber.position === 'footer-left'"
-                      [class.footerCenter]="pageFurniture().pageNumber.position === 'footer-center'"
-                      [class.footerRight]="pageFurniture().pageNumber.position === 'footer-right'"
-                    >
-                      {{ pageNumberLabel(activePageIndex()) }}
-                    </div>
-                  } -->
                   @if (pageFurniture().footer.visible) {
                     <div class="pageFurnitureFooter" [class.withDivider]="pageFurniture().footer.divider">
                       <div class="pageFurnitureFooter__cell">{{ furnitureText(pageFurniture().footer.leftContent, activePageIndex()) }}</div>
@@ -889,12 +877,57 @@
                       class="widget"
                       [attr.data-widget-id]="w.id"
                       [class.isSelected]="selectedWidgetId() === w.id"
+                      [class.widget--unifiedSelection]="isUnifiedSelectionWidgetKind(w.kind)"
+                      [class.widget--table]="w.kind === 'table'"
                       [class.widget--image]="w.kind === 'image'"
                       [class.widget--text]="w.kind === 'text'"
                       [ngStyle]="{ left: w.x + 'px', top: w.y + 'px', width: w.w + 'px', height: w.h + 'px' }"
                       (pointerdown)="onWidgetPointerDown(activePageIndex(), w.id, $event)"
                     >
-                      <div class="widget__chrome" (pointerdown)="onWidgetHeaderPointerDown(activePageIndex(), w.id, $event)">
+                      @if (isUnifiedSelectionWidgetKind(w.kind) && selectedWidgetId() === w.id && !readonlyMode()) {
+                        <div
+                          class="widgetSelectionToolbar"
+                          (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                        >
+                          <button
+                            type="button"
+                            class="textDraftToolbar__grip"
+                            title="Drag to move"
+                            aria-label="Drag to move"
+                            (pointerdown)="onWidgetToolbarGripPointerDown(activePageIndex(), w.id, $event)"
+                          >
+                            <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
+                          </button>
+                          <div class="textDraftToolbar__actions">
+                            <button
+                              type="button"
+                              class="textDraftToolbar__btn"
+                              title="Duplicate"
+                              aria-label="Duplicate"
+                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                              (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
+                            >
+                              ⧉
+                            </button>
+                            <button
+                              type="button"
+                              class="textDraftToolbar__btn textDraftToolbar__btn--danger"
+                              title="Remove"
+                              aria-label="Remove"
+                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                              (click)="removeWidget(activePageIndex(), w.id); $event.stopPropagation()"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      }
+
+                      <div
+                        class="widget__chrome"
+                        [class.widget__chrome--hidden]="isUnifiedSelectionWidgetKind(w.kind)"
+                        (pointerdown)="onWidgetHeaderPointerDown(activePageIndex(), w.id, $event)"
+                      >
                         <div class="widget__icon" [title]="w.kind">
                           @switch (w.kind) {
                             @case ('table') { <span class="widget__iconText">T</span> }
@@ -1106,11 +1139,85 @@
                         }
                       </div>
 
-                      <div
-                        class="widget__resize widget__resize--br"
-                        (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'br', $event)"
-                      ></div>
+                      @if (!readonlyMode() && (!isUnifiedSelectionWidgetKind(w.kind) || selectedWidgetId() === w.id)) {
+                        <div
+                          class="widget__resize widget__resize--nw"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'nw', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--n"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'n', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--ne"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'ne', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--e"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'e', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--se"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'se', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--s"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 's', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--sw"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'sw', $event)"
+                        ></div>
+                        <div
+                          class="widget__resize widget__resize--w"
+                          (pointerdown)="onWidgetResizePointerDown(activePageIndex(), w.id, 'w', $event)"
+                        ></div>
+                      }
                     </div>
+                  }
+                </div>
+
+                <div class="pageHudLayer">
+                  @if (selectedPlacedImage(); as pImg) {
+                    @if (pImg.pageIndex === activePageIndex() && !readonlyMode()) {
+                      <div
+                        class="widgetSelectionToolbar placedImageHudToolbar"
+                        [ngStyle]="placedImageToolbarPositionStyle(pImg)"
+                        (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
+                      >
+                      <button
+                        type="button"
+                        class="textDraftToolbar__grip"
+                        title="Drag to move"
+                        aria-label="Drag to move image"
+                        (pointerdown)="onPlacedImageToolbarGripPointerDown($event)"
+                      >
+                        <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
+                      </button>
+                      <div class="textDraftToolbar__actions">
+                        <button
+                          type="button"
+                          class="textDraftToolbar__btn"
+                          title="Duplicate"
+                          aria-label="Duplicate image"
+                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
+                          (click)="duplicateSelectedPlacedImageFromToolbar($event)"
+                        >
+                          ⧉
+                        </button>
+                        <button
+                          type="button"
+                          class="textDraftToolbar__btn textDraftToolbar__btn--danger"
+                          title="Remove"
+                          aria-label="Remove image"
+                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
+                          (click)="removeSelectedPlacedImage(); $event.stopPropagation()"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                    }
                   }
                 </div>
 
@@ -1413,7 +1520,7 @@
                         type="button"
                         class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
                         draggable="true"
-                        [title]="textFeatureEnabled() ? 'Insert text box' : 'Turn on Text (PDF text editing) above first'"
+                        title="Insert text (same editor as PDF text)"
                         (dragstart)="onWidgetDragStart('text', $event)"
                         (click)="onInsertWidgetClick('text', $event)"
                         [disabled]="pageCount() === 0 || isLoading() || !textFeatureEnabled()"

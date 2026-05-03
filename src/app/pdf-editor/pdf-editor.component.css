@@ -1588,7 +1588,7 @@
 .widgetLayer {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 4;
   pointer-events: none;
 }
 
@@ -1605,11 +1605,70 @@
   pointer-events: auto;
 }
 
-.widget.isSelected {
+.widget.isSelected:not(.widget--unifiedSelection) {
   border-color: rgba(139, 92, 246, 0.55);
   box-shadow:
     0 12px 40px rgba(0, 0, 0, 0.20),
     0 0 0 3px rgba(139, 92, 246, 0.18);
+}
+
+/* Text / table / image / video: shared dashed frame, floating toolbar, hollow handles. */
+.widget--unifiedSelection {
+  border: 1px solid rgba(203, 213, 225, 0.88);
+  background: #fff;
+  backdrop-filter: none;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.07);
+}
+
+.widget--unifiedSelection.isSelected {
+  border: 1px dashed rgba(148, 163, 184, 0.92);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.09);
+}
+
+.widget--unifiedSelection .widget__content {
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.widgetSelectionToolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 5px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.65);
+  max-width: min(280px, 100vw);
+  pointer-events: auto;
+}
+
+.widget__chrome--hidden {
+  display: none !important;
+}
+
+.widget--table .widget__cellHeader:not(.widget__cellHeader--corner) {
+  background: linear-gradient(180deg, #fafaff, #f4f0ff);
+  border-color: rgba(91, 33, 182, 0.14);
+  color: rgba(76, 29, 149, 0.78);
+}
+
+.widget--table .widget__tableGrid {
+  box-shadow: inset 0 0 0 1px rgba(91, 33, 182, 0.2);
+  border-radius: 8px;
+}
+
+.widget--table .widget__cell {
+  border-color: rgba(91, 33, 182, 0.12);
 }
 
 .widget__chrome {
@@ -1781,6 +1840,7 @@
 }
 
 .widget__table {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -1901,46 +1961,139 @@
 
 .widget__resize {
   position: absolute;
+  z-index: 15;
   width: 14px;
   height: 14px;
   border-radius: 6px;
   border: 1px solid rgba(15, 23, 42, 0.16);
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+  touch-action: none;
+}
+
+.widget__resize--nw {
+  left: 4px;
+  top: 4px;
+  transform: translate(-50%, -50%);
+  cursor: nwse-resize;
 }
 
 .widget__resize--n {
   top: 4px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   cursor: ns-resize;
 }
 
-.widget__resize--s {
-  bottom: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  cursor: ns-resize;
+.widget__resize--ne {
+  right: 4px;
+  top: 4px;
+  transform: translate(50%, -50%);
+  cursor: nesw-resize;
 }
 
 .widget__resize--e {
   right: 4px;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(50%, -50%);
   cursor: ew-resize;
+}
+
+.widget__resize--se {
+  right: 4px;
+  bottom: 4px;
+  transform: translate(50%, 50%);
+  cursor: nwse-resize;
+}
+
+.widget__resize--s {
+  bottom: 4px;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  cursor: ns-resize;
+}
+
+.widget__resize--sw {
+  left: 4px;
+  bottom: 4px;
+  transform: translate(-50%, 50%);
+  cursor: nesw-resize;
 }
 
 .widget__resize--w {
   left: 4px;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
   cursor: ew-resize;
 }
 
-.widget__resize--br {
-  right: 4px;
-  bottom: 4px;
-  cursor: nwse-resize;
+.widget--unifiedSelection.isSelected .widget__resize {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  /* hollow ring */
+  background: rgba(255, 255, 255, 0.96);
+  border: 1.5px solid rgba(100, 116, 139, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+    0 1px 2px rgba(15, 23, 42, 0.08);
+  z-index: 18;
+}
+
+/* Video / iframe / image capture pointer events; disable while selected so handles + drag work. */
+.widget--unifiedSelection.isSelected.widget--image .widget__media,
+.widget--unifiedSelection.isSelected.widget--image .widget__imageCropWrap img,
+.widget--unifiedSelection.isSelected .widget__mediaIframe,
+.widget--unifiedSelection.isSelected video.widget__media {
+  pointer-events: none;
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--nw {
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--n {
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--ne {
+  right: 0;
+  top: 0;
+  transform: translate(50%, -50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--e {
+  right: 0;
+  top: 50%;
+  transform: translate(50%, -50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--se {
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--s {
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--sw {
+  left: 0;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+}
+
+.widget--unifiedSelection.isSelected .widget__resize--w {
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .sidebarHeader {
@@ -2369,11 +2522,13 @@
   margin: 0;
   padding: 0;
   border-radius: 12px;
-  overflow: hidden;
+  /* visible so floating toolbars / resize handles above the page are not clipped */
+  overflow: visible;
   box-shadow:
     0 12px 40px rgba(0, 0, 0, 0.35),
     0 0 0 1px rgba(255, 255, 255, 0.1);
   background: white;
+  isolation: isolate;
 }
 
 .page__canvas {
@@ -2383,6 +2538,8 @@
   left: 0;
   margin: 0;
   vertical-align: top;
+  z-index: 0;
+  border-radius: 12px;
 }
 
 .page__overlay {
@@ -2394,6 +2551,21 @@
   margin: 0;
   padding: 0;
   cursor: crosshair;
+  z-index: 2;
+  border-radius: 12px;
+}
+
+/* DOM HUD above overlay + widgets (placed-image toolbar). */
+.pageHudLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.placedImageHudToolbar {
+  pointer-events: auto;
 }
 
 .pageFurnitureLayer {
@@ -2708,12 +2880,12 @@
   border-radius: 0 0 10px 10px;
 }
 
-/* Image widgets: keep controls overlaid on the image (no separate top strip). */
-.widget--image {
+/* Image widgets: legacy floating chrome when not on the unified selection system. */
+.widget--image:not(.widget--unifiedSelection) {
   background: transparent;
 }
 
-.widget--image .widget__chrome {
+.widget--image:not(.widget--unifiedSelection) .widget__chrome {
   position: absolute;
   top: 6px;
   left: 6px;
@@ -2726,14 +2898,34 @@
   backdrop-filter: blur(6px);
 }
 
-.widget--image .widget__content {
+.widget--image:not(.widget--unifiedSelection) .widget__content {
   height: 100%;
   border-radius: 12px;
   overflow: hidden;
 }
 
-.widget--image .widget__media {
+.widget--image:not(.widget--unifiedSelection) .widget__media {
   border-radius: 12px;
+}
+
+/* Unified image: same framed look as text / table / video (toolbar + dashed handles). */
+.widget--image.widget--unifiedSelection {
+  background: #fff;
+}
+
+.widget--image.widget--unifiedSelection .widget__content {
+  border-radius: 10px;
+}
+
+.widget--image.widget--unifiedSelection .widget__media {
+  border-radius: 10px;
+  background: #f1f5f9;
+}
+
+.widget--image.widget--unifiedSelection .widget__imageCropWrap {
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f1f5f9;
 }
 
 .widget__imageCropWrap {

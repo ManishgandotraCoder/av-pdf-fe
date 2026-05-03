@@ -393,7 +393,7 @@ type ActiveTextDraftGesture =
       origW: number;
       origH: number;
     };
-type WidgetResizeEdge = 'n' | 's' | 'e' | 'w' | 'br';
+type WidgetResizeEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | 'br';
 type ActivePlacedImageOp = {
   pageIndex: number;
   id: string;
@@ -1643,14 +1643,20 @@ export class PdfEditorComponent implements AfterViewInit {
     dt.effectAllowed = 'copy';
   }
 
-  /** Place an asset-library row at overlay coordinates (same rules as click-to-place). */
-  private placeAssetLibraryRowAtPoint(pageIndex: number, row: AssetLibraryRow, x: number, y: number) {
+  /**
+   * After choosing an asset from the library (including drag onto the page), arm the same
+   * click-to-place flow as the Insert buttons — the next click on the PDF drops the element.
+   */
+  private prepareAssetLibraryRowPlacement(row: AssetLibraryRow) {
     this.errorText.set(null);
-    this.tool.set('text');
+    this.cancelInsertWidgetMode();
+    this.pendingImageDataUrl = null;
     if (row.rowKind === 'local') {
       const asset = row.asset;
       if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
-        this.addWidgetAtPoint(pageIndex, 'image', x, y, { imageDataUrl: asset.imageSrc });
+        this.pendingImageDataUrl = asset.imageSrc;
+        this.tool.set('image');
+        this.focusRightbarInsertPanel();
         return;
       }
       if (asset.kind === 'video') {
@@ -1659,13 +1665,19 @@ export class PdfEditorComponent implements AfterViewInit {
           src = URL.createObjectURL(asset.videoFile);
         }
         const playable = this.normalizeVideoWidgetSrc(src);
-        if (!playable) {
+        if (playable) {
+          this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
+          this.tool.set('text');
+          this.focusRightbarInsertPanel();
+        } else if (src) {
           this.errorText.set(
-            'Video asset has no playable URL. If it came from the CRM, refresh the Assets Library.'
+            'Video URL is not supported. Use http(s), //…, or blob URLs. Try refreshing the Assets Library.'
           );
-          return;
+        } else {
+          this.errorText.set(
+            'Video asset has no playable URL. Refresh the Assets Library, or re-add the video from a direct link.'
+          );
         }
-        this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: playable });
         return;
       }
       this.errorText.set('This asset type cannot be placed on the canvas.');
@@ -1680,7 +1692,9 @@ export class PdfEditorComponent implements AfterViewInit {
         );
         return;
       }
-      this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: playable });
+      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
+      this.tool.set('text');
+      this.focusRightbarInsertPanel();
       return;
     }
     if (item.kind === 'image' || item.kind === 'template') {
@@ -1689,7 +1703,9 @@ export class PdfEditorComponent implements AfterViewInit {
         this.errorText.set('Asset is missing a file or preview URL.');
         return;
       }
-      this.addWidgetAtPoint(pageIndex, 'image', x, y, { imageDataUrl: src });
+      this.pendingImageDataUrl = src;
+      this.tool.set('image');
+      this.focusRightbarInsertPanel();
       return;
     }
     this.errorText.set('This asset type cannot be placed on the canvas.');
@@ -1724,6 +1740,8 @@ export class PdfEditorComponent implements AfterViewInit {
     ev?.preventDefault();
     ev?.stopPropagation();
     this.errorText.set(null);
+    this.cancelInsertWidgetMode();
+    this.pendingImageDataUrl = null;
     this.tool.set('text');
     if (item.kind === 'video') {
       const playable = this.normalizeVideoWidgetSrc(item.url || item.previewUrl);
@@ -1743,7 +1761,8 @@ export class PdfEditorComponent implements AfterViewInit {
         this.errorText.set('Asset is missing a file or preview URL.');
         return;
       }
-      this.insertWidgetPending.set({ kind: 'image', imageDataUrl: src });
+      this.pendingImageDataUrl = src;
+      this.tool.set('image');
       this.focusRightbarInsertPanel();
       return;
     }
@@ -2304,9 +2323,6 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  private pendingPdfImageDrop: { pageIndex: number; x: number; y: number } | null = null;
-  private pendingVideoWidgetDrop: { pageIndex: number; x: number; y: number } | null = null;
-
   protected onPdfImageDragStart(ev: DragEvent) {
     try {
       const dt = ev.dataTransfer;
@@ -2329,15 +2345,32 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  /** Shared by Insert → Text and drag-drop of the text chip: next click on the canvas starts a text draft. */
+  private armPlacedTextInsertMode() {
+    if (this.isTextPlacing() && !this.activeTextDraftGesture) this.commitTextDraft();
+    this.flushInlineWidgetTextEditors(this.activePageIndex());
+    this.cancelInsertWidgetMode();
+    this.errorText.set(null);
+    this.pendingImageDataUrl = null;
+    this.textFeatureEnabled.set(true);
+    void this.renderActivePage().finally(() => this.cdr.markForCheck());
+    this.tool.set('text');
+  }
+
   protected onInsertWidgetClick(kind: WidgetKind, ev: Event) {
     ev.preventDefault();
     ev.stopPropagation();
 
-    // Pan mode disables overlay pointer events; placement is click-driven.
+    if (kind === 'text') {
+      this.armPlacedTextInsertMode();
+      return;
+    }
+
+    this.cancelInsertWidgetMode();
+    // Pan mode disables overlay pointer events; placement is click-driven for widgets.
     this.tool.set('text');
 
     if (kind === 'image') {
-      this.insertWidgetPending.set(null);
       const el = this.widgetImageFile?.nativeElement;
       if (el) {
         el.value = '';
@@ -2347,7 +2380,6 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     if (kind === 'video') {
-      this.insertWidgetPending.set(null);
       const el = this.widgetVideoFile?.nativeElement;
       if (el) {
         el.value = '';
@@ -2357,17 +2389,11 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     if (kind === 'signature') {
-      this.insertWidgetPending.set(null);
       const el = this.widgetSignatureFile?.nativeElement;
       if (el) {
         el.value = '';
         el.click();
       }
-      return;
-    }
-
-    if (kind === 'text' && !this.textFeatureEnabled()) {
-      this.errorText.set('Turn on Text (PDF text editing) in the sidebar first.');
       return;
     }
 
@@ -2402,9 +2428,12 @@ export class PdfEditorComponent implements AfterViewInit {
     const asset = this.reusableAssets().find((a) => a.id === assetId);
     if (!asset) return;
     this.errorText.set(null);
+    this.cancelInsertWidgetMode();
+    this.pendingImageDataUrl = null;
     this.tool.set('text');
     if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
-      this.insertWidgetPending.set({ kind: 'image', imageDataUrl: asset.imageSrc });
+      this.pendingImageDataUrl = asset.imageSrc;
+      this.tool.set('image');
       this.focusRightbarInsertPanel();
       return;
     }
@@ -2549,8 +2578,8 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const dataUrl = await this.readAndCropImageFile(file);
       if (!dataUrl) return;
-      this.tool.set('text');
-      this.insertWidgetPending.set({ kind: 'image', imageDataUrl: dataUrl });
+      this.pendingImageDataUrl = dataUrl;
+      this.tool.set('image');
       this.rememberReusableAsset({
         id: `asset_img_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
         kind: 'image',
@@ -2569,7 +2598,6 @@ export class PdfEditorComponent implements AfterViewInit {
     const file = input.files?.[0] ?? null;
     input.value = '';
     if (!file) {
-      this.pendingVideoWidgetDrop = null;
       return;
     }
 
@@ -2599,13 +2627,11 @@ export class PdfEditorComponent implements AfterViewInit {
     const reader = new FileReader();
     reader.onerror = () => {
       this.errorText.set('Failed to read video.');
-      this.pendingVideoWidgetDrop = null;
     };
     reader.onload = () => {
       const dataUrl = String(reader.result ?? '');
       if (!/^data:video\//i.test(dataUrl)) {
         this.errorText.set('Unsupported video file.');
-        this.pendingVideoWidgetDrop = null;
         return;
       }
 
@@ -2627,13 +2653,9 @@ export class PdfEditorComponent implements AfterViewInit {
         videoUrl: dataUrl,
         createdAt: Date.now()
       });
-      if (this.pendingVideoWidgetDrop) {
-        const { pageIndex, x, y } = this.pendingVideoWidgetDrop;
-        this.pendingVideoWidgetDrop = null;
-        this.addWidgetAtPoint(pageIndex, 'video', x, y, { videoObjectUrl: dataUrl });
-        return;
-      }
       this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: dataUrl });
+      this.focusRightbarInsertPanel();
+      this.redrawOverlay(this.activePageIndex());
     };
     reader.readAsDataURL(file);
   }
@@ -2696,8 +2718,8 @@ export class PdfEditorComponent implements AfterViewInit {
   protected insertWidgetModeHint(): string {
     const p = this.insertWidgetPending();
     if (!p) return '';
-    if (p.kind === 'image' && !p.imageDataUrl) return 'Choose an image…';
-    if (p.kind === 'video' && !p.videoObjectUrl) return 'Choose a video…';
+    if (p.kind === 'image' && !p.imageDataUrl) return 'Click on the page to place the image.';
+    if (p.kind === 'video' && !p.videoObjectUrl) return 'Click on the page to place the video.';
     return 'Click on the page to place.';
   }
 
@@ -3178,11 +3200,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (assetPayload) {
       const row = this.resolveAssetLibraryRowFromPayload(assetPayload);
       if (row) {
-        const { overlay } = this.getCanvasPair(pageIndex);
-        if (!overlay) return;
-        const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
-        const pt = this.eventToPoint(overlay, pseudoPointer);
-        this.placeAssetLibraryRowAtPoint(pageIndex, row, pt.x, pt.y);
+        this.prepareAssetLibraryRowPlacement(row);
       } else {
         this.errorText.set('That asset is no longer in the list. Refresh the Assets Library and try again.');
       }
@@ -3192,27 +3210,16 @@ export class PdfEditorComponent implements AfterViewInit {
     // Dragging from our sidebar "Insert Image" tile.
     const pdfInsert = ev.dataTransfer?.getData('application/x-avyro-pdf-insert') ?? '';
     if (pdfInsert === 'image') {
-      const { overlay } = this.getCanvasPair(pageIndex);
-      if (!overlay) return;
-      const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
-      const pt = this.eventToPoint(overlay, pseudoPointer);
-
       const el = this.pdfImageFile?.nativeElement;
       if (!el) return;
-      this.pendingPdfImageDrop = { pageIndex, x: pt.x, y: pt.y };
       el.value = '';
       el.click();
       return;
     }
 
     if (pdfInsert === 'video') {
-      const { overlay } = this.getCanvasPair(pageIndex);
-      if (!overlay) return;
-      const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
-      const pt = this.eventToPoint(overlay, pseudoPointer);
       const el = this.widgetVideoFile?.nativeElement;
       if (!el) return;
-      this.pendingVideoWidgetDrop = { pageIndex, x: pt.x, y: pt.y };
       el.value = '';
       el.click();
       return;
@@ -3222,17 +3229,19 @@ export class PdfEditorComponent implements AfterViewInit {
       ev.dataTransfer?.getData('application/x-avyro-widget-kind') ||
       ev.dataTransfer?.getData('text/plain') ||
       '';
-    const kind = (['table', 'image', 'text', 'video', 'signature'] as const).includes(raw as any)
-      ? (raw as WidgetKind)
-      : null;
+    const draggableWidgetKinds: WidgetKind[] = [
+      'table',
+      'image',
+      'text',
+      'video',
+      'signature',
+      'textOverImage',
+      'imageBackgroundText'
+    ];
+    const kind = draggableWidgetKinds.includes(raw as WidgetKind) ? (raw as WidgetKind) : null;
     if (!kind) {
       const file = ev.dataTransfer?.files?.[0] ?? null;
       if (!file) return;
-
-      const { overlay } = this.getCanvasPair(pageIndex);
-      if (!overlay) return;
-      const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
-      const pt = this.eventToPoint(overlay, pseudoPointer);
 
       if (file.type === 'image/png' || file.type === 'image/jpeg') {
         this.errorText.set(null);
@@ -3249,11 +3258,11 @@ export class PdfEditorComponent implements AfterViewInit {
             this.isInserting.set(false);
             return;
           }
+          this.cancelInsertWidgetMode();
           this.pendingImageDataUrl = dataUrl;
           this.tool.set('image');
-          void this.placePendingImage(pageIndex, pt.x, pt.y).finally(() => {
-            this.isInserting.set(false);
-          });
+          this.isInserting.set(false);
+          this.redrawOverlay(this.activePageIndex());
         };
         reader.readAsDataURL(file);
         return;
@@ -3262,8 +3271,13 @@ export class PdfEditorComponent implements AfterViewInit {
       if (file.type.startsWith('video/')) {
         this.errorText.set(null);
         try {
+          this.cancelInsertWidgetMode();
+          this.pendingImageDataUrl = null;
           const objectUrl = URL.createObjectURL(file);
-          this.addWidgetAtPoint(pageIndex, 'video', pt.x, pt.y, { videoObjectUrl: objectUrl });
+          this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: objectUrl });
+          this.tool.set('text');
+          this.focusRightbarInsertPanel();
+          this.redrawOverlay(this.activePageIndex());
         } catch (e) {
           this.errorText.set(e instanceof Error ? e.message : 'Failed to load video.');
         }
@@ -3274,12 +3288,15 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    const { overlay } = this.getCanvasPair(pageIndex);
-    if (!overlay) return;
-
-    const pseudoPointer = { clientX: ev.clientX, clientY: ev.clientY } as PointerEvent;
-    const pt = this.eventToPoint(overlay, pseudoPointer);
-    this.addWidgetAtPoint(pageIndex, kind, pt.x, pt.y);
+    if (kind === 'text') {
+      this.armPlacedTextInsertMode();
+      return;
+    }
+    this.cancelInsertWidgetMode();
+    this.pendingImageDataUrl = null;
+    this.insertWidgetPending.set({ kind });
+    this.tool.set('text');
+    this.focusRightbarInsertPanel();
   }
 
   protected onWidgetPointerDown(pageIndex: number, widgetId: string, ev: PointerEvent) {
@@ -3306,6 +3323,62 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
     this.beginWidgetMove(pageIndex, widgetId, ev);
+  }
+
+  protected isUnifiedSelectionWidgetKind(kind: WidgetKind): boolean {
+    return kind === 'table' || kind === 'image' || kind === 'video' || kind === 'text';
+  }
+
+  protected onWidgetSelectionToolbarChromePointerDown(ev: PointerEvent) {
+    ev.stopPropagation();
+  }
+
+  protected onWidgetToolbarGripPointerDown(pageIndex: number, widgetId: string, ev: PointerEvent) {
+    if (this.readonlyMode()) return;
+    this.onWidgetHeaderPointerDown(pageIndex, widgetId, ev);
+  }
+
+  protected duplicateWidgetUnified(pageIndex: number, widgetId: string, ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (this.readonlyMode()) return;
+    const w = this.getWidget(pageIndex, widgetId);
+    if (!w || !this.isUnifiedSelectionWidgetKind(w.kind)) return;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+    const copy = this.deepCloneWidgetForDuplicate(w);
+    copy.x = clamp(copy.x, 0, Math.max(0, rw - copy.w));
+    copy.y = clamp(copy.y, 0, Math.max(0, rh - copy.h));
+    this.widgetsByPage.update((prev) => {
+      const cur = prev[pageIndex] ?? [];
+      return { ...prev, [pageIndex]: [...cur, copy] };
+    });
+    this.selectedWidgetId.set(copy.id);
+    this.selectedDetectedPdfMedia.set(null);
+    this.selectedPlacedTextId.set(null);
+  }
+
+  private deepCloneWidgetForDuplicate(w: Widget): Widget {
+    const id = this.newWidgetId();
+    const step = 14;
+    const copy: Widget = {
+      ...w,
+      id,
+      x: w.x + step,
+      y: w.y + step
+    };
+    if (w.table) {
+      copy.table = {
+        rows: w.table.rows,
+        cols: w.table.cols,
+        cells: w.table.cells.map((row) => row.slice())
+      };
+    }
+    if (w.kind === 'video' && w.videoSrc?.startsWith('blob:')) {
+      this.videoObjectUrlByWidgetId.set(id, w.videoSrc);
+    }
+    return copy;
   }
 
   protected onWidgetResizePointerDown(
@@ -3815,7 +3888,6 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedWidgetId.set(null);
     this.editingWidgetId.set(null);
     this.replaceMediaTarget.set(null);
-    this.pendingVideoWidgetDrop = null;
     this.selectedPlacedImageId.set(null);
     this.selectedPlacedTextId.set(null);
     this.imageCropSession.set(null);
@@ -4164,8 +4236,6 @@ export class PdfEditorComponent implements AfterViewInit {
     this.textDraftBox = null;
     this.isImagePlacing.set(false);
     this.pendingImageDataUrl = null;
-    this.pendingPdfImageDrop = null;
-    this.pendingVideoWidgetDrop = null;
     this.activePlacedImageOp = null;
     this.activePlacedTextOp = null;
     this.activeTextDraftGesture = null;
@@ -5512,6 +5582,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (target.closest('.pageMenu')) return;
     if (target.closest('.pageMenuBtn')) return;
     if (target.closest('.widget')) return;
+    if (target.closest('.placedImageHudToolbar')) return;
     if (target.closest('.imageCropBar')) return;
     if (target.closest('.insertSourceMenu')) return;
     if (target.closest('.rightbarMediaActions')) return;
@@ -5567,6 +5638,79 @@ export class PdfEditorComponent implements AfterViewInit {
     const image = this.getImageAnno(pageIndex, id);
     if (!image) return null;
     return { pageIndex, image };
+  }
+
+  protected placedImageToolbarPositionStyle(sel: { pageIndex: number; image: ImageAnno }): Record<string, string> {
+    const im = sel.image;
+    return {
+      position: 'absolute',
+      left: `${im.x + im.w / 2}px`,
+      top: `${im.y}px`,
+      transform: `translate(-50%, calc(-100% - 5px))`,
+      zIndex: '9'
+    };
+  }
+
+  protected onPlacedImageToolbarChromePointerDown(ev: PointerEvent) {
+    ev.stopPropagation();
+  }
+
+  protected onPlacedImageToolbarGripPointerDown(ev: PointerEvent) {
+    if (this.readonlyMode()) return;
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    const { pageIndex, image } = sel;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const pt = this.eventToPoint(overlay, ev);
+    this.beginHistoryStep();
+    (ev.currentTarget as HTMLElement | null)?.setPointerCapture?.(ev.pointerId);
+    this.activePlacedImageOp = {
+      pageIndex,
+      id: image.id,
+      pointerId: ev.pointerId,
+      mode: 'move',
+      edge: null,
+      startX: pt.x,
+      startY: pt.y,
+      orig: { x: image.x, y: image.y, w: image.w, h: image.h }
+    };
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+
+  protected duplicateSelectedPlacedImageFromToolbar(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (this.readonlyMode()) return;
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    const { pageIndex, image } = sel;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
+    const step = 14;
+    const newId = this.newPlacedImageId();
+    const nx = clamp(image.x + step, 0, Math.max(0, rw - image.w));
+    const ny = clamp(image.y + step, 0, Math.max(0, rh - image.h));
+    const copy: ImageAnno = {
+      ...image,
+      id: newId,
+      x: nx,
+      y: ny
+    };
+    this.beginHistoryStep();
+    this.editsByPage.update((prev) => {
+      const ex = prev[pageIndex];
+      if (!ex) return prev;
+      return {
+        ...prev,
+        [pageIndex]: { ...ex, images: [...(ex.images ?? []), copy] }
+      };
+    });
+    this.selectedPlacedImageId.set(newId);
+    this.redrawOverlay(pageIndex);
+    this.cdr.markForCheck();
   }
 
   protected replaceSelectedPlacedImage(ev: Event) {
@@ -5789,8 +5933,11 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
     this.errorText.set(null);
+    this.cancelInsertWidgetMode();
+    this.pendingImageDataUrl = null;
     this.tool.set('text');
     this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: url });
+    this.focusRightbarInsertPanel();
     this.rememberReusableAsset({
       id: `asset_vid_url_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
       kind: 'video',
@@ -6180,6 +6327,76 @@ export class PdfEditorComponent implements AfterViewInit {
         this.redrawOverlay(opI.pageIndex);
         return;
       }
+      if (edge === 'nw') {
+        const dx = pt.x - opI.startX;
+        const dy = pt.y - opI.startY;
+        const nx = o.x + dx;
+        const ny = o.y + dy;
+        const nw0 = o.w - dx;
+        const nh0 = o.h - dy;
+        const x = clamp(nx, 0, o.x + o.w - minS);
+        const y = clamp(ny, 0, o.y + o.h - minS);
+        const ww = clamp(nw0, minS, o.x + o.w - x);
+        const hh = clamp(nh0, minS, o.y + o.h - y);
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x, y, w: ww, h: hh };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({
+          ...a,
+          x: fin.x,
+          y: fin.y,
+          w: fin.w,
+          h: fin.h
+        }));
+        this.redrawOverlay(opI.pageIndex);
+        return;
+      }
+      if (edge === 'ne') {
+        const dy = pt.y - opI.startY;
+        const ny = o.y + dy;
+        const nh0 = o.h - dy;
+        const y = clamp(ny, 0, o.y + o.h - minS);
+        const hh = clamp(nh0, minS, o.y + o.h - y);
+        const nw = clamp(o.w + (pt.x - opI.startX), minS, Math.max(minS, rw - o.x));
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x: o.x, y, w: nw, h: hh };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, y: fin.y, w: fin.w, h: fin.h }));
+        this.redrawOverlay(opI.pageIndex);
+        return;
+      }
+      if (edge === 'sw') {
+        const dx = pt.x - opI.startX;
+        const nx = o.x + dx;
+        const nw0 = o.w - dx;
+        const x = clamp(nx, 0, o.x + o.w - minS);
+        const ww = clamp(nw0, minS, o.x + o.w - x);
+        const nh = clamp(o.h + (pt.y - opI.startY), minS, Math.max(minS, rh - o.y));
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x, y: o.y, w: ww, h: nh };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, x: fin.x, w: fin.w, h: fin.h }));
+        this.redrawOverlay(opI.pageIndex);
+        return;
+      }
+      if (edge === 'se') {
+        const nw = clamp(
+          o.w + (pt.x - opI.startX),
+          minS,
+          Math.max(minS, rw - o.x)
+        );
+        const nh = clamp(
+          o.h + (pt.y - opI.startY),
+          minS,
+          Math.max(minS, rh - o.y)
+        );
+        const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+        const candR = { x: o.x, y: o.y, w: nw, h: nh };
+        const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: fin.w, h: fin.h }));
+        this.redrawOverlay(opI.pageIndex);
+        return;
+      }
       return;
     }
 
@@ -6223,9 +6440,10 @@ export class PdfEditorComponent implements AfterViewInit {
     const dy = pt.y - op.startY;
     const minW = 80;
     const minH = 60;
-    const edge = op.resizeEdge ?? 'br';
+    const edge = op.resizeEdge ?? 'se';
+    const edgeKind = edge === 'br' ? 'se' : edge;
 
-    if (edge === 'br') {
+    if (edgeKind === 'se' || edge === 'br') {
       const maxWb = Math.max(minW, rw - o.x);
       const maxHb = Math.max(minH, rh - o.y);
       const cw = clamp(o.w + dx, minW, maxWb);
@@ -6235,6 +6453,64 @@ export class PdfEditorComponent implements AfterViewInit {
       const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
       this.updateWidget(op.pageIndex, op.id, (w) => ({
         ...w,
+        w: fin.w,
+        h: fin.h
+      }));
+      return;
+    }
+
+    if (edgeKind === 'nw') {
+      const nx = o.x + dx;
+      const ny = o.y + dy;
+      const nw0 = o.w - dx;
+      const nh0 = o.h - dy;
+      const x = clamp(nx, 0, o.x + o.w - minW);
+      const y = clamp(ny, 0, o.y + o.h - minH);
+      const ww = clamp(nw0, minW, o.x + o.w - x);
+      const hh = clamp(nh0, minH, o.y + o.h - y);
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x, y, w: ww, h: hh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({
+        ...w,
+        x: fin.x,
+        y: fin.y,
+        w: fin.w,
+        h: fin.h
+      }));
+      return;
+    }
+
+    if (edgeKind === 'ne') {
+      const ny = o.y + dy;
+      const nh0 = o.h - dy;
+      const y = clamp(ny, 0, o.y + o.h - minH);
+      const hh = clamp(nh0, minH, o.y + o.h - y);
+      const nw = clamp(o.w + dx, minW, Math.max(minW, rw - o.x));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x: o.x, y, w: nw, h: hh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({
+        ...w,
+        y: fin.y,
+        w: fin.w,
+        h: fin.h
+      }));
+      return;
+    }
+
+    if (edgeKind === 'sw') {
+      const nx = o.x + dx;
+      const nw0 = o.w - dx;
+      const x = clamp(nx, 0, o.x + o.w - minW);
+      const ww = clamp(nw0, minW, o.x + o.w - x);
+      const nh = clamp(o.h + dy, minH, Math.max(minH, rh - o.y));
+      const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
+      const candR = { x, y: o.y, w: ww, h: nh };
+      const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minW, minH, obstaclesW);
+      this.updateWidget(op.pageIndex, op.id, (w) => ({
+        ...w,
+        x: fin.x,
         w: fin.w,
         h: fin.h
       }));
@@ -7411,8 +7687,40 @@ export class PdfEditorComponent implements AfterViewInit {
 
     const pending = this.insertWidgetPending();
     if (pending) {
-      if (pending.kind === 'image' && !pending.imageDataUrl) return;
-      if (pending.kind === 'video' && !pending.videoObjectUrl) return;
+      if (pending.kind === 'image' && pending.imageDataUrl) {
+        const { overlay } = this.getCanvasPair(pageIndex);
+        if (!overlay) return;
+        const p = this.eventToPoint(overlay, ev);
+        this.pendingImageDataUrl = pending.imageDataUrl;
+        this.insertWidgetPending.set(null);
+        this.isInserting.set(false);
+        ev.preventDefault();
+        ev.stopPropagation();
+        void this.placePendingImage(pageIndex, p.x, p.y);
+        return;
+      }
+      if (pending.kind === 'image' && !pending.imageDataUrl) {
+        const { overlay } = this.getCanvasPair(pageIndex);
+        if (!overlay) return;
+        const p = this.eventToPoint(overlay, ev);
+        this.insertWidgetPending.set(null);
+        this.isInserting.set(false);
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.addWidgetAtPoint(pageIndex, 'image', p.x, p.y);
+        return;
+      }
+      if (pending.kind === 'video' && !pending.videoObjectUrl) {
+        const { overlay } = this.getCanvasPair(pageIndex);
+        if (!overlay) return;
+        const p = this.eventToPoint(overlay, ev);
+        this.insertWidgetPending.set(null);
+        this.isInserting.set(false);
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.addWidgetAtPoint(pageIndex, 'video', p.x, p.y);
+        return;
+      }
 
       const { overlay } = this.getCanvasPair(pageIndex);
       if (!overlay) return;
@@ -7506,12 +7814,14 @@ export class PdfEditorComponent implements AfterViewInit {
           ev.preventDefault();
           ev.stopPropagation();
           this.redrawOverlay(pageIndex);
+          this.cdr.markForCheck();
           return;
         }
         this.selectedPlacedImageId.set(null);
         this.selectedPlacedTextId.set(null);
         this.imageCropSession.set(null);
         this.redrawOverlay(pageIndex);
+        this.cdr.markForCheck();
       }
     }
 
@@ -7859,6 +8169,30 @@ export class PdfEditorComponent implements AfterViewInit {
     this.activeTextDraftGesture = null;
     this.textDraftFreeRect.set({ w: 320, h: 44 });
     if (pageIndex !== null) this.redrawOverlay(pageIndex);
+  }
+
+  /** Same floating editor + toolbar as clicking the page with the Text tool (placed {@link TextAnno}, not a widget). */
+  private beginNewPlacedTextAt(pageIndex: number, x: number, y: number) {
+    this.editingReplace = null;
+    this.selectedWidgetId.set(null);
+    this.selectedDetectedPdfMedia.set(null);
+    this.selectedPlacedImageId.set(null);
+    this.selectedPlacedTextId.set(null);
+    this.insertWidgetPending.set(null);
+    this.isTextPlacing.set(true);
+    this.textDraft.set('');
+    this.textDraftPageIndex.set(pageIndex);
+    this.textDraftX.set(x);
+    this.textDraftY.set(y);
+    this.textBgEnabled.set(false);
+    this.textDraftBox = null;
+    this.textDraftFreeRect.set({ w: 320, h: 44 });
+    this.tool.set('text');
+    this.redrawOverlay(pageIndex);
+    queueMicrotask(() => {
+      this.textDraftEditor?.nativeElement?.focus({ preventScroll: true });
+      this.cdr.markForCheck();
+    });
   }
 
   private getTextDraftLayoutSize(): { w: number; h: number } {
@@ -8770,6 +9104,10 @@ export class PdfEditorComponent implements AfterViewInit {
     for (let i = images.length - 1; i >= 0; i--) {
       const im = images[i]!;
       const { x: ix, y: iy, w: iw, h: ih } = im;
+      if (Math.hypot(x - ix, y - iy) <= hsz) return { id: im.id, part: 'nw' };
+      if (Math.hypot(x - (ix + iw), y - iy) <= hsz) return { id: im.id, part: 'ne' };
+      if (Math.hypot(x - ix, y - (iy + ih)) <= hsz) return { id: im.id, part: 'sw' };
+      if (Math.hypot(x - (ix + iw), y - (iy + ih)) <= hsz) return { id: im.id, part: 'se' };
       if (Math.hypot(x - (ix + iw / 2), y - iy) <= hsz) return { id: im.id, part: 'n' };
       if (Math.hypot(x - (ix + iw / 2), y - (iy + ih)) <= hsz) return { id: im.id, part: 's' };
       if (Math.hypot(x - (ix + iw), y - (iy + ih / 2)) <= hsz) return { id: im.id, part: 'e' };
@@ -8782,6 +9120,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private drawPlacedImageChrome(ctx: CanvasRenderingContext2D, anno: ImageAnno) {
     if (this.selectedPlacedImageId() !== anno.id) return;
     const hs = PdfEditorComponent.placedImageHandlePx;
+    const hr = hs / 2 + 0.5;
     const { x, y, w, h: hh } = anno;
     ctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
     ctx.lineWidth = 1;
@@ -8789,18 +9128,22 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.strokeRect(x, y, w, hh);
     ctx.setLineDash([]);
     ctx.fillStyle = '#fff';
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
+    ctx.strokeStyle = 'rgba(100, 116, 139, 0.55)';
 
-    const drawHandle = (ax: number, ay: number) => {
+    const drawDot = (ax: number, ay: number) => {
       ctx.beginPath();
-      ctx.rect(ax - hs / 2, ay - hs / 2, hs, hs);
+      ctx.arc(ax, ay, hr, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     };
-    drawHandle(x + w / 2, y);
-    drawHandle(x + w / 2, y + hh);
-    drawHandle(x + w, y + hh / 2);
-    drawHandle(x, y + hh / 2);
+    drawDot(x, y);
+    drawDot(x + w / 2, y);
+    drawDot(x + w, y);
+    drawDot(x + w, y + hh / 2);
+    drawDot(x + w, y + hh);
+    drawDot(x + w / 2, y + hh);
+    drawDot(x, y + hh);
+    drawDot(x, y + hh / 2);
   }
 
   private redrawAllOverlays() {
@@ -9814,7 +10157,6 @@ export class PdfEditorComponent implements AfterViewInit {
     const file = input.files?.[0] ?? null;
     input.value = '';
     if (!file) {
-      this.pendingPdfImageDrop = null;
       this.isImagePlacing.set(false);
       return;
     }
@@ -9824,7 +10166,6 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const dataUrl = await this.readAndCropImageFile(file);
       if (!dataUrl) {
-        this.pendingPdfImageDrop = null;
         this.pendingImageDataUrl = null;
         this.tool.set('text');
         return;
@@ -9839,19 +10180,10 @@ export class PdfEditorComponent implements AfterViewInit {
         createdAt: Date.now()
       });
       this.tool.set('image');
-
-      // If this picker was triggered by a sidebar drag+drop, place on that page/position.
-      if (this.pendingPdfImageDrop) {
-        const { pageIndex, x, y } = this.pendingPdfImageDrop;
-        this.pendingPdfImageDrop = null;
-        await this.placePendingImage(pageIndex, x, y);
-      } else {
-        this.redrawOverlay(this.activePageIndex());
-      }
+      this.redrawOverlay(this.activePageIndex());
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to pick image.');
       this.pendingImageDataUrl = null;
-      this.pendingPdfImageDrop = null;
     } finally {
       this.isImagePlacing.set(false);
     }
@@ -9983,26 +10315,19 @@ export class PdfEditorComponent implements AfterViewInit {
     return await this.requestImageCrop(dataUrl);
   }
 
-  private async placePendingImage(pageIndex: number, x: number, y: number) {
-    const dataUrl = this.pendingImageDataUrl;
-    if (!dataUrl) return;
-    if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-      this.errorText.set('Unsupported image (use PNG or JPEG).');
-      this.pendingImageDataUrl = null;
-      this.tool.set('text');
-      return;
-    }
+  /** Places an image on the PDF overlay (same as the Image tool and PNG/JPEG drop). `src` may be a data URL or a usable image URL. */
+  private async placeImageSrcAtPoint(pageIndex: number, x: number, y: number, src: string): Promise<void> {
+    const trimmed = src.trim();
+    if (!trimmed) return;
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
     const { w: pageCssW, h: pageCssH } = this.overlayNominalCssSize(overlay);
 
     let img: HTMLImageElement;
     try {
-      img = await this.loadHtmlImage(dataUrl);
+      img = await this.loadHtmlImage(trimmed);
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to decode image.');
-      this.pendingImageDataUrl = null;
-      this.tool.set('text');
       return;
     }
 
@@ -10024,16 +10349,23 @@ export class PdfEditorComponent implements AfterViewInit {
       y: py,
       w,
       h,
-      dataUrl,
+      dataUrl: trimmed,
       srcW: img.naturalWidth,
       srcH: img.naturalHeight
     };
     this.pushImageAnno(pageIndex, anno);
     this.selectedWidgetId.set(null);
     this.selectedPlacedImageId.set(id);
-    this.pendingImageDataUrl = null;
     this.tool.set('text');
     this.redrawOverlay(pageIndex);
+    this.cdr.markForCheck();
+  }
+
+  private async placePendingImage(pageIndex: number, x: number, y: number) {
+    const src = this.pendingImageDataUrl;
+    if (!src) return;
+    this.pendingImageDataUrl = null;
+    await this.placeImageSrcAtPoint(pageIndex, x, y, src);
   }
 
   private loadHtmlImage(dataUrl: string): Promise<HTMLImageElement> {
