@@ -403,6 +403,8 @@ type ActivePlacedImageOp = {
   startX: number;
   startY: number;
   orig: { x: number; y: number; w: number; h: number };
+  /** Undo snapshot is taken on first real geometry change, not on click-to-select. */
+  historyBegun?: boolean;
 };
 
 type ActivePlacedTextOp = {
@@ -3411,6 +3413,11 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedDetectedPdfMedia.set(null);
     this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
+    const w = this.getWidget(pageIndex, widgetId);
+    // Image/video: click only selects (toolbar / right bar: replace, remove). Drag from the grip handle.
+    if (w?.kind === 'image' || w?.kind === 'video') {
+      return;
+    }
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -5896,7 +5903,6 @@ export class PdfEditorComponent implements AfterViewInit {
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
     const pt = this.eventToPoint(overlay, ev);
-    this.beginHistoryStep();
     (ev.currentTarget as HTMLElement | null)?.setPointerCapture?.(ev.pointerId);
     this.activePlacedImageOp = {
       pageIndex,
@@ -5906,44 +5912,11 @@ export class PdfEditorComponent implements AfterViewInit {
       edge: null,
       startX: pt.x,
       startY: pt.y,
-      orig: { x: image.x, y: image.y, w: image.w, h: image.h }
+      orig: { x: image.x, y: image.y, w: image.w, h: image.h },
+      historyBegun: false
     };
     ev.preventDefault();
     ev.stopPropagation();
-  }
-
-  protected duplicateSelectedPlacedImageFromToolbar(ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    if (this.readonlyMode()) return;
-    const sel = this.selectedPlacedImage();
-    if (!sel) return;
-    const { pageIndex, image } = sel;
-    const { overlay } = this.getCanvasPair(pageIndex);
-    if (!overlay) return;
-    const { w: rw, h: rh } = this.overlayNominalCssSize(overlay);
-    const step = 14;
-    const newId = this.newPlacedImageId();
-    const nx = clamp(image.x + step, 0, Math.max(0, rw - image.w));
-    const ny = clamp(image.y + step, 0, Math.max(0, rh - image.h));
-    const copy: ImageAnno = {
-      ...image,
-      id: newId,
-      x: nx,
-      y: ny
-    };
-    this.beginHistoryStep();
-    this.editsByPage.update((prev) => {
-      const ex = prev[pageIndex];
-      if (!ex) return prev;
-      return {
-        ...prev,
-        [pageIndex]: { ...ex, images: [...(ex.images ?? []), copy] }
-      };
-    });
-    this.selectedPlacedImageId.set(newId);
-    this.redrawOverlay(pageIndex);
-    this.cdr.markForCheck();
   }
 
   protected replaceSelectedPlacedImage(ev: Event) {
@@ -6504,6 +6477,7 @@ export class PdfEditorComponent implements AfterViewInit {
           clamp(o.y + dy, 0, maxY),
           obstaclesI
         );
+        this.beforeFirstPlacedImageMutation(opI, { x: pos.x, y: pos.y, w: o.w, h: o.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({
           ...a,
           x: pos.x,
@@ -6523,6 +6497,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x: o.x, y: o.y, w: nw, h: o.h };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: fin.w }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6536,6 +6511,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x: o.x, y: o.y, w: o.w, h: nh };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6549,6 +6525,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x, y: o.y, w: w0, h: o.h };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, x: fin.x, w: fin.w }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6562,6 +6539,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x: o.x, y, w: o.w, h: h0 };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, y: fin.y, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6580,6 +6558,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x, y, w: ww, h: hh };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({
           ...a,
           x: fin.x,
@@ -6600,6 +6579,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x: o.x, y, w: nw, h: hh };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, y: fin.y, w: fin.w, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6614,6 +6594,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x, y: o.y, w: ww, h: nh };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, x: fin.x, w: fin.w, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -6632,6 +6613,7 @@ export class PdfEditorComponent implements AfterViewInit {
         const origR = { x: o.x, y: o.y, w: o.w, h: o.h };
         const candR = { x: o.x, y: o.y, w: nw, h: nh };
         const fin = this.constrainAxisRectLerpNoOverlap(rw, rh, origR, candR, minS, minS, obstaclesI);
+        this.beforeFirstPlacedImageMutation(opI, { x: fin.x, y: fin.y, w: fin.w, h: fin.h });
         this.updatePlacedImage(opI.pageIndex, opI.id, (a) => ({ ...a, w: fin.w, h: fin.h }));
         this.redrawOverlay(opI.pageIndex);
         return;
@@ -8038,18 +8020,26 @@ export class PdfEditorComponent implements AfterViewInit {
           this.selectedWidgetId.set(null);
           this.selectedDetectedPdfMedia.set(null);
           this.selectedPlacedTextId.set(null);
-          this.beginHistoryStep();
           this.selectedPlacedImageId.set(hit.id);
+          // Body: select only (toolbar: replace / delete / drag grip). Resize uses handles; move uses HUD grip.
+          if (hit.part === 'body') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.redrawOverlay(pageIndex);
+            this.cdr.markForCheck();
+            return;
+          }
           (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
           this.activePlacedImageOp = {
             pageIndex,
             id: hit.id,
             pointerId: ev.pointerId,
-            mode: hit.part === 'body' ? 'move' : 'resize',
-            edge: hit.part === 'body' ? null : hit.part,
+            mode: 'resize',
+            edge: hit.part,
             startX: p.x,
             startY: p.y,
-            orig: { x: anno.x, y: anno.y, w: anno.w, h: anno.h }
+            orig: { x: anno.x, y: anno.y, w: anno.w, h: anno.h },
+            historyBegun: false
           };
           ev.preventDefault();
           ev.stopPropagation();
@@ -8069,16 +8059,24 @@ export class PdfEditorComponent implements AfterViewInit {
             : this.materializeDetectedPdfImageForEditing(pageIndex, hitMedia);
           if (anno) {
             this.selectedPlacedImageId.set(anno.id);
+            if (part === 'body') {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.redrawOverlay(pageIndex);
+              this.cdr.markForCheck();
+              return;
+            }
             (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
             this.activePlacedImageOp = {
               pageIndex,
               id: anno.id,
               pointerId: ev.pointerId,
-              mode: part === 'body' ? 'move' : 'resize',
-              edge: part === 'body' ? null : part,
+              mode: 'resize',
+              edge: part,
               startX: p.x,
               startY: p.y,
-              orig: { x: anno.x, y: anno.y, w: anno.w, h: anno.h }
+              orig: { x: anno.x, y: anno.y, w: anno.w, h: anno.h },
+              historyBegun: false
             };
             ev.preventDefault();
             ev.stopPropagation();
@@ -9102,6 +9100,22 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
+  private placedImageRectDiffersFromOrig(
+    op: ActivePlacedImageOp,
+    next: { x: number; y: number; w: number; h: number }
+  ): boolean {
+    const o = op.orig;
+    return next.x !== o.x || next.y !== o.y || next.w !== o.w || next.h !== o.h;
+  }
+
+  /** First time the user actually moves/resizes vs. click-to-select only, push an undo snapshot. */
+  private beforeFirstPlacedImageMutation(op: ActivePlacedImageOp, next: { x: number; y: number; w: number; h: number }) {
+    if (!this.placedImageRectDiffersFromOrig(op, next)) return;
+    if (op.historyBegun) return;
+    op.historyBegun = true;
+    this.beginHistoryStep();
+  }
+
   private getTextDraftObstacleRect(pageIndex: number): { x: number; y: number; w: number; h: number } | null {
     if (!this.isTextPlacing() || this.textDraftPageIndex() !== pageIndex) return null;
     const { w, h } = this.getTextDraftLayoutSize();
@@ -9509,7 +9523,7 @@ export class PdfEditorComponent implements AfterViewInit {
       case 'se':
         return 'nwse-resize';
       default:
-        return 'grab';
+        return 'pointer';
     }
   }
 

@@ -800,16 +800,18 @@
                             <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                           </button>
                           <div class="textDraftToolbar__actions">
-                            <button
-                              type="button"
-                              class="textDraftToolbar__btn"
-                              title="Copy"
-                              aria-label="Copy"
-                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
-                              (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
-                            >
-                              ⧉
-                            </button>
+                            @if (w.kind !== 'image' && w.kind !== 'video') {
+                              <button
+                                type="button"
+                                class="textDraftToolbar__btn"
+                                title="Duplicate"
+                                aria-label="Duplicate"
+                                (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                                (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
+                              >
+                                ⧉
+                              </button>
+                            }
                             <button
                               type="button"
                               class="textDraftToolbar__btn"
@@ -1110,12 +1112,12 @@
                         <button
                           type="button"
                           class="textDraftToolbar__btn"
-                          title="Copy"
-                          aria-label="Copy image"
+                          title="Replace image"
+                          aria-label="Replace image"
                           (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="duplicateSelectedPlacedImageFromToolbar($event)"
+                          (click)="replaceSelectedPlacedImage($event)"
                         >
-                          ⧉
+                          ↻
                         </button>
                         <button
                           type="button"
