@@ -900,6 +900,9 @@ export class PdfEditorComponent implements AfterViewInit {
   private readonly videoObjectUrlByWidgetId = new Map<string, string>();
   /** Maps detected embedded-media id → replacement overlay id (session-only; survives slight re-detection drift). */
   private readonly embeddedImageReplacementByDetectedId = new Map<string, string>();
+  private hoveredDetectedPdfImage:
+    | { pageIndex: number; media: DetectedPdfMedia; part: 'body' | PlacedImageEdge }
+    | null = null;
   private readonly persistedVideoDbName = 'avyro-editor-media';
   private readonly persistedVideoStoreName = 'videoByRef';
 
@@ -1215,7 +1218,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const pageCount = this.pageCount();
       const fileName = this.fileName();
       if (!id || pageCount === 0) return;
-      const snapshot = JSON.stringify({ edits, widgets, furniture, pageCount, fileName });
+      const snapshot = this.autoVersionSnapshotFingerprint(edits, widgets, furniture, pageCount, fileName);
       if (!this.autoVersionSnapshotReady) {
         this.autoVersionSnapshotReady = true;
         this.lastAutoVersionSnapshot = snapshot;
@@ -1654,6 +1657,10 @@ export class PdfEditorComponent implements AfterViewInit {
     if (row.rowKind === 'local') {
       const asset = row.asset;
       if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
+        if (this.embeddedMediaReplaceTarget?.kind === 'image') {
+          void this.replaceEmbeddedImageTargetWithSrc(asset.imageSrc);
+          return;
+        }
         this.pendingImageDataUrl = asset.imageSrc;
         this.tool.set('image');
         this.focusRightbarInsertPanel();
@@ -1701,6 +1708,10 @@ export class PdfEditorComponent implements AfterViewInit {
       const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
       if (!src) {
         this.errorText.set('Asset is missing a file or preview URL.');
+        return;
+      }
+      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
+        void this.replaceEmbeddedImageTargetWithSrc(src);
         return;
       }
       this.pendingImageDataUrl = src;
@@ -1759,6 +1770,10 @@ export class PdfEditorComponent implements AfterViewInit {
       const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
       if (!src) {
         this.errorText.set('Asset is missing a file or preview URL.');
+        return;
+      }
+      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
+        void this.replaceEmbeddedImageTargetWithSrc(src);
         return;
       }
       this.pendingImageDataUrl = src;
@@ -2434,6 +2449,10 @@ export class PdfEditorComponent implements AfterViewInit {
     this.pendingImageDataUrl = null;
     this.tool.set('text');
     if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
+      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
+        void this.replaceEmbeddedImageTargetWithSrc(asset.imageSrc);
+        return;
+      }
       this.pendingImageDataUrl = asset.imageSrc;
       this.tool.set('image');
       this.focusRightbarInsertPanel();
@@ -2474,7 +2493,6 @@ export class PdfEditorComponent implements AfterViewInit {
       try {
         const dataUrl = await this.readAndCropImageFile(file);
         if (!dataUrl) return;
-        // Keep original PDF layer/background untouched for replace flows.
         await this.placeReplacementImageInPdfMediaRect(embeddedReplace.pageIndex, dataUrl, {
           id: embeddedReplace.id,
           kind: 'image',
@@ -2590,6 +2608,28 @@ export class PdfEditorComponent implements AfterViewInit {
         imageSrc: dataUrl,
         createdAt: Date.now()
       });
+    } finally {
+      this.isInserting.set(false);
+    }
+  }
+
+  private async replaceEmbeddedImageTargetWithSrc(src: string) {
+    const target = this.embeddedMediaReplaceTarget;
+    if (target?.kind !== 'image') return;
+    this.embeddedMediaReplaceTarget = null;
+    this.errorText.set(null);
+    this.isInserting.set(true);
+    try {
+      await this.placeReplacementImageInPdfMediaRect(target.pageIndex, src, {
+        id: target.id,
+        kind: 'image',
+        x: target.x,
+        y: target.y,
+        w: target.w,
+        h: target.h
+      });
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
     } finally {
       this.isInserting.set(false);
     }
@@ -3191,6 +3231,83 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
+  /**
+   * Drop PNG/JPEG onto the page: if the cursor is over an embedded PDF image or a placed overlay image,
+   * replace that image; otherwise arm the Image tool for click-to-place (existing behaviour).
+   */
+  private async handleDroppedImageFileOnPageStack(pageIndex: number, file: File, ev: DragEvent) {
+    if (this.readonlyMode()) {
+      this.errorText.set('This document is read-only.');
+      return;
+    }
+    this.errorText.set(null);
+    this.isInserting.set(true);
+    try {
+      const { overlay } = this.getCanvasPair(pageIndex);
+      if (overlay) {
+        const pt = this.eventToPoint(overlay, ev);
+        const placedHit = this.hitTestPlacedImage(pageIndex, pt.x, pt.y);
+        if (placedHit) {
+          const anno = this.getImageAnno(pageIndex, placedHit.id);
+          if (anno) {
+            const dataUrl = await this.readAndCropImageFile(file);
+            if (!dataUrl) return;
+            const img = await this.loadHtmlImage(dataUrl);
+            this.beginHistoryStep();
+            this.updatePlacedImage(pageIndex, anno.id, (a) => {
+              const nextBounds = this.withMaxImageBounds(
+                { x: a.x, y: a.y, w: a.w, h: a.h },
+                img.naturalWidth,
+                img.naturalHeight
+              );
+              return {
+                ...a,
+                ...nextBounds,
+                dataUrl,
+                srcW: Math.max(1, img.naturalWidth),
+                srcH: Math.max(1, img.naturalHeight),
+                crop: undefined
+              };
+            });
+            this.selectedPlacedImageId.set(anno.id);
+            this.selectedDetectedPdfMedia.set(null);
+            this.selectedWidgetId.set(null);
+            this.redrawOverlay(pageIndex);
+            this.cdr.markForCheck();
+            return;
+          }
+        }
+        const embedded = this.hitTestDetectedMedia(pageIndex, pt.x, pt.y);
+        if (embedded?.kind === 'image') {
+          const dataUrl = await this.readAndCropImageFile(file);
+          if (!dataUrl) return;
+          await this.placeReplacementImageInPdfMediaRect(pageIndex, dataUrl, embedded);
+          this.cdr.markForCheck();
+          return;
+        }
+      }
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read dropped image.'));
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.readAsDataURL(file);
+      });
+      if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
+        this.errorText.set('Unsupported image (use PNG or JPEG).');
+        return;
+      }
+      this.cancelInsertWidgetMode();
+      this.pendingImageDataUrl = dataUrl;
+      this.tool.set('image');
+      this.redrawOverlay(this.activePageIndex());
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to load image.');
+    } finally {
+      this.isInserting.set(false);
+    }
+  }
+
   protected onPageStackDrop(pageIndex: number, ev: DragEvent) {
     ev.preventDefault();
 
@@ -3246,27 +3363,7 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!file) return;
 
       if (file.type === 'image/png' || file.type === 'image/jpeg') {
-        this.errorText.set(null);
-        this.isInserting.set(true);
-        const reader = new FileReader();
-        reader.onerror = () => {
-          this.errorText.set('Failed to read dropped image.');
-          this.isInserting.set(false);
-        };
-        reader.onload = () => {
-          const dataUrl = String(reader.result ?? '');
-          if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-            this.errorText.set('Unsupported image (use PNG or JPEG).');
-            this.isInserting.set(false);
-            return;
-          }
-          this.cancelInsertWidgetMode();
-          this.pendingImageDataUrl = dataUrl;
-          this.tool.set('image');
-          this.isInserting.set(false);
-          this.redrawOverlay(this.activePageIndex());
-        };
-        reader.readAsDataURL(file);
+        void this.handleDroppedImageFileOnPageStack(pageIndex, file, ev);
         return;
       }
 
@@ -3338,6 +3435,13 @@ export class PdfEditorComponent implements AfterViewInit {
   protected onWidgetToolbarGripPointerDown(pageIndex: number, widgetId: string, ev: PointerEvent) {
     if (this.readonlyMode()) return;
     this.onWidgetHeaderPointerDown(pageIndex, widgetId, ev);
+  }
+
+  protected cancelWidgetSelection(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.selectedWidgetId.set(null);
+    this.activeWidgetOp = null;
   }
 
   protected duplicateWidgetUnified(pageIndex: number, widgetId: string, ev: Event) {
@@ -4181,22 +4285,133 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
-  private cloneEdits(edits: Record<number, PageEdits>) {
-    // Use structuredClone when available; fall back to JSON for plain data.
-    try {
-      return structuredClone(edits);
-    } catch {
-      return JSON.parse(JSON.stringify(edits)) as Record<number, PageEdits>;
+  /**
+   * Deep-clone page edits without `structuredClone` / recursive JSON serializers.
+   * Large pixel payloads (placed images, video data URLs on widgets) made those paths
+   * fragile (stack / heap) during save and history snapshots.
+   */
+  private cloneEdits(edits: Record<number, PageEdits>): Record<number, PageEdits> {
+    const out: Record<number, PageEdits> = {};
+    for (const [k, e] of Object.entries(edits)) {
+      const pi = Number(k);
+      if (!Number.isFinite(pi) || !e) continue;
+      out[pi] = {
+        viewportWidth: e.viewportWidth,
+        viewportHeight: e.viewportHeight,
+        ink: e.ink.map((s) => ({
+          color: s.color,
+          width: s.width,
+          points: s.points.map((p) => ({ x: p.x, y: p.y }))
+        })),
+        text: e.text.map((t) => ({ ...t })),
+        images: e.images.map((im) => ({
+          ...im,
+          crop: im.crop ? { x: im.crop.x, y: im.crop.y, w: im.crop.w, h: im.crop.h } : undefined
+        })),
+        replaces: e.replaces.map((r) => ({ ...r }))
+      };
     }
+    return out;
   }
 
-  private cloneWidgetsByPage(widgetsByPage: Record<number, Widget[]>) {
-    // Keep history snapshots detached from live signal objects.
-    try {
-      return structuredClone(widgetsByPage);
-    } catch {
-      return JSON.parse(JSON.stringify(widgetsByPage)) as Record<number, Widget[]>;
+  private cloneWidgetsByPage(widgetsByPage: Record<number, Widget[]>): Record<number, Widget[]> {
+    const out: Record<number, Widget[]> = {};
+    for (const [k, list] of Object.entries(widgetsByPage)) {
+      const pi = Number(k);
+      if (!Number.isFinite(pi) || !list) continue;
+      out[pi] = list.map((w) => {
+        const next: Widget = { ...w };
+        if (w.imageCrop) {
+          next.imageCrop = { x: w.imageCrop.x, y: w.imageCrop.y, w: w.imageCrop.w, h: w.imageCrop.h };
+        }
+        if (w.table) {
+          next.table = {
+            rows: w.table.rows,
+            cols: w.table.cols,
+            cells: w.table.cells.map((row) => row.slice())
+          };
+        }
+        return next;
+      });
     }
+    return out;
+  }
+
+  /** FNV-1a–style digest for long strings; avoids megabyte `JSON.stringify` of raw media. */
+  private fingerprintHeavyString(s: string | undefined | null, maxInline = 4096): string {
+    if (s == null || s === '') return '';
+    if (s.length <= maxInline) return s;
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return `~h~${s.length}~${(h >>> 0).toString(16)}`;
+  }
+
+  /**
+   * Lightweight document fingerprint for auto-version scheduling (not persisted).
+   * Full `JSON.stringify` of edits + widgets embedded entire video/image data URLs and could
+   * overflow the stack or choke the main thread when saving with video.
+   */
+  private autoVersionSnapshotFingerprint(
+    edits: Record<number, PageEdits>,
+    widgets: Record<number, Widget[]>,
+    furniture: PageFurniture,
+    pageCount: number,
+    fileName: string | null
+  ): string {
+    const fpFurniture = {
+      ...furniture,
+      logo: {
+        ...furniture.logo,
+        url: this.fingerprintHeavyString(furniture.logo.url)
+      }
+    };
+    const fpEdits: Record<number, PageEdits> = {};
+    for (const [k, e] of Object.entries(edits)) {
+      const pi = Number(k);
+      if (!Number.isFinite(pi) || !e) continue;
+      fpEdits[pi] = {
+        viewportWidth: e.viewportWidth,
+        viewportHeight: e.viewportHeight,
+        ink: e.ink,
+        text: e.text.map((t) => ({ ...t, text: this.fingerprintHeavyString(t.text) })),
+        images: e.images.map((im) => ({ ...im, dataUrl: this.fingerprintHeavyString(im.dataUrl) })),
+        replaces: e.replaces.map((r) => ({
+          ...r,
+          oldText: this.fingerprintHeavyString(r.oldText),
+          newText: this.fingerprintHeavyString(r.newText)
+        }))
+      };
+    }
+    const fpWidgets: Record<number, Array<Record<string, unknown>>> = {};
+    for (const [k, list] of Object.entries(widgets)) {
+      const pi = Number(k);
+      if (!Number.isFinite(pi) || !list) continue;
+      fpWidgets[pi] = list.map((w) => ({
+        id: w.id,
+        kind: w.kind,
+        x: w.x,
+        y: w.y,
+        w: w.w,
+        h: w.h,
+        imageSrc: w.imageSrc !== undefined ? this.fingerprintHeavyString(w.imageSrc) : undefined,
+        imageNaturalW: w.imageNaturalW,
+        imageNaturalH: w.imageNaturalH,
+        imageCrop: w.imageCrop,
+        videoSrc: w.videoSrc !== undefined ? this.fingerprintHeavyString(w.videoSrc) : undefined,
+        textValue: w.textValue !== undefined ? this.fingerprintHeavyString(w.textValue) : undefined,
+        signatureSrc: w.signatureSrc !== undefined ? this.fingerprintHeavyString(w.signatureSrc) : undefined,
+        layeredTextValue:
+          w.layeredTextValue !== undefined ? this.fingerprintHeavyString(w.layeredTextValue) : undefined,
+        table: w.table
+          ? {
+              rows: w.table.rows,
+              cols: w.table.cols,
+              cells: w.table.cells.map((row) => row.map((c) => this.fingerprintHeavyString(String(c ?? ''))))
+            }
+          : undefined
+      }));
+    }
+    return JSON.stringify({ edits: fpEdits, widgets: fpWidgets, furniture: fpFurniture, pageCount, fileName });
   }
 
   private createHistorySnapshot(): EditorHistorySnapshot {
@@ -4261,11 +4476,12 @@ export class PdfEditorComponent implements AfterViewInit {
     const widgetsByPage = opts?.widgetsByPage ?? this.widgetsByPage();
     const editsByPage = opts?.edits ?? this.editsByPage();
     const hasFlattenOnlyWidgets = Object.values(widgetsByPage).some((list) =>
-      (list ?? []).some((w) =>
-        w.kind !== 'image' &&
-        w.kind !== 'signature' &&
-        w.kind !== 'video'
-      )
+      (list ?? []).some((w) => {
+        if (w.kind === 'image' || w.kind === 'signature') return false;
+        // Semantic export skips video; flatten so the first frame appears in saved/exported PDFs.
+        if (w.kind === 'video') return !!w.videoSrc;
+        return true;
+      })
     );
     if (hasFlattenOnlyWidgets) return true;
     return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
@@ -4342,9 +4558,15 @@ export class PdfEditorComponent implements AfterViewInit {
     page.drawText(t, { x: x0, y: y0, size: fontPdfSize, font, color: rgb(color01.r, color01.g, color01.b) });
   }
 
-  private buildEditorStateBaseBytes(): Uint8Array {
+  /**
+   * PDF bytes written to the server on Save / overwrite / auto-version.
+   * Must match what Export produces so images, widgets (text/table/video), ink, and replacements persist.
+   */
+  private async buildSavedProposalPdfBytes(): Promise<Uint8Array> {
     if (!this.pdfBytes) throw new Error('PDF not loaded.');
-    return this.clonePdfBytes(this.pdfBytes);
+    return this.exportNeedsFlatten()
+      ? await this.buildFlattenedExportBytes()
+      : await this.buildSemanticExportBytes();
   }
 
   /** Semantic PDF with annotations (pen, text, images, etc.). Not used when `exportNeedsFlatten()`. */
@@ -5129,7 +5351,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isSaving.set(true);
     try {
-      const safeBytes = this.buildEditorStateBaseBytes();
+      const safeBytes = await this.buildSavedProposalPdfBytes();
       const nextName = this.buildVersionName(this.fileName() ?? 'Proposal.pdf');
       const currentWidgets = this.widgetsByPage();
       const currentFurniture = this.pageFurniture();
@@ -5195,7 +5417,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.errorText.set(null);
     this.isSaving.set(true);
     try {
-      const safeBytes = this.buildEditorStateBaseBytes();
+      const safeBytes = await this.buildSavedProposalPdfBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
       await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
       try {
@@ -5334,7 +5556,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.autoVersionSaveInFlight = true;
     this.isAutoVersionSaving.set(true);
     try {
-      const safeBytes = this.buildEditorStateBaseBytes();
+      const safeBytes = await this.buildSavedProposalPdfBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
       await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
       await this.loadProposalVersions(id);
@@ -5657,6 +5879,15 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
   }
 
+  protected cancelPlacedImageSelection(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.selectedPlacedImageId.set(null);
+    this.activePlacedImageOp = null;
+    this.imageCropSession.set(null);
+    this.redrawOverlay(this.activePageIndex());
+  }
+
   protected onPlacedImageToolbarGripPointerDown(ev: PointerEvent) {
     if (this.readonlyMode()) return;
     const sel = this.selectedPlacedImage();
@@ -5798,8 +6029,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected onDetectedEmbeddedImageDragOver(ev: DragEvent) {
-    const selected = this.selectedDetectedPdfMedia();
-    if (!selected || selected.media.kind !== 'image') return;
+    if (!ev.dataTransfer?.types?.includes('Files')) return;
     ev.preventDefault();
     ev.stopPropagation();
     try {
@@ -5810,10 +6040,17 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected async onDetectedEmbeddedImageDrop(ev: DragEvent) {
-    const selected = this.selectedDetectedPdfMedia();
-    if (!selected || selected.media.kind !== 'image') return;
     ev.preventDefault();
     ev.stopPropagation();
+    if (this.readonlyMode()) {
+      this.errorText.set('This document is read-only.');
+      return;
+    }
+    const selected = this.selectedDetectedPdfMedia();
+    if (!selected || selected.media.kind !== 'image') {
+      this.errorText.set('Click the embedded image on the page first, then drop a replacement here.');
+      return;
+    }
     const file = ev.dataTransfer?.files?.[0] ?? null;
     if (!file) return;
     if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
@@ -7820,6 +8057,42 @@ export class PdfEditorComponent implements AfterViewInit {
           this.cdr.markForCheck();
           return;
         }
+
+        const hitDetectedImage = this.hitTestDetectedPdfImageInteractive(pageIndex, p.x, p.y);
+        if (hitDetectedImage) {
+          const { media: hitMedia, part } = hitDetectedImage;
+          this.selectedWidgetId.set(null);
+          this.selectedDetectedPdfMedia.set(null);
+          this.selectedPlacedTextId.set(null);
+          const anno = this.readonlyMode()
+            ? null
+            : this.materializeDetectedPdfImageForEditing(pageIndex, hitMedia);
+          if (anno) {
+            this.selectedPlacedImageId.set(anno.id);
+            (ev.currentTarget as HTMLCanvasElement | null)?.setPointerCapture?.(ev.pointerId);
+            this.activePlacedImageOp = {
+              pageIndex,
+              id: anno.id,
+              pointerId: ev.pointerId,
+              mode: part === 'body' ? 'move' : 'resize',
+              edge: part === 'body' ? null : part,
+              startX: p.x,
+              startY: p.y,
+              orig: { x: anno.x, y: anno.y, w: anno.w, h: anno.h }
+            };
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.redrawOverlay(pageIndex);
+            this.cdr.markForCheck();
+            return;
+          }
+          this.selectedPlacedImageId.set(null);
+          this.selectedDetectedPdfMedia.set({ pageIndex, media: hitMedia });
+          this.focusRightbarInsertPanel();
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
         this.selectedPlacedImageId.set(null);
         this.selectedPlacedTextId.set(null);
         this.imageCropSession.set(null);
@@ -8014,7 +8287,10 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected onOverlayPointerMove(pageIndex: number, ev: PointerEvent) {
-    if (!this.activeInk) return;
+    if (!this.activeInk) {
+      this.updateDetectedPdfImageHover(pageIndex, ev);
+      return;
+    }
     if (this.activeInk.pageIndex !== pageIndex) return;
     if (this.activeInk.pointerId !== ev.pointerId) return;
 
@@ -8030,6 +8306,42 @@ export class PdfEditorComponent implements AfterViewInit {
 
     stroke.points.push(p);
     this.activeInk.lastPoint = p;
+    this.redrawOverlay(pageIndex);
+  }
+
+  protected onOverlayPointerLeave(pageIndex: number) {
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (overlay) overlay.style.cursor = '';
+    if (this.hoveredDetectedPdfImage?.pageIndex === pageIndex) {
+      this.hoveredDetectedPdfImage = null;
+      this.redrawOverlay(pageIndex);
+    }
+  }
+
+  private updateDetectedPdfImageHover(pageIndex: number, ev: PointerEvent) {
+    if (this.tool() === 'pen') return;
+    if (this.tool() === 'image' && this.pendingImageDataUrl) return;
+    const { overlay } = this.getCanvasPair(pageIndex);
+    if (!overlay) return;
+    const p = this.eventToPoint(overlay, ev);
+    const hitPlaced = this.hitTestPlacedImage(pageIndex, p.x, p.y);
+    if (hitPlaced) {
+      overlay.style.cursor = this.cursorForImagePart(hitPlaced.part);
+      if (this.hoveredDetectedPdfImage?.pageIndex === pageIndex) {
+        this.hoveredDetectedPdfImage = null;
+        this.redrawOverlay(pageIndex);
+      }
+      return;
+    }
+    const hit = this.hitTestDetectedPdfImageInteractive(pageIndex, p.x, p.y);
+    overlay.style.cursor = hit ? this.cursorForImagePart(hit.part) : '';
+    const prev = this.hoveredDetectedPdfImage;
+    const changed =
+      prev?.pageIndex !== pageIndex ||
+      prev?.media.id !== hit?.media.id ||
+      prev?.part !== hit?.part;
+    if (!changed) return;
+    this.hoveredDetectedPdfImage = hit ? { pageIndex, media: hit.media, part: hit.part } : null;
     this.redrawOverlay(pageIndex);
   }
 
@@ -8183,6 +8495,18 @@ export class PdfEditorComponent implements AfterViewInit {
     this.activeTextDraftGesture = null;
     this.textDraftFreeRect.set({ w: 320, h: 44 });
     if (pageIndex !== null) this.redrawOverlay(pageIndex);
+  }
+
+  protected deleteTextDraftFromToolbar() {
+    const pageIndex = this.textDraftPageIndex();
+    if (pageIndex === null) return;
+    if (this.textDraftBox) {
+      this.textDraft.set('');
+      if (this.textDraftEditor?.nativeElement) this.textDraftEditor.nativeElement.value = '';
+      this.commitTextDraft();
+      return;
+    }
+    this.cancelTextDraft();
   }
 
   /** Same floating editor + toolbar as clicking the page with the Text tool (placed {@link TextAnno}, not a widget). */
@@ -8818,7 +9142,12 @@ export class PdfEditorComponent implements AfterViewInit {
       if (b.w > 0 && b.h > 0) out.push({ x: b.x, y: b.y, w: b.w, h: b.h });
     }
     for (const r of page?.replaces ?? []) {
-      if (r.w > 0 && r.h > 0) out.push({ x: r.x, y: r.y, w: r.w, h: r.h });
+      if (r.w <= 0 || r.h <= 0) continue;
+      // PDF embedded-image/video erase masks sit under the replacement overlay with the same
+      // bbox; counting them as obstacles blocks resize (esp. south/east) because the grown rect
+      // still intersects the mask.
+      if (r.source === 'mediaErase') continue;
+      out.push({ x: r.x, y: r.y, w: r.w, h: r.h });
     }
     if (exclude?.kind !== 'textDraft') {
       const td = this.getTextDraftObstacleRect(pageIndex);
@@ -9131,11 +9460,63 @@ export class PdfEditorComponent implements AfterViewInit {
     return null;
   }
 
-  private drawPlacedImageChrome(ctx: CanvasRenderingContext2D, anno: ImageAnno) {
-    if (this.selectedPlacedImageId() !== anno.id) return;
+  private hitTestImageRectPart(
+    rect: { x: number; y: number; w: number; h: number },
+    x: number,
+    y: number
+  ): 'body' | PlacedImageEdge | null {
+    const hsz = PdfEditorComponent.placedImageHandleHit;
+    const { x: ix, y: iy, w: iw, h: ih } = rect;
+    if (Math.hypot(x - ix, y - iy) <= hsz) return 'nw';
+    if (Math.hypot(x - (ix + iw), y - iy) <= hsz) return 'ne';
+    if (Math.hypot(x - ix, y - (iy + ih)) <= hsz) return 'sw';
+    if (Math.hypot(x - (ix + iw), y - (iy + ih)) <= hsz) return 'se';
+    if (Math.hypot(x - (ix + iw / 2), y - iy) <= hsz) return 'n';
+    if (Math.hypot(x - (ix + iw / 2), y - (iy + ih)) <= hsz) return 's';
+    if (Math.hypot(x - (ix + iw), y - (iy + ih / 2)) <= hsz) return 'e';
+    if (Math.hypot(x - ix, y - (iy + ih / 2)) <= hsz) return 'w';
+    if (x >= ix && x <= ix + iw && y >= iy && y <= iy + ih) return 'body';
+    return null;
+  }
+
+  private hitTestDetectedPdfImageInteractive(
+    pageIndex: number,
+    x: number,
+    y: number
+  ): { media: DetectedPdfMedia; part: 'body' | PlacedImageEdge } | null {
+    const items = this.detectedMediaByPage()[pageIndex] ?? [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const media = items[i]!;
+      if (media.kind !== 'image') continue;
+      const part = this.hitTestImageRectPart(media, x, y);
+      if (part) return { media, part };
+    }
+    return null;
+  }
+
+  private cursorForImagePart(part: 'body' | PlacedImageEdge): string {
+    switch (part) {
+      case 'n':
+      case 's':
+        return 'ns-resize';
+      case 'e':
+      case 'w':
+        return 'ew-resize';
+      case 'ne':
+      case 'sw':
+        return 'nesw-resize';
+      case 'nw':
+      case 'se':
+        return 'nwse-resize';
+      default:
+        return 'grab';
+    }
+  }
+
+  private drawImageRectChrome(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }) {
     const hs = PdfEditorComponent.placedImageHandlePx;
     const hr = hs / 2 + 0.5;
-    const { x, y, w, h: hh } = anno;
+    const { x, y, w, h: hh } = rect;
     ctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
@@ -9158,6 +9539,11 @@ export class PdfEditorComponent implements AfterViewInit {
     drawDot(x + w / 2, y + hh);
     drawDot(x, y + hh);
     drawDot(x, y + hh / 2);
+  }
+
+  private drawPlacedImageChrome(ctx: CanvasRenderingContext2D, anno: ImageAnno) {
+    if (this.selectedPlacedImageId() !== anno.id) return;
+    this.drawImageRectChrome(ctx, anno);
   }
 
   private redrawAllOverlays() {
@@ -9191,7 +9577,13 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     const edit = this.editsByPage()[pageIndex];
-    if (!edit) return;
+    if (!edit) {
+      const hoveredImage = this.hoveredDetectedPdfImage;
+      if (hoveredImage?.pageIndex === pageIndex) {
+        this.drawImageRectChrome(ctx, hoveredImage.media);
+      }
+      return;
+    }
 
     // Images (before ink + text; selection chrome drawn on top of everything below)
     for (const img of edit.images) {
@@ -9258,6 +9650,11 @@ export class PdfEditorComponent implements AfterViewInit {
     for (const img of edit.images) {
       this.drawPlacedImageChrome(ctx, img);
     }
+
+    const hoveredImage = this.hoveredDetectedPdfImage;
+    if (hoveredImage?.pageIndex === pageIndex) {
+      this.drawImageRectChrome(ctx, hoveredImage.media);
+    }
   }
 
   private applyReplacesToBase(pageIndex: number) {
@@ -9313,7 +9710,7 @@ export class PdfEditorComponent implements AfterViewInit {
    * Map pointer position to PDF.js viewport CSS coordinates (same space as {@link getCssViewportForPdfPage}).
    * Normalizes against the element's laid-out size so browser zoom / subpixel drift does not skew hits vs drawing.
    */
-  private eventToPoint(canvas: HTMLCanvasElement, ev: Pick<PointerEvent, 'clientX' | 'clientY'>): InkPoint {
+  private eventToPoint(canvas: HTMLCanvasElement, ev: { clientX: number; clientY: number }): InkPoint {
     const dpr = window.devicePixelRatio || 1;
     const nominalW = canvas.width / dpr;
     const nominalH = canvas.height / dpr;
@@ -9636,6 +10033,94 @@ export class PdfEditorComponent implements AfterViewInit {
     this.redrawOverlay(pageIndex);
   }
 
+  private mediaEraseReplaceForBox(box: { x: number; y: number; w: number; h: number }): TextReplace {
+    return {
+      x: box.x,
+      y: box.y,
+      w: Math.max(1, box.w),
+      h: Math.max(1, box.h),
+      oldText: '',
+      newText: '',
+      maskMode: 'color',
+      bgColor: '#ffffff',
+      color: '#000000',
+      fontSize: 12,
+      fontStyle: 'regular',
+      fontFamily: 'helvetica',
+      source: 'mediaErase'
+    };
+  }
+
+  private captureBaseCanvasRectAsImage(
+    pageIndex: number,
+    box: { x: number; y: number; w: number; h: number }
+  ): { dataUrl: string; srcW: number; srcH: number } | null {
+    const { base } = this.getCanvasPair(pageIndex);
+    if (!base) return null;
+    const cssW = parseFloat(base.style.width) || base.width;
+    const cssH = parseFloat(base.style.height) || base.height;
+    const sx = base.width / Math.max(1, cssW);
+    const sy = base.height / Math.max(1, cssH);
+    const srcX = clamp(Math.floor(box.x * sx), 0, Math.max(0, base.width - 1));
+    const srcY = clamp(Math.floor(box.y * sy), 0, Math.max(0, base.height - 1));
+    const srcW = clamp(Math.ceil(box.w * sx), 1, Math.max(1, base.width - srcX));
+    const srcH = clamp(Math.ceil(box.h * sy), 1, Math.max(1, base.height - srcY));
+    const tmp = document.createElement('canvas');
+    tmp.width = srcW;
+    tmp.height = srcH;
+    const ctx = tmp.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(base, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+    return { dataUrl: tmp.toDataURL('image/png'), srcW, srcH };
+  }
+
+  private materializeDetectedPdfImageForEditing(pageIndex: number, media: DetectedPdfMedia): ImageAnno | null {
+    if (media.kind !== 'image') return null;
+    const existing = this.findReplacementImageAnnoForDetected(pageIndex, media);
+    if (existing) return existing;
+    const captured = this.captureBaseCanvasRectAsImage(pageIndex, media);
+    if (!captured) return null;
+    const id = this.replacementImageIdForBox(pageIndex, media);
+    const anno: ImageAnno = {
+      id,
+      x: media.x,
+      y: media.y,
+      w: Math.max(1, media.w),
+      h: Math.max(1, media.h),
+      dataUrl: captured.dataUrl,
+      srcW: captured.srcW,
+      srcH: captured.srcH
+    };
+    const erase = this.mediaEraseReplaceForBox(media);
+
+    this.beginHistoryStep();
+    this.editsByPage.update((prev) => {
+      const existingPage = prev[pageIndex] ?? {
+        viewportWidth: 1,
+        viewportHeight: 1,
+        ink: [],
+        text: [],
+        images: [],
+        replaces: []
+      };
+      const images = [...(existingPage.images ?? []).filter((im) => im.id !== id), anno];
+      const replaces = [
+        ...(existingPage.replaces ?? []).filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, erase))),
+        erase
+      ];
+      return {
+        ...prev,
+        [pageIndex]: { ...existingPage, images, replaces }
+      };
+    });
+
+    this.embeddedImageReplacementByDetectedId.set(this.detectedMediaLinkKey(pageIndex, media.id), id);
+    this.dropDetectedMediaEntry(pageIndex, media.id);
+    this.applyReplacesToBase(pageIndex);
+    this.redrawOverlay(pageIndex);
+    return anno;
+  }
+
   private beginEmbeddedMediaReplace(pageIndex: number, m: DetectedPdfMedia) {
     this.embeddedMediaReplaceTarget = {
       pageIndex,
@@ -9665,7 +10150,7 @@ export class PdfEditorComponent implements AfterViewInit {
     const img = await this.loadHtmlImage(dataUrl);
     const natW = Math.max(1, img.naturalWidth);
     const natH = Math.max(1, img.naturalHeight);
-    const target = this.getCappedReplaceRect(box);
+    const target = { x: box.x, y: box.y, w: Math.max(1, box.w), h: Math.max(1, box.h) };
     // Fully cover the detected target region so old background is completely hidden.
     // (Use center-crop from source image when aspect ratios differ.)
     const scale = Math.max(target.w / natW, target.h / natH);
@@ -9691,14 +10176,36 @@ export class PdfEditorComponent implements AfterViewInit {
       srcH: natH,
       crop: { x: cropX, y: cropY, w: srcW, h: srcH }
     };
-    if (this.getImageAnno(pageIndex, id)) {
-      this.beginHistoryStep();
-      this.updatePlacedImage(pageIndex, id, () => anno);
-    } else {
-      this.pushImageAnno(pageIndex, anno);
-    }
+    const erase = this.mediaEraseReplaceForBox(box);
+
+    this.beginHistoryStep();
+    this.editsByPage.update((prev) => {
+      const existing = prev[pageIndex] ?? {
+        viewportWidth: 1,
+        viewportHeight: 1,
+        ink: [],
+        text: [],
+        images: [],
+        replaces: []
+      };
+      const images = [...(existing.images ?? []).filter((im) => im.id !== id), anno];
+      const replaces = [
+        ...(existing.replaces ?? []).filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, erase))),
+        erase
+      ];
+      return {
+        ...prev,
+        [pageIndex]: { ...existing, images, replaces }
+      };
+    });
     this.embeddedImageReplacementByDetectedId.set(this.detectedMediaLinkKey(pageIndex, box.id), id);
+    this.dropDetectedMediaEntry(pageIndex, box.id);
+    const selected = this.selectedDetectedPdfMedia();
+    if (selected && selected.pageIndex === pageIndex && selected.media.id === box.id) {
+      this.selectedDetectedPdfMedia.set(null);
+    }
     this.selectedPlacedImageId.set(id);
+    this.applyReplacesToBase(pageIndex);
     this.redrawOverlay(pageIndex);
   }
 

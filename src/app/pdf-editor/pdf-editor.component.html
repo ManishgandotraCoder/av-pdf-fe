@@ -652,106 +652,6 @@
       <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
-          <button
-            type="button"
-            class="sidebarToggle"
-            [title]="sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
-            (click)="toggleSidebar()"
-            style="padding: 10px; margin-bottom: 10px;"
-          >
-            @if (sidebarCollapsed()) {
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M10 6l6 6-6 6"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            } @else {
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M14 6l-6 6 6 6"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            }
-          </button>
-
-        <div class="keySlots" aria-label="Key page slots">
-          <div class="keySlots__group">
-            @for (slot of fixedKeySlotsForNav; track slot.id; let idx = $index) {
-              <button
-                type="button"
-                class="keySlot"
-                [class.isActive]="activePageIndex() === idx"
-                [disabled]="!isKeySlotPageAvailable(idx)"
-                (click)="setActivePage(idx)"
-              >
-                {{ slot.title }}
-              </button>
-            }
-          </div>
-
-          @if (customKeySlots().length > 0) {
-            <div class="keySlots__divider" aria-hidden="true"></div>
-          }
-
-          <div class="keySlots__custom">
-            @for (slot of customKeySlots(); track slot.id; let i = $index) {
-              <div
-                class="keySlotRow"
-                [class.isActive]="activePageIndex() === fixedKeySlotsForNav.length + i"
-                (click)="setActivePage(fixedKeySlotsForNav.length + i)"
-                (keydown.enter)="setActivePage(fixedKeySlotsForNav.length + i)"
-                role="button"
-                tabindex="0"
-                (dragover)="onCustomKeySlotDragOver($event)"
-                (drop)="onCustomKeySlotDrop(i, $event)"
-              >
-                <button
-                  type="button"
-                  class="keySlot keySlot--custom"
-                  [disabled]="!isKeySlotPageAvailable(fixedKeySlotsForNav.length + i)"
-                  [class.isActive]="activePageIndex() === fixedKeySlotsForNav.length + i"
-                  (click)="setActivePage(fixedKeySlotsForNav.length + i); $event.stopPropagation()"
-                >
-                  {{ slot.title }}
-                </button>
-                <div class="keySlotRow__actions">
-                  <button
-                    type="button"
-                    class="keySlotRow__btn keySlotRow__btn--rename"
-                    title="Rename"
-                    [disabled]="readonlyMode() || isLoading() || isSaving()"
-                    (click)="renameCustomKeySlot(i); $event.stopPropagation()"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    class="keySlotRow__btn keySlotRow__btn--drag"
-                    title="Drag to reorder"
-                    [disabled]="readonlyMode() || isLoading() || isSaving() || customKeySlots().length <= 1"
-                    draggable="true"
-                    (dragstart)="onCustomKeySlotDragStart(i, $event)"
-                    (click)="$event.stopPropagation()"
-                  >
-                    ↕
-                  </button>
-                </div>
-              </div>
-            }
-          </div>
-
-        
-        </div>
 
         <div class="sidebar__scroll">
           <div class="sidebar__list">
@@ -841,6 +741,7 @@
                   #overlayCanvas
                   (pointerdown)="onOverlayPointerDown(activePageIndex(), $event)"
                   (pointermove)="onOverlayPointerMove(activePageIndex(), $event)"
+                  (pointerleave)="onOverlayPointerLeave(activePageIndex())"
                   (pointerup)="onOverlayPointerUp(activePageIndex(), $event)"
                   (pointercancel)="onOverlayPointerUp(activePageIndex(), $event)"
                 ></canvas>
@@ -902,8 +803,8 @@
                             <button
                               type="button"
                               class="textDraftToolbar__btn"
-                              title="Duplicate"
-                              aria-label="Duplicate"
+                              title="Copy"
+                              aria-label="Copy"
                               (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
                               (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
                             >
@@ -911,13 +812,23 @@
                             </button>
                             <button
                               type="button"
+                              class="textDraftToolbar__btn"
+                              title="Cancel selection"
+                              aria-label="Cancel selection"
+                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                              (click)="cancelWidgetSelection($event)"
+                            >
+                              ×
+                            </button>
+                            <button
+                              type="button"
                               class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                              title="Remove"
-                              aria-label="Remove"
+                              title="Delete"
+                              aria-label="Delete"
                               (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
                               (click)="removeWidget(activePageIndex(), w.id); $event.stopPropagation()"
                             >
-                              ×
+                              ⌫
                             </button>
                           </div>
                         </div>
@@ -1184,6 +1095,7 @@
                         class="widgetSelectionToolbar placedImageHudToolbar"
                         [ngStyle]="placedImageToolbarPositionStyle(pImg)"
                         (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
+                        style="padding: 20px;"
                       >
                       <button
                         type="button"
@@ -1198,8 +1110,8 @@
                         <button
                           type="button"
                           class="textDraftToolbar__btn"
-                          title="Duplicate"
-                          aria-label="Duplicate image"
+                          title="Copy"
+                          aria-label="Copy image"
                           (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
                           (click)="duplicateSelectedPlacedImageFromToolbar($event)"
                         >
@@ -1207,13 +1119,23 @@
                         </button>
                         <button
                           type="button"
+                          class="textDraftToolbar__btn"
+                          title="Cancel selection"
+                          aria-label="Cancel image selection"
+                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
+                          (click)="cancelPlacedImageSelection($event)"
+                        >
+                          ×
+                        </button>
+                        <button
+                          type="button"
                           class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                          title="Remove"
-                          aria-label="Remove image"
+                          title="Delete"
+                          aria-label="Delete image"
                           (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
                           (click)="removeSelectedPlacedImage(); $event.stopPropagation()"
                         >
-                          ×
+                          ⌫
                         </button>
                       </div>
                     </div>
@@ -1238,8 +1160,8 @@
                           <button
                             type="button"
                             class="textDraftToolbar__btn"
-                            title="Duplicate"
-                            aria-label="Duplicate text box"
+                            title="Copy"
+                            aria-label="Copy text box"
                             (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
                             (click)="duplicateTextDraft(); $event.stopPropagation()"
                           >
@@ -1247,13 +1169,23 @@
                           </button>
                           <button
                             type="button"
-                            class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                            title="Delete"
-                            aria-label="Delete text box"
+                            class="textDraftToolbar__btn"
+                            title="Cancel"
+                            aria-label="Cancel text editing"
                             (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
                             (click)="cancelTextDraft(); $event.stopPropagation()"
                           >
                             ×
+                          </button>
+                          <button
+                            type="button"
+                            class="textDraftToolbar__btn textDraftToolbar__btn--danger"
+                            title="Delete"
+                            aria-label="Delete text box"
+                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
+                            (click)="deleteTextDraftFromToolbar(); $event.stopPropagation()"
+                          >
+                            ⌫
                           </button>
                         </div>
                       </div>
@@ -1418,25 +1350,31 @@
             }
           </div>
         </header>
-
+        @if (selectedPlacedImage(); as placedImageSel) {
+          <div class="rightbarMediaActions rightbarMediaActions--imageReplaceFocus" role="group" aria-label="Selected placed image actions">
+            <div class="rightbarMediaActions__title">Selected image</div>
+            <div class="rightbarAssetsHint">Type: image (editable overlay)</div>
+            <div class="rightbarMediaActions__row">
+              <button
+                type="button"
+                class="rightbarMediaActions__btn rightbarMediaActions__btn--highlight"
+                (click)="replaceSelectedPlacedImage($event)"
+              >
+                Replace
+              </button>
+              <button type="button" class="rightbarMediaActions__btn" (click)="openImageCrop()">
+                Crop
+              </button>
+              <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedPlacedImage()">
+                Remove
+              </button>
+            </div>
+          </div>
+        }
         <div class="rightbarStudio__body">
         @if (rightbarPrimaryTab() === 'elements' && rightbarTab() === 'options') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel">
             <div class="rightbar__row">
-              <div class="rightbarTextGate" role="group" aria-label="PDF text editing">
-                <span class="rightbarTextGate__label">Text</span>
-                <button
-                  type="button"
-                  class="rightbarTextGate__btn"
-                  [class.rightbarTextGate__btn--on]="textFeatureEnabled()"
-                  (click)="toggleTextFeatureEnabled()"
-                  [attr.aria-pressed]="textFeatureEnabled()"
-                  [disabled]="pageCount() === 0 || isLoading()"
-                  title="Turn PDF text tools on or off"
-                >
-                  {{ textFeatureEnabled() ? 'On' : 'Off' }}
-                </button>
-              </div>
 
               <div class="rightbarStudio__libraryBlock">
                 <button
@@ -1622,7 +1560,7 @@
                   </div>
                 }
               </div>
-
+              
               @if (selectedItemWidget(); as selectedItem) {
                 <div
                   class="rightbarMediaActions"
@@ -1723,7 +1661,7 @@
                       (dragover)="onDetectedEmbeddedImageDragOver($event)"
                       (drop)="onDetectedEmbeddedImageDrop($event)"
                     >
-                      Drag & drop PNG or JPEG here to replace (crop step follows)
+                      Or drop PNG / JPEG on the image on the page. You can also drop here after selecting it.
                     </div>
                   }
                   <div class="rightbarMediaActions__row">
@@ -1747,27 +1685,6 @@
                 </div>
               }
 
-              @if (selectedPlacedImage(); as placedImageSel) {
-                <div class="rightbarMediaActions rightbarMediaActions--imageReplaceFocus" role="group" aria-label="Selected placed image actions">
-                  <div class="rightbarMediaActions__title">Selected image</div>
-                  <div class="rightbarAssetsHint">Type: image (editable overlay)</div>
-                  <div class="rightbarMediaActions__row">
-                    <button
-                      type="button"
-                      class="rightbarMediaActions__btn rightbarMediaActions__btn--highlight"
-                      (click)="replaceSelectedPlacedImage($event)"
-                    >
-                      Replace
-                    </button>
-                    <button type="button" class="rightbarMediaActions__btn" (click)="openImageCrop()">
-                      Crop
-                    </button>
-                    <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedPlacedImage()">
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              }
 
               <div class="rightbarMediaActions" role="group" aria-label="Slide actions">
                 <div class="rightbarMediaActions__title">Slide Actions</div>
