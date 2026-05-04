@@ -3082,6 +3082,13 @@ export class PdfEditorComponent implements AfterViewInit {
     }, 120);
   }
 
+  private cancelEditorStatePersist() {
+    if (this.editorStatePersistTimer !== null) {
+      clearTimeout(this.editorStatePersistTimer);
+      this.editorStatePersistTimer = null;
+    }
+  }
+
   private persistEditorStateNow() {
     const id = this.docId();
     if (!id || this.isLoading()) return;
@@ -4428,6 +4435,89 @@ export class PdfEditorComponent implements AfterViewInit {
     };
   }
 
+  private removeBakedPdfImageEdits(edits: Record<number, PageEdits>): Record<number, PageEdits> {
+    const out: Record<number, PageEdits> = {};
+    for (const [k, e] of Object.entries(edits)) {
+      const pageIndex = Number(k);
+      if (!Number.isFinite(pageIndex) || !e) continue;
+      const images = (e.images ?? []).filter((img) => !this.isBakedPdfImageReplacement(img.id));
+      const replaces = (e.replaces ?? []).filter((r) => r.source !== 'mediaErase');
+      if (
+        (e.ink?.length ?? 0) === 0 &&
+        (e.text?.length ?? 0) === 0 &&
+        images.length === 0 &&
+        replaces.length === 0
+      ) {
+        continue;
+      }
+      out[pageIndex] = { ...e, images, replaces };
+    }
+    return out;
+  }
+
+  private isBakedPdfImageReplacement(id: string): boolean {
+    return id.startsWith('pdfmedia_replace_p');
+  }
+
+  private pdfImageReplacementPageIndex(id: string): number | null {
+    const match = /^pdfmedia_replace_p(\d+)_/.exec(id);
+    if (!match) return null;
+    const pageIndex = Number(match[1]);
+    return Number.isInteger(pageIndex) && pageIndex >= 0 ? pageIndex : null;
+  }
+
+  /**
+   * Replacement overlays are named with their real PDF page. If a delayed callback ever leaves
+   * one in the wrong page bucket, export would draw it on that bucket's page. Normalize before
+   * saving so the baked PDF and the in-memory overlay agree.
+   */
+  private normalizePdfImageReplacementPages(edits: Record<number, PageEdits>): Record<number, PageEdits> {
+    const out = this.cloneEdits(edits);
+
+    for (const [k, page] of Object.entries(edits)) {
+      const sourcePageIndex = Number(k);
+      if (!Number.isFinite(sourcePageIndex) || !page?.images?.length) continue;
+
+      for (const img of page.images) {
+        const targetPageIndex = this.pdfImageReplacementPageIndex(img.id);
+        if (targetPageIndex === null || targetPageIndex === sourcePageIndex) continue;
+
+        const source = out[sourcePageIndex];
+        if (!source) continue;
+        const target =
+          out[targetPageIndex] ??
+          ({
+            viewportWidth: source.viewportWidth,
+            viewportHeight: source.viewportHeight,
+            ink: [],
+            text: [],
+            images: [],
+            replaces: []
+          } satisfies PageEdits);
+
+        const matchingErase = source.replaces.filter(
+          (r) => r.source === 'mediaErase' && this.isSameReplaceRegion(r, img)
+        );
+        source.images = source.images.filter((im) => im.id !== img.id);
+        source.replaces = source.replaces.filter(
+          (r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, img))
+        );
+        target.images = [...target.images.filter((im) => im.id !== img.id), { ...img }];
+        target.replaces = [
+          ...target.replaces.filter((r) => !matchingErase.some((m) => this.isSameReplaceRegion(r, m))),
+          ...matchingErase.map((r) => ({ ...r }))
+        ];
+        out[targetPageIndex] = target;
+      }
+    }
+
+    return out;
+  }
+
+  private editorStateForSavedPdf(): Record<number, PageEdits> {
+    return this.removeBakedPdfImageEdits(this.editsByPage());
+  }
+
   private restoreHistorySnapshot(snapshot: EditorHistorySnapshot) {
     this.editsByPage.set(this.patchTextAnnosMissingIds(this.cloneEdits(snapshot.editsByPage)));
     this.widgetsByPage.set(this.cloneWidgetsByPage(snapshot.widgetsByPage));
@@ -4491,7 +4581,9 @@ export class PdfEditorComponent implements AfterViewInit {
       })
     );
     if (hasFlattenOnlyWidgets) return true;
-    return Object.values(editsByPage).some((e) => (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint'));
+    return Object.values(editsByPage).some((e) =>
+      (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint' || r.source === 'mediaErase')
+    );
   }
 
   /** Map an editor/viewport axis-aligned rect to an axis-aligned box in PDF user space (pdf-lib coordinates). */
@@ -4580,7 +4672,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private async buildSemanticExportBytes(editsOverride?: Record<number, PageEdits>): Promise<Uint8Array> {
     if (!this.pdfBytes) throw new Error('PDF not loaded.');
     this.assertReadablePdfHeader(this.pdfBytes);
-    const edits = editsOverride ?? this.editsByPage();
+    const edits = this.normalizePdfImageReplacementPages(editsOverride ?? this.editsByPage());
     const pdf = await PDFDocument.load(this.clonePdfBytes(this.pdfBytes));
     const fontsByFamily: Record<PdfExportFontFamily, Record<FontStyle, PDFFont>> = {
       helvetica: {
@@ -4856,7 +4948,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.assertReadablePdfHeader(this.pdfBytes);
     const outPdf = await PDFDocument.create();
 
-    const edits = editsOverride ?? this.editsByPage();
+    const edits = this.normalizePdfImageReplacementPages(editsOverride ?? this.editsByPage());
     const widgetsByPage = widgetsOverride ?? this.widgetsByPage();
 
     // Render at higher scale for better quality.
@@ -5372,7 +5464,8 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       // New version gets a new doc id; carry local editor state forward
       // so layers remain editable after navigation/refresh.
-      await this.persistEditorStateForDoc(created.id, this.editsByPage(), currentWidgets);
+      this.cancelEditorStatePersist();
+      await this.persistEditorStateForDoc(created.id, this.editorStateForSavedPdf(), currentWidgets);
       this.persistPageFurnitureForDoc(created.id, currentFurniture);
       if (currentTitle) this.persistTitleForDoc(created.id, currentTitle);
       try {
@@ -5426,7 +5519,8 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const safeBytes = await this.buildSavedProposalPdfBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
-      await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
+      this.cancelEditorStatePersist();
+      await this.persistEditorStateForDoc(id, this.editorStateForSavedPdf(), this.widgetsByPage());
       try {
         await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
       } catch {
@@ -5565,7 +5659,8 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const safeBytes = await this.buildSavedProposalPdfBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
-      await this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
+      this.cancelEditorStatePersist();
+      await this.persistEditorStateForDoc(id, this.editorStateForSavedPdf(), this.widgetsByPage());
       await this.loadProposalVersions(id);
     } catch {
       // Avoid blocking editing flow for auto-version failures.
@@ -5865,10 +5960,17 @@ export class PdfEditorComponent implements AfterViewInit {
   protected selectedPlacedImage(): { pageIndex: number; image: ImageAnno } | null {
     const id = this.selectedPlacedImageId();
     if (!id) return null;
-    const pageIndex = this.activePageIndex();
-    const image = this.getImageAnno(pageIndex, id);
-    if (!image) return null;
-    return { pageIndex, image };
+    const activePageIndex = this.activePageIndex();
+    const activeImage = this.getImageAnno(activePageIndex, id);
+    if (activeImage) return { pageIndex: activePageIndex, image: activeImage };
+
+    for (const [k, e] of Object.entries(this.editsByPage())) {
+      const pageIndex = Number(k);
+      if (!Number.isFinite(pageIndex) || pageIndex === activePageIndex) continue;
+      const image = e?.images?.find((im) => im.id === id);
+      if (image) return { pageIndex, image };
+    }
+    return null;
   }
 
   protected placedImageToolbarPositionStyle(sel: { pageIndex: number; image: ImageAnno }): Record<string, string> {
@@ -9963,8 +10065,8 @@ export class PdfEditorComponent implements AfterViewInit {
     const hRatio = rect.h / pageH;
     const areaRatio = (rect.w * rect.h) / (pageW * pageH);
 
-    // If a detected image nearly covers the page, treat it as background render content.
-    return (wRatio >= 0.95 && hRatio >= 0.95) || areaRatio >= 0.9;
+    // Only ignore true full-page raster backgrounds. Large hero/project images are still editable.
+    return (wRatio >= 0.985 && hRatio >= 0.985) || areaRatio >= 0.975;
   }
 
   private dropDetectedMediaEntry(pageIndex: number, id: string) {
@@ -10936,9 +11038,9 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected openImageCrop() {
-    const id = this.selectedPlacedImageId();
-    if (!id) return;
-    this.openPlacedImageCropSession(this.activePageIndex(), id);
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    this.openPlacedImageCropSession(sel.pageIndex, sel.image.id);
   }
 
   private openPlacedImageCropSession(pageIndex: number, id: string) {
@@ -11099,9 +11201,10 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected removeSelectedPlacedImage() {
-    const id = this.selectedPlacedImageId();
-    if (!id) return;
-    const pageIndex = this.activePageIndex();
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    const { pageIndex, image } = sel;
+    const id = image.id;
     if (this.activePlacedImageOp?.pageIndex === pageIndex && this.activePlacedImageOp.id === id) {
       this.activePlacedImageOp = null;
     }
@@ -11564,6 +11667,18 @@ export class PdfEditorComponent implements AfterViewInit {
     for (const [k, edit] of Object.entries(raw ?? {})) {
       const pageIndex = Number(k);
       if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pageCount || !edit) continue;
+      const replaces = Array.isArray(edit.replaces)
+        ? edit.replaces.map((r) =>
+            r?.source === 'textEdit' ? { ...r, maskMode: 'color' as const, bgColor: '#ffffff' } : r
+          )
+        : [];
+      const images = Array.isArray(edit.images)
+        ? edit.images.filter(
+            (img) =>
+              !this.isBakedPdfImageReplacement(img.id) ||
+              replaces.some((r) => r.source === 'mediaErase' && this.isSameReplaceRegion(r, img))
+          )
+        : [];
       out[pageIndex] = {
         viewportWidth: Number.isFinite(edit.viewportWidth) ? edit.viewportWidth : 1,
         viewportHeight: Number.isFinite(edit.viewportHeight) ? edit.viewportHeight : 1,
@@ -11575,12 +11690,8 @@ export class PdfEditorComponent implements AfterViewInit {
               : { ...(t as TextAnno), id: `txt_${pageIndex}_${i}_${Math.random().toString(16).slice(2, 10)}` }
           )
           : [],
-        images: Array.isArray(edit.images) ? edit.images : [],
-        replaces: Array.isArray(edit.replaces)
-          ? edit.replaces.map((r) =>
-            r?.source === 'textEdit' ? { ...r, maskMode: 'color' as const, bgColor: '#ffffff' } : r
-          )
-          : []
+        images,
+        replaces
       };
     }
     return out;
