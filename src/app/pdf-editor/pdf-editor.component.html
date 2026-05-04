@@ -893,11 +893,16 @@
                         </button>
                       </div>
                     }
-                    <div class="textDraft__frame" [ngStyle]="textDraftFrameStyle()">
+                    <div
+                      class="textDraft__frame"
+                      [class.textDraft__frame--existingPdfText]="isEditingExistingPdfText()"
+                      [ngStyle]="textDraftFrameStyle()"
+                    >
                       <textarea
                         #textDraftEditor
                         class="textDraft__textarea"
                         [(ngModel)]="textDraft"
+                        [attr.wrap]="isEditingExistingPdfText() ? 'off' : null"
                         placeholder="Type…"
                         (keydown)="onTextDraftKeydown($event)"
                         (keydown.escape)="cancelTextDraft()"

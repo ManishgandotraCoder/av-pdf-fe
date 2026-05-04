@@ -616,7 +616,7 @@ function inferFontFamilyFromPdfJsStyle(raw: any): FontFamily {
   if (combined.includes('arial')) return 'arial';
   if (combined.includes('courier')) return 'courier';
   if (combined.includes('times')) return 'times';
-  if (combined.includes('serif') || combined.includes('roman')) return 'times';
+  if (/\bserif\b/.test(combined)) return 'times';
   if (combined.includes('mono')) return 'courier';
   return 'helvetica';
 }
@@ -1098,6 +1098,10 @@ export class PdfEditorComponent implements AfterViewInit {
     | null = null;
   /** When adding new overlay text (no mask box), layout size for the in-page editor. */
   private readonly textDraftFreeRect = signal<{ w: number; h: number }>({ w: 320, h: 44 });
+
+  protected isEditingExistingPdfText(): boolean {
+    return this.textDraftBox !== null;
+  }
 
   /**
    * Slightly shrink the page preview when inline edit controls are surfaced in the right sidebar
