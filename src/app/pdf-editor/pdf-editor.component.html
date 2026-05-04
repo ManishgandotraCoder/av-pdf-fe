@@ -90,58 +90,6 @@
     </div>
   }
 
-  @if (imageUploadCropModal(); as crop) {
-    <div class="deleteSlideModal" (click)="cancelImageUploadCrop($event)">
-      <div class="deleteSlideModal__backdrop" aria-hidden="true"></div>
-      <div
-        class="deleteSlideModal__panel imageUploadCropModal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="imageUploadCropTitle"
-        (click)="$event.stopPropagation()"
-      >
-        <h2 id="imageUploadCropTitle" class="deleteSlideModal__title">Crop image</h2>
-        <div class="imageUploadCropModal__preview imageUploadCropModal__surface" #uploadCropSurface>
-          <img [src]="crop.dataUrl" alt="Crop preview" />
-          <div class="imageUploadCropModal__mask"></div>
-          <div class="imageUploadCropModal__box" [ngStyle]="uploadCropBoxStyle()">
-            <button
-              type="button"
-              class="imageUploadCropModal__handle imageUploadCropModal__handle--tl"
-              (pointerdown)="onUploadCropHandlePointerDown('tl', $event)"
-              aria-label="Resize crop top left"
-            ></button>
-            <button
-              type="button"
-              class="imageUploadCropModal__handle imageUploadCropModal__handle--tr"
-              (pointerdown)="onUploadCropHandlePointerDown('tr', $event)"
-              aria-label="Resize crop top right"
-            ></button>
-            <button
-              type="button"
-              class="imageUploadCropModal__handle imageUploadCropModal__handle--bl"
-              (pointerdown)="onUploadCropHandlePointerDown('bl', $event)"
-              aria-label="Resize crop bottom left"
-            ></button>
-            <button
-              type="button"
-              class="imageUploadCropModal__handle imageUploadCropModal__handle--br"
-              (pointerdown)="onUploadCropHandlePointerDown('br', $event)"
-              aria-label="Resize crop bottom right"
-            ></button>
-          </div>
-        </div>
-        <div class="deleteSlideModal__actions">
-          <button type="button" class="deleteSlideModal__btn deleteSlideModal__btn--muted" (click)="cancelImageUploadCrop($event)">
-            Cancel
-          </button>
-          <button type="button" class="deleteSlideModal__btn" (click)="applyImageUploadCrop($event)">
-            Apply crop
-          </button>
-        </div>
-      </div>
-    </div>
-  }
 
   @if (sharePanelOpen()) {
     <div class="shareDrawer" (click)="closeSharePanel()">
@@ -496,11 +444,7 @@
             <button class="toolIcon" type="button" [title]="it.title" [disabled]="it.disabled?.() ?? false">
               <label class="toolIconLabel">
                 <input class="file" type="file" [accept]="it.accept" (change)="it.onChange($event)" />
-                @switch (it.icon) {
-                  @case ('image') {
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                  }
-                }
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M17 3v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               </label>
             </button>
           }
@@ -513,65 +457,7 @@
     <div class="errorToast" role="alert" aria-live="polite">{{ errorText() }}</div>
   }
 
-  @if (imageCropSession(); as ic) {
-    <div class="imageCropBar" role="region" aria-label="Image crop">
-      <span class="imageCropBar__label">
-        @if (ic.mode === 'placed') {
-          Crop placed image
-        } @else {
-          Crop image widget
-        }
-      </span>
-      <div class="imageCropBar__row">
-        <span>Left</span>
-        <input
-          type="range"
-          min="0"
-          max="49"
-          step="0.5"
-          [ngModel]="ic.leftPct"
-          (ngModelChange)="patchImageCropField('leftPct', $event)"
-        />
-      </div>
-      <div class="imageCropBar__row">
-        <span>Top</span>
-        <input
-          type="range"
-          min="0"
-          max="49"
-          step="0.5"
-          [ngModel]="ic.topPct"
-          (ngModelChange)="patchImageCropField('topPct', $event)"
-        />
-      </div>
-      <div class="imageCropBar__row">
-        <span>Right</span>
-        <input
-          type="range"
-          min="0"
-          max="49"
-          step="0.5"
-          [ngModel]="ic.rightPct"
-          (ngModelChange)="patchImageCropField('rightPct', $event)"
-        />
-      </div>
-      <div class="imageCropBar__row">
-        <span>Bottom</span>
-        <input
-          type="range"
-          min="0"
-          max="49"
-          step="0.5"
-          [ngModel]="ic.bottomPct"
-          (ngModelChange)="patchImageCropField('bottomPct', $event)"
-        />
-      </div>
-      <button type="button" class="placedImageTools__btn" (click)="applyImageCrop()">Apply crop</button>
-      <button type="button" class="placedImageTools__btn" (click)="cancelImageCrop()">Cancel</button>
-    </div>
-  }
-
-  @if ((isLoading() || isInserting() || isImagePlacing()) && !imageUploadCropModal()) {
+  @if (isLoading() || isInserting()) {
     <div class="busyOverlay" role="status" aria-live="polite" aria-busy="true">
       <div class="busyOverlay__panel">
         <div class="busySpinner" aria-hidden="true"></div>
@@ -617,38 +503,6 @@
       class="workspaceWrap"
       [class.isSidebarCollapsed]="sidebarCollapsed()"
     >
-      <input
-        #pdfImageFile
-        class="file"
-        type="file"
-        accept="image/png,image/jpeg"
-        (change)="onPickImageFile($event)"
-        hidden
-      />
-      <input
-        #widgetImageFile
-        class="file"
-        type="file"
-        accept="image/png,image/jpeg"
-        (change)="onWidgetInsertImagePicked($event)"
-        hidden
-      />
-      <input
-        #widgetVideoFile
-        class="file"
-        type="file"
-        accept="video/*"
-        (change)="onWidgetInsertVideoPicked($event)"
-        hidden
-      />
-      <input
-        #widgetSignatureFile
-        class="file"
-        type="file"
-        accept="image/png,image/jpeg"
-        (change)="onSignatureFilePicked($event)"
-        hidden
-      />
       <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
@@ -780,7 +634,6 @@
                       [class.isSelected]="selectedWidgetId() === w.id"
                       [class.widget--unifiedSelection]="isUnifiedSelectionWidgetKind(w.kind)"
                       [class.widget--table]="w.kind === 'table'"
-                      [class.widget--image]="w.kind === 'image'"
                       [class.widget--text]="w.kind === 'text'"
                       [ngStyle]="{ left: w.x + 'px', top: w.y + 'px', width: w.w + 'px', height: w.h + 'px' }"
                       (pointerdown)="onWidgetPointerDown(activePageIndex(), w.id, $event)"
@@ -800,18 +653,16 @@
                             <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                           </button>
                           <div class="textDraftToolbar__actions">
-                            @if (w.kind !== 'image' && w.kind !== 'video') {
-                              <button
-                                type="button"
-                                class="textDraftToolbar__btn"
-                                title="Duplicate"
-                                aria-label="Duplicate"
-                                (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
-                                (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
-                              >
-                                ⧉
-                              </button>
-                            }
+                            <button
+                              type="button"
+                              class="textDraftToolbar__btn"
+                              title="Duplicate"
+                              aria-label="Duplicate"
+                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
+                              (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
+                            >
+                              ⧉
+                            </button>
                             <button
                               type="button"
                               class="textDraftToolbar__btn"
@@ -844,12 +695,7 @@
                         <div class="widget__icon" [title]="w.kind">
                           @switch (w.kind) {
                             @case ('table') { <span class="widget__iconText">T</span> }
-                            @case ('image') { <span class="widget__iconText">I</span> }
                             @case ('text') { <span class="widget__iconText">Tx</span> }
-                            @case ('video') { <span class="widget__iconText">V</span> }
-                            @case ('signature') { <span class="widget__iconText">S</span> }
-                            @case ('textOverImage') { <span class="widget__iconText">T/I</span> }
-                            @case ('imageBackgroundText') { <span class="widget__iconText">I/T</span> }
                           }
                         </div>
 
@@ -914,19 +760,6 @@
                               }
                             </div>
                           }
-                          @case ('image') {
-                            @if (w.imageSrc) {
-                              @if (w.imageCrop && w.imageNaturalW && w.imageNaturalH) {
-                                <div class="widget__imageCropWrap" [ngStyle]="widgetImageCropWrapStyle(w)">
-                                  <img [src]="w.imageSrc" alt="" draggable="false" [ngStyle]="widgetImageCropImgStyle(w)" />
-                                </div>
-                              } @else {
-                                <img class="widget__media" [src]="w.imageSrc" alt="" draggable="false" />
-                              }
-                            } @else {
-                              <div class="widget__label">Image</div>
-                            }
-                          }
                           @case ('text') {
                             @if (editingWidgetId() === w.id) {
                               <textarea
@@ -962,92 +795,6 @@
                                 <span class="widget__labelBtn widget__textAddBtn" aria-hidden="true">+ Add text</span>
                               </div>
                             }
-                          }
-                          @case ('video') {
-                            @if (w.videoSrc) {
-                              @if (parseWidgetVideo(w.videoSrc); as parsedVideo) {
-                                @if (parsedVideo.kind === 'youtube' || parsedVideo.kind === 'vimeo' || parsedVideo.kind === 'twitch') {
-                                  <iframe
-                                    class="widget__media widget__mediaIframe"
-                                    [src]="parsedVideo.embedSrc | safeVideoUrl"
-                                    title="Embedded video"
-                                    loading="lazy"
-                                    referrerpolicy="strict-origin-when-cross-origin"
-                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                    allowfullscreen
-                                  ></iframe>
-                                } @else {
-                                  <video class="widget__media" [src]="parsedVideo.embedSrc" controls playsinline preload="metadata" draggable="false"></video>
-                                }
-                              } @else {
-                                <video class="widget__media" [src]="w.videoSrc" controls playsinline preload="metadata" draggable="false"></video>
-                              }
-                            } @else {
-                              <div class="widget__label">Video</div>
-                            }
-                          }
-                          @case ('signature') {
-                            @if (w.signatureSrc) {
-                              <img class="widget__media" [src]="w.signatureSrc" alt="" draggable="false" />
-                            } @else {
-                              <button type="button" class="widget__labelBtn" (click)="beginSignaturePickForWidget(w.id, $event)">
-                                Upload signature
-                              </button>
-                            }
-                          }
-                          @case ('textOverImage') {
-                            <div class="widget__layered widget__layered--textOverImage">
-                              @if (w.imageSrc) {
-                                <img class="widget__media widget__layeredMedia" [src]="w.imageSrc" alt="" draggable="false" />
-                              } @else {
-                                <div class="widget__label">Add image to start</div>
-                              }
-                              <button type="button" class="widget__layeredPickBtn" (click)="beginLayeredImagePickForWidget(w.id, $event)">
-                                {{ w.imageSrc ? 'Replace image' : 'Pick image' }}
-                              </button>
-                              @if (editingWidgetId() === w.id) {
-                                <textarea
-                                  class="widget__layeredText widget__editor"
-                                  [ngModel]="w.layeredTextValue ?? ''"
-                                  (ngModelChange)="updateLayeredTextWidget(activePageIndex(), w.id, $event)"
-                                  placeholder="Type overlay text..."
-                                  (pointerdown)="$event.stopPropagation()"
-                                  (keydown.escape)="onLayeredTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
-                                  (keydown.enter)="onLayeredTextWidgetEditorEnter(activePageIndex(), w.id, $event)"
-                                  (blur)="onLayeredTextWidgetEditorBlur(activePageIndex(), w.id, $event)"
-                                  autofocus
-                                ></textarea>
-                              } @else {
-                                <button type="button" class="widget__labelBtn" (click)="startEditingWidget(w.id, $event)">Edit text</button>
-                              }
-                            </div>
-                          }
-                          @case ('imageBackgroundText') {
-                            <div class="widget__layered widget__layered--imageBackgroundText">
-                              @if (w.imageSrc) {
-                                <img class="widget__media widget__layeredMedia" [src]="w.imageSrc" alt="" draggable="false" />
-                              } @else {
-                                <div class="widget__label">Add background image</div>
-                              }
-                              <button type="button" class="widget__layeredPickBtn" (click)="beginLayeredImagePickForWidget(w.id, $event)">
-                                {{ w.imageSrc ? 'Replace image' : 'Pick image' }}
-                              </button>
-                              @if (editingWidgetId() === w.id) {
-                                <textarea
-                                  class="widget__layeredText widget__editor"
-                                  [ngModel]="w.layeredTextValue ?? ''"
-                                  (ngModelChange)="updateLayeredTextWidget(activePageIndex(), w.id, $event)"
-                                  placeholder="Type text content..."
-                                  (pointerdown)="$event.stopPropagation()"
-                                  (keydown.escape)="onLayeredTextWidgetEditorEscape(activePageIndex(), w.id, $event)"
-                                  (keydown.enter)="onLayeredTextWidgetEditorEnter(activePageIndex(), w.id, $event)"
-                                  (blur)="onLayeredTextWidgetEditorBlur(activePageIndex(), w.id, $event)"
-                                  autofocus
-                                ></textarea>
-                              } @else {
-                                <button type="button" class="widget__labelBtn" (click)="startEditingWidget(w.id, $event)">Edit text</button>
-                              }
-                            </div>
                           }
                         }
                       </div>
@@ -1090,60 +837,6 @@
                   }
                 </div>
 
-                <div class="pageHudLayer">
-                  @if (selectedPlacedImage(); as pImg) {
-                    @if (pImg.pageIndex === activePageIndex() && !readonlyMode()) {
-                      <div
-                        class="widgetSelectionToolbar placedImageHudToolbar"
-                        [ngStyle]="placedImageToolbarPositionStyle(pImg)"
-                        (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                        style="padding: 20px;"
-                      >
-                      <button
-                        type="button"
-                        class="textDraftToolbar__grip"
-                        title="Drag to move"
-                        aria-label="Drag to move image"
-                        (pointerdown)="onPlacedImageToolbarGripPointerDown($event)"
-                      >
-                        <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
-                      </button>
-                      <div class="textDraftToolbar__actions">
-                        <button
-                          type="button"
-                          class="textDraftToolbar__btn"
-                          title="Replace image"
-                          aria-label="Replace image"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="replaceSelectedPlacedImage($event)"
-                        >
-                          ↻
-                        </button>
-                        <button
-                          type="button"
-                          class="textDraftToolbar__btn"
-                          title="Cancel selection"
-                          aria-label="Cancel image selection"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="cancelPlacedImageSelection($event)"
-                        >
-                          ×
-                        </button>
-                        <button
-                          type="button"
-                          class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                          title="Delete"
-                          aria-label="Delete image"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="removeSelectedPlacedImage(); $event.stopPropagation()"
-                        >
-                          ⌫
-                        </button>
-                      </div>
-                    </div>
-                    }
-                  }
-                </div>
 
                 @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
                   <div class="textDraft" [ngStyle]="textDraftShellStyle()">
@@ -1352,27 +1045,6 @@
             }
           </div>
         </header>
-        @if (selectedPlacedImage(); as placedImageSel) {
-          <div class="rightbarMediaActions rightbarMediaActions--imageReplaceFocus" role="group" aria-label="Selected placed image actions">
-            <div class="rightbarMediaActions__title">Selected image</div>
-            <div class="rightbarAssetsHint">Type: image (editable overlay)</div>
-            <div class="rightbarMediaActions__row">
-              <button
-                type="button"
-                class="rightbarMediaActions__btn rightbarMediaActions__btn--highlight"
-                (click)="replaceSelectedPlacedImage($event)"
-              >
-                Replace
-              </button>
-              <button type="button" class="rightbarMediaActions__btn" (click)="openImageCrop()">
-                Crop
-              </button>
-              <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedPlacedImage()">
-                Remove
-              </button>
-            </div>
-          </div>
-        }
         <div class="rightbarStudio__body">
         @if (rightbarPrimaryTab() === 'elements' && rightbarTab() === 'options') {
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel">
@@ -1415,51 +1087,6 @@
                         type="button"
                         class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
                         draggable="true"
-                        title="Insert image"
-                        (dragstart)="onPdfImageDragStart($event)"
-                        (click)="onInsertWidgetClick('image', $event)"
-                        [disabled]="pageCount() === 0 || isLoading()"
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                          <path d="M8 14l2-2 4 4 2-2 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
-                          <path d="M10 9a1.5 1.5 0 1 0 0 .01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                        </svg>
-                        <span class="rightbar__iconLabel">Image</span>
-                      </button>
-
-                      <div class="insertSourceMenu rightbarStudio__cell">
-                        <button
-                          type="button"
-                          class="rightbar__icon rightbar__iconLabeled"
-                          draggable="true"
-                          title="Insert video"
-                          (dragstart)="onPdfVideoDragStart($event)"
-                          (click)="toggleInsertSourceMenu('video', $event)"
-                          [disabled]="pageCount() === 0 || isLoading()"
-                        >
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 7h11v10H4z" fill="none" stroke="currentColor" stroke-width="2" />
-                            <path d="M15 10l5-3v10l-5-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
-                          </svg>
-                          <span class="rightbar__iconLabel">Video</span>
-                        </button>
-                        @if (insertSourceMenu() === 'video') {
-                          <div class="insertSourceMenu__panel" role="menu">
-                            <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'url', $event)">
-                              URL
-                            </button>
-                            <button type="button" class="insertSourceMenu__item" role="menuitem" (click)="pickInsertSource('video', 'upload', $event)">
-                              Upload
-                            </button>
-                          </div>
-                        }
-                      </div>
-
-                      <button
-                        type="button"
-                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
-                        draggable="true"
                         title="Insert text (same editor as PDF text)"
                         (dragstart)="onWidgetDragStart('text', $event)"
                         (click)="onInsertWidgetClick('text', $event)"
@@ -1491,74 +1118,6 @@
                   }
                 </section>
 
-                <section class="rightbarStudio__section">
-                  <button
-                    type="button"
-                    class="rightbarStudio__sectionHead"
-                    [attr.aria-expanded]="!rightbarLayoutCollapsed()"
-                    (click)="toggleRightbarSection('layout')"
-                  >
-                    <span class="rightbarStudio__sectionTitle">Layout elements</span>
-                    <span class="rightbarStudio__sectionChevron" [class.rightbarStudio__sectionChevron--collapsed]="rightbarLayoutCollapsed()">▾</span>
-                  </button>
-                  @if (!rightbarLayoutCollapsed()) {
-                    <div class="rightbarStudio__grid rightbarStudio__grid--narrow" aria-label="Layout elements">
-                      <button
-                        type="button"
-                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
-                        draggable="true"
-                        title="Insert text over image"
-                        (dragstart)="onWidgetDragStart('textOverImage', $event)"
-                        (click)="onInsertWidgetClick('textOverImage', $event)"
-                        [disabled]="pageCount() === 0 || isLoading()"
-                      >
-                        <span class="rightbar__iconTextLite">T/I</span>
-                        <span class="rightbar__iconLabel">Text over image</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
-                        draggable="true"
-                        title="Insert image as background of text"
-                        (dragstart)="onWidgetDragStart('imageBackgroundText', $event)"
-                        (click)="onInsertWidgetClick('imageBackgroundText', $event)"
-                        [disabled]="pageCount() === 0 || isLoading()"
-                      >
-                        <span class="rightbar__iconTextLite">I/T</span>
-                        <span class="rightbar__iconLabel">Image behind text</span>
-                      </button>
-                    </div>
-                  }
-                </section>
-
-                <section class="rightbarStudio__section">
-                  <button
-                    type="button"
-                    class="rightbarStudio__sectionHead"
-                    [attr.aria-expanded]="!rightbarBaseCollapsed()"
-                    (click)="toggleRightbarSection('base')"
-                  >
-                    <span class="rightbarStudio__sectionTitle">Base elements</span>
-                    <span class="rightbarStudio__sectionChevron" [class.rightbarStudio__sectionChevron--collapsed]="rightbarBaseCollapsed()">▾</span>
-                  </button>
-                  @if (!rightbarBaseCollapsed()) {
-                    <div class="rightbarStudio__grid" aria-label="Base elements">
-                      <button
-                        type="button"
-                        class="rightbar__icon rightbar__iconLabeled rightbarStudio__cell"
-                        draggable="true"
-                        title="Insert signature"
-                        (dragstart)="onWidgetDragStart('signature', $event)"
-                        (click)="onInsertWidgetClick('signature', $event)"
-                        [disabled]="pageCount() === 0 || isLoading()"
-                      >
-                        <span class="rightbar__iconTextLite">S</span>
-                        <span class="rightbar__iconLabel">Signature</span>
-                      </button>
-                    </div>
-                  }
-                </section>
                   </div>
                 }
               </div>
@@ -1566,7 +1125,6 @@
               @if (selectedItemWidget(); as selectedItem) {
                 <div
                   class="rightbarMediaActions"
-                  [class.rightbarMediaActions--imageReplaceFocus]="selectedItem.widget.kind === 'image'"
                   role="group"
                   aria-label="Selected media actions"
                 >
@@ -1576,9 +1134,6 @@
                   <div class="rightbarAssetsHint">
                     Type: {{ selectedItem.widget.kind }}
                   </div>
-                  @if (selectedItem.widget.kind === 'video' && selectedVideoSourceDisplay()) {
-                    <div class="rightbarAssetsHint">Source: {{ selectedVideoSourceDisplay() }}</div>
-                  }
                   <div class="rightbarAssetsHint">
                     Overlapping widgets: send backward or bring forward to change which one is on top.
                   </div>
@@ -1602,85 +1157,8 @@
                       Bring forward
                     </button>
                   </div>
-                  @if (selectedItem.widget.kind === 'textOverImage' || selectedItem.widget.kind === 'imageBackgroundText') {
-                    <div class="rightbarAssetsHint">Text + image block style</div>
-                    <div class="rightbarMediaActions__row">
-                      <button
-                        type="button"
-                        class="rightbarMediaActions__btn"
-                        [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'textOverImage'"
-                        (click)="setSelectedLayeredWidgetKind('textOverImage', $event)"
-                      >
-                        Text over image
-                      </button>
-                      <button
-                        type="button"
-                        class="rightbarMediaActions__btn"
-                        [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'imageBackgroundText'"
-                        (click)="setSelectedLayeredWidgetKind('imageBackgroundText', $event)"
-                      >
-                        Image behind text
-                      </button>
-                    </div>
-                  }
                   <div class="rightbarMediaActions__row">
-                    <button
-                      type="button"
-                      class="rightbarMediaActions__btn"
-                      [class.rightbarMediaActions__btn--highlight]="selectedItem.widget.kind === 'image'"
-                      [disabled]="!canReplaceSelectedWidget()"
-                      (click)="replaceSelectedWidget($event)"
-                    >
-                      Replace
-                    </button>
-                    @if (selectedItem.widget.kind === 'image' && selectedItem.widget.imageSrc) {
-                      <button type="button" class="rightbarMediaActions__btn" (click)="openSelectedWidgetImageCrop($event)">
-                        Crop
-                      </button>
-                    }
                     <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedWidget($event)">
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              }
-
-              @if (selectedDetectedMediaItem(); as selectedDetected) {
-                <div
-                  class="rightbarMediaActions"
-                  [class.rightbarMediaActions--imageReplaceFocus]="selectedDetected.media.kind === 'image'"
-                  role="group"
-                  aria-label="Detected media actions"
-                >
-                  <div class="rightbarMediaActions__title">{{ selectedDetectedMediaTitle() }}</div>
-                  <div class="rightbarAssetsHint">Type: {{ selectedDetected.media.kind }} (embedded in PDF)</div>
-                  @if (selectedDetected.media.kind === 'image') {
-                    <div class="rightbarAssetsHint">
-                      Crop adjusts your replacement image after Replace (not the original PDF bitmap).
-                    </div>
-                    <div
-                      class="rightbarDetectedImageDrop"
-                      (dragover)="onDetectedEmbeddedImageDragOver($event)"
-                      (drop)="onDetectedEmbeddedImageDrop($event)"
-                    >
-                      Or drop PNG / JPEG on the image on the page. You can also drop here after selecting it.
-                    </div>
-                  }
-                  <div class="rightbarMediaActions__row">
-                    <button
-                      type="button"
-                      class="rightbarMediaActions__btn"
-                      [class.rightbarMediaActions__btn--highlight]="selectedDetected.media.kind === 'image'"
-                      (click)="replaceSelectedDetectedMedia($event)"
-                    >
-                      {{ selectedDetected.media.kind === 'image' ? 'Replace' : 'Update' }}
-                    </button>
-                    @if (selectedDetected.media.kind === 'image') {
-                      <button type="button" class="rightbarMediaActions__btn" (click)="cropSelectedDetectedEmbeddedImage($event)">
-                        Crop
-                      </button>
-                    }
-                    <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedDetectedMedia($event)">
                       Remove
                     </button>
                   </div>
@@ -1885,7 +1363,7 @@
             } @else if (!assetLibraryLoading() && !assetLibraryError()) {
               <p class="rightbarAssetsHint">
                 @if (!crmLibraryConfigured() && reusableAssets().length === 0) {
-                  No assets yet. Add images or videos from Elements, or connect your CRM (set CRM_API_BASE_URL on the
+                  No assets yet. Add template previews from Elements, or connect your CRM (set CRM_API_BASE_URL on the
                   editor backend) to load shared library items.
                 } @else if (!crmLibraryConfigured() && reusableAssets().length > 0) {
                   No saved uploads match this search.

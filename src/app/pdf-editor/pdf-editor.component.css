@@ -634,54 +634,6 @@
   border-bottom-color: rgba(255, 45, 85, 0.25);
 }
 
-.placedImageTools,
-.imageCropBar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 14px;
-  padding: 8px 16px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
-  background: linear-gradient(180deg, rgba(238, 242, 255, 0.95), rgba(248, 250, 252, 0.92));
-}
-
-.placedImageTools__label,
-.imageCropBar__label {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(15, 23, 42, 0.55);
-  margin-right: 4px;
-}
-
-.placedImageTools__btn {
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 8px;
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  background: #fff;
-  color: #4338ca;
-  cursor: pointer;
-}
-
-.placedImageTools__btn:hover {
-  background: rgba(99, 102, 241, 0.08);
-}
-
-.imageCropBar__row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.75);
-  min-width: 140px;
-}
-
-.imageCropBar__row input[type='range'] {
-  width: 120px;
-  accent-color: #6366f1;
-}
-
 .empty {
   display: grid;
   place-items: center;
@@ -1338,11 +1290,6 @@
   background: rgba(255, 255, 255, 0.88);
 }
 
-.rightbarMediaActions--imageReplaceFocus {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
-}
-
 .rightbarMediaActions__title {
   font-size: 12px;
   font-weight: 700;
@@ -1386,19 +1333,6 @@
 .rightbarMediaActions__btnDanger {
   border-color: rgba(220, 38, 38, 0.32);
   color: rgba(153, 27, 27, 0.95);
-}
-
-.rightbarDetectedImageDrop {
-  margin-top: 8px;
-  padding: 10px 10px;
-  border-radius: 8px;
-  border: 1px dashed rgba(37, 99, 235, 0.45);
-  background: rgba(219, 234, 254, 0.35);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: rgba(30, 64, 175, 0.92);
-  text-align: center;
 }
 
 .rightbarTextGate {
@@ -2040,14 +1974,6 @@
   z-index: 18;
 }
 
-/* Video / iframe / image capture pointer events; disable while selected so handles + drag work. */
-.widget--unifiedSelection.isSelected.widget--image .widget__media,
-.widget--unifiedSelection.isSelected.widget--image .widget__imageCropWrap img,
-.widget--unifiedSelection.isSelected .widget__mediaIframe,
-.widget--unifiedSelection.isSelected video.widget__media {
-  pointer-events: none;
-}
-
 .widget--unifiedSelection.isSelected .widget__resize--nw {
   left: 0;
   top: 0;
@@ -2555,19 +2481,6 @@
   border-radius: 12px;
 }
 
-/* DOM HUD above overlay + widgets (placed-image toolbar). */
-.pageHudLayer {
-  position: absolute;
-  inset: 0;
-  z-index: 11;
-  pointer-events: none;
-  overflow: visible;
-}
-
-.placedImageHudToolbar {
-  pointer-events: auto;
-}
-
 .pageFurnitureLayer {
   position: absolute;
   inset: 0;
@@ -2880,147 +2793,6 @@
   border-radius: 0 0 10px 10px;
 }
 
-/* Image widgets: legacy floating chrome when not on the unified selection system. */
-.widget--image:not(.widget--unifiedSelection) {
-  background: transparent;
-}
-
-.widget--image:not(.widget--unifiedSelection) .widget__chrome {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  right: 6px;
-  z-index: 3;
-  height: 28px;
-  border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  background: rgba(248, 250, 252, 0.78);
-  backdrop-filter: blur(6px);
-}
-
-.widget--image:not(.widget--unifiedSelection) .widget__content {
-  height: 100%;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.widget--image:not(.widget--unifiedSelection) .widget__media {
-  border-radius: 12px;
-}
-
-/* Unified image: same framed look as text / table / video (toolbar + dashed handles). */
-.widget--image.widget--unifiedSelection {
-  background: #fff;
-}
-
-.widget--image.widget--unifiedSelection .widget__content {
-  border-radius: 10px;
-}
-
-.widget--image.widget--unifiedSelection .widget__media {
-  border-radius: 10px;
-  background: #f1f5f9;
-}
-
-.widget--image.widget--unifiedSelection .widget__imageCropWrap {
-  border-radius: 10px;
-  overflow: hidden;
-  background: #f1f5f9;
-}
-
-.widget__imageCropWrap {
-  flex: 1;
-  min-height: 0;
-  align-self: stretch;
-}
-
-.widget__mediaIframe {
-  border: 0;
-}
-
-.widget__layered {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.widget__layered .widget__layeredMedia {
-  position: relative;
-  z-index: 0;
-}
-
-.widget__layered--textOverImage::after,
-.widget__layered--imageBackgroundText::after {
-  z-index: 1;
-}
-
-.widget__layered .widget__labelBtn {
-  position: relative;
-  z-index: 2;
-}
-
-.widget__layeredMedia {
-  border-radius: 0;
-}
-
-.widget__layeredPickBtn {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  z-index: 2;
-  border: 1px solid rgba(15, 23, 42, 0.18);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  color: rgba(15, 23, 42, 0.9);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-
-.widget__layeredText {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
-  z-index: 2;
-  min-height: 64px;
-  max-height: calc(100% - 20px);
-  resize: none;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 10px;
-  padding: 10px;
-  box-sizing: border-box;
-  outline: none;
-  background: rgba(255, 255, 255, 0.9);
-  color: rgba(15, 23, 42, 0.95);
-  font: 600 13px/1.35 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI";
-}
-
-.widget__layered--textOverImage::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.18) 10%, rgba(0, 0, 0, 0.54) 100%);
-}
-
-.widget__layered--textOverImage .widget__layeredText {
-  text-align: center;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.widget__layered--imageBackgroundText::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: rgba(255, 255, 255, 0.45);
-}
-
 .pageSettings {
   margin-top: 12px;
   border-top: 1px solid rgba(15, 23, 42, 0.1);
@@ -3249,93 +3021,6 @@
 
 .deleteSlideModal__btn--danger:active:not(:disabled) {
   transform: translateY(1px);
-}
-
-.imageUploadCropModal {
-  width: min(640px, 100%);
-}
-
-.imageUploadCropModal__preview {
-  width: 100%;
-  height: min(320px, 42vh);
-  margin-bottom: 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  background: #f8fafc;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.imageUploadCropModal__preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.imageUploadCropModal__surface {
-  position: relative;
-  user-select: none;
-}
-
-.imageUploadCropModal__mask {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(rgba(15, 23, 42, 0.38), rgba(15, 23, 42, 0.38)),
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.03) 0,
-      rgba(255, 255, 255, 0.03) 14px,
-      rgba(255, 255, 255, 0.08) 14px,
-      rgba(255, 255, 255, 0.08) 28px
-    );
-  pointer-events: none;
-}
-
-.imageUploadCropModal__box {
-  position: absolute;
-  border: 2px solid rgba(99, 102, 241, 0.95);
-  box-shadow:
-    0 0 0 9999px rgba(15, 23, 42, 0.4),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-  pointer-events: none;
-}
-
-.imageUploadCropModal__handle {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid rgba(67, 56, 202, 0.95);
-  background: #fff;
-  pointer-events: auto;
-  touch-action: none;
-}
-
-.imageUploadCropModal__handle--tl {
-  left: -8px;
-  top: -8px;
-  cursor: nwse-resize;
-}
-
-.imageUploadCropModal__handle--tr {
-  right: -8px;
-  top: -8px;
-  cursor: nesw-resize;
-}
-
-.imageUploadCropModal__handle--bl {
-  left: -8px;
-  bottom: -8px;
-  cursor: nesw-resize;
-}
-
-.imageUploadCropModal__handle--br {
-  right: -8px;
-  bottom: -8px;
-  cursor: nwse-resize;
 }
 
 .slideToast {

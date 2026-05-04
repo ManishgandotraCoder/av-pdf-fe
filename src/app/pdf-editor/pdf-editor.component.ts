@@ -42,10 +42,8 @@ import {
   type ShareUser
 } from '../pdf-api/pdf-api.service';
 import { AssetMetaService } from '../asset-meta/asset-meta.service';
-import { SafeVideoUrlPipe } from '../proposal-elements/pipes/safe-resource-url.pipe';
-import { parseVideoEmbedInput, type ParsedVideoEmbed } from '../proposal-elements/utils/video-embed';
 
-type Tool = 'pan' | 'pen' | 'text' | 'image';
+type Tool = 'pan' | 'pen' | 'text';
 type FontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
 type FontFamily =
   | 'helvetica'
@@ -63,14 +61,7 @@ type FontFamily =
   | 'montserrat'
   | 'abcdee_helvetica_bold';
 
-type WidgetKind =
-  | 'table'
-  | 'image'
-  | 'text'
-  | 'video'
-  | 'signature'
-  | 'textOverImage'
-  | 'imageBackgroundText';
+type WidgetKind = 'table' | 'text';
 type Widget = {
   id: string;
   kind: WidgetKind;
@@ -78,39 +69,22 @@ type Widget = {
   y: number;
   w: number;
   h: number;
-  /** PNG/JPEG data URL for image widgets */
-  imageSrc?: string;
-  /** Natural pixel size of imageSrc (for crop UI / export) */
-  imageNaturalW?: number;
-  imageNaturalH?: number;
-  /** Crop rect in full-image pixel coordinates (image widgets only) */
-  imageCrop?: { x: number; y: number; w: number; h: number };
-  /** Object URL for video widgets (revoked on remove) */
-  videoSrc?: string;
   /** Plain text for text widgets */
   textValue?: string;
-  /** Signature image data URL */
-  signatureSrc?: string;
-  /** Shared text payload for layered text/image widgets. */
-  layeredTextValue?: string;
   /** Basic editable table model */
   table?: { rows: number; cols: number; cells: string[][] };
 };
 
 type InsertWidgetPending = {
-  kind: WidgetKind;
-  imageDataUrl?: string;
-  videoObjectUrl?: string;
+  kind: 'table';
 };
 
 type ReusableAsset = {
   id: string;
-  kind: 'image' | 'video' | 'template';
+  kind: 'template';
   label: string;
   source: 'upload' | 'url' | 'crm';
   imageSrc?: string;
-  videoUrl?: string;
-  videoFile?: File;
   createdAt: number;
   categoryId?: string;
   categoryLabel?: string;
@@ -134,14 +108,7 @@ type PersistedWidget = {
   y: number;
   w: number;
   h: number;
-  imageSrc?: string;
-  imageNaturalW?: number;
-  imageNaturalH?: number;
-  imageCrop?: { x: number; y: number; w: number; h: number };
-  videoSrc?: string;
   textValue?: string;
-  signatureSrc?: string;
-  layeredTextValue?: string;
   table?: { rows: number; cols: number; cells: string[][] };
 };
 
@@ -289,7 +256,6 @@ type ToolbarIcon =
   | 'italic'
   | 'textColor'
   | 'bgColor'
-  | 'image'
   | 'pen'
   | 'text'
   | 'pan';
@@ -699,7 +665,7 @@ function weightFromStyle(style: FontStyle): 400 | 700 {
 @Component({
   selector: 'app-pdf-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, SafeVideoUrlPipe],
+  imports: [CommonModule, FormsModule],
   templateUrl: './pdf-editor.component.html',
   styleUrl: './pdf-editor.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -1546,8 +1512,9 @@ export class PdfEditorComponent implements AfterViewInit {
           (a) =>
             a &&
             typeof a.id === 'string' &&
-            (a.kind === 'image' || a.kind === 'video' || a.kind === 'template') &&
-            (a.imageSrc || a.videoUrl)
+            a.kind === 'template' &&
+            typeof a.imageSrc === 'string' &&
+            a.imageSrc.length > 0
         )
         .slice(0, PdfEditorComponent.maxPersistedReusableAssets);
       if (next.length) this.reusableAssets.set(next);
@@ -1560,11 +1527,7 @@ export class PdfEditorComponent implements AfterViewInit {
     if (typeof localStorage === 'undefined') return;
     const list = this.reusableAssets();
     const serializable = list
-      .filter((a) => a.imageSrc || (typeof a.videoUrl === 'string' && a.videoUrl.length > 0))
-      .map((a) => {
-        const { videoFile: _omit, ...rest } = a;
-        return rest;
-      })
+      .filter((a) => a.kind === 'template' && typeof a.imageSrc === 'string' && a.imageSrc.length > 0)
       .slice(0, PdfEditorComponent.maxPersistedReusableAssets);
     try {
       localStorage.setItem(PdfEditorComponent.reusableAssetsStorageKey, JSON.stringify(serializable));
@@ -1655,73 +1618,18 @@ export class PdfEditorComponent implements AfterViewInit {
   private prepareAssetLibraryRowPlacement(row: AssetLibraryRow) {
     this.errorText.set(null);
     this.cancelInsertWidgetMode();
-    this.pendingImageDataUrl = null;
-    if (row.rowKind === 'local') {
-      const asset = row.asset;
-      if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
-        if (this.embeddedMediaReplaceTarget?.kind === 'image') {
-          void this.replaceEmbeddedImageTargetWithSrc(asset.imageSrc);
-          return;
-        }
-        this.pendingImageDataUrl = asset.imageSrc;
-        this.tool.set('image');
-        this.focusRightbarInsertPanel();
-        return;
-      }
-      if (asset.kind === 'video') {
-        let src = asset.videoUrl;
-        if (!src && asset.videoFile) {
-          src = URL.createObjectURL(asset.videoFile);
-        }
-        const playable = this.normalizeVideoWidgetSrc(src);
-        if (playable) {
-          this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
-          this.tool.set('text');
-          this.focusRightbarInsertPanel();
-        } else if (src) {
-          this.errorText.set(
-            'Video URL is not supported. Use http(s), //…, or blob URLs. Try refreshing the Assets Library.'
-          );
-        } else {
-          this.errorText.set(
-            'Video asset has no playable URL. Refresh the Assets Library, or re-add the video from a direct link.'
-          );
-        }
-        return;
-      }
-      this.errorText.set('This asset type cannot be placed on the canvas.');
-      return;
-    }
-    const item = row.item;
-    if (item.kind === 'video') {
-      const playable = this.normalizeVideoWidgetSrc(item.url || item.previewUrl);
-      if (!playable) {
-        this.errorText.set(
-          'Video asset has no playable URL. Refresh the Assets Library, or ask your admin to expose a direct file link from the CRM.'
-        );
-        return;
-      }
-      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
-      this.tool.set('text');
+    this.tool.set('text');
+    if (row.rowKind === 'local' && row.asset.imageSrc) {
+      this.insertWidgetPending.set({ kind: 'table' });
       this.focusRightbarInsertPanel();
       return;
     }
-    if (item.kind === 'image' || item.kind === 'template') {
-      const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
-      if (!src) {
-        this.errorText.set('Asset is missing a file or preview URL.');
-        return;
-      }
-      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
-        void this.replaceEmbeddedImageTargetWithSrc(src);
-        return;
-      }
-      this.pendingImageDataUrl = src;
-      this.tool.set('image');
+    if (row.rowKind === 'crm' && (row.item.kind === 'template' || row.item.kind === 'image')) {
+      this.insertWidgetPending.set({ kind: 'table' });
       this.focusRightbarInsertPanel();
       return;
     }
-    this.errorText.set('This asset type cannot be placed on the canvas.');
+    this.errorText.set('Only template assets are supported for insertion.');
   }
 
   private parseAssetLibraryDropPayload(raw: string): { v: 1; rowKind: 'local' | 'crm'; id: string } | null {
@@ -1754,36 +1662,13 @@ export class PdfEditorComponent implements AfterViewInit {
     ev?.stopPropagation();
     this.errorText.set(null);
     this.cancelInsertWidgetMode();
-    this.pendingImageDataUrl = null;
     this.tool.set('text');
-    if (item.kind === 'video') {
-      const playable = this.normalizeVideoWidgetSrc(item.url || item.previewUrl);
-      if (!playable) {
-        this.errorText.set(
-          'Video asset has no playable URL. Refresh the Assets Library, or ask your admin to expose a direct file link from the CRM.'
-        );
-        return;
-      }
-      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
+    if (item.kind === 'template' || item.kind === 'image') {
+      this.insertWidgetPending.set({ kind: 'table' });
       this.focusRightbarInsertPanel();
       return;
     }
-    if (item.kind === 'image' || item.kind === 'template') {
-      const src = item.kind === 'image' ? item.url || item.previewUrl : item.previewUrl || item.url;
-      if (!src) {
-        this.errorText.set('Asset is missing a file or preview URL.');
-        return;
-      }
-      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
-        void this.replaceEmbeddedImageTargetWithSrc(src);
-        return;
-      }
-      this.pendingImageDataUrl = src;
-      this.tool.set('image');
-      this.focusRightbarInsertPanel();
-      return;
-    }
-    this.errorText.set('This asset type cannot be placed on the canvas.');
+    this.errorText.set('Only template assets are supported for insertion.');
   }
 
   protected formatVersionTimestamp(ts: number): string {
@@ -2318,16 +2203,6 @@ export class PdfEditorComponent implements AfterViewInit {
     this.onInsertWidgetClick(kind, ev);
   }
 
-  protected pickPdfImageFromMenu(ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    this.closeDocsMenu();
-    const el = this.pdfImageFile?.nativeElement;
-    if (!el) return;
-    el.value = '';
-    el.click();
-  }
-
   protected onWidgetDragStart(kind: WidgetKind, ev: DragEvent) {
     try {
       const dt = ev.dataTransfer;
@@ -2342,35 +2217,12 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  protected onPdfImageDragStart(ev: DragEvent) {
-    try {
-      const dt = ev.dataTransfer;
-      if (!dt) return;
-      dt.setData('application/x-avyro-pdf-insert', 'image');
-      dt.effectAllowed = 'copy';
-    } catch {
-      // ignore
-    }
-  }
-
-  protected onPdfVideoDragStart(ev: DragEvent) {
-    try {
-      const dt = ev.dataTransfer;
-      if (!dt) return;
-      dt.setData('application/x-avyro-pdf-insert', 'video');
-      dt.effectAllowed = 'copy';
-    } catch {
-      // ignore
-    }
-  }
-
   /** Shared by Insert → Text and drag-drop of the text chip: next click on the canvas starts a text draft. */
   private armPlacedTextInsertMode() {
     if (this.isTextPlacing() && !this.activeTextDraftGesture) this.commitTextDraft();
     this.flushInlineWidgetTextEditors(this.activePageIndex());
     this.cancelInsertWidgetMode();
     this.errorText.set(null);
-    this.pendingImageDataUrl = null;
     this.textFeatureEnabled.set(true);
     void this.renderActivePage().finally(() => this.cdr.markForCheck());
     this.tool.set('text');
@@ -2384,61 +2236,9 @@ export class PdfEditorComponent implements AfterViewInit {
       this.armPlacedTextInsertMode();
       return;
     }
-
     this.cancelInsertWidgetMode();
-    // Pan mode disables overlay pointer events; placement is click-driven for widgets.
     this.tool.set('text');
-
-    if (kind === 'image') {
-      const el = this.widgetImageFile?.nativeElement;
-      if (el) {
-        el.value = '';
-        el.click();
-      }
-      return;
-    }
-
-    if (kind === 'video') {
-      const el = this.widgetVideoFile?.nativeElement;
-      if (el) {
-        el.value = '';
-        el.click();
-      }
-      return;
-    }
-
-    if (kind === 'signature') {
-      const el = this.widgetSignatureFile?.nativeElement;
-      if (el) {
-        el.value = '';
-        el.click();
-      }
-      return;
-    }
-
     this.insertWidgetPending.set({ kind });
-  }
-
-  protected toggleInsertSourceMenu(kind: 'image' | 'video', ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const cur = this.insertSourceMenu();
-    this.insertSourceMenu.set(cur === kind ? null : kind);
-  }
-
-  protected pickInsertSource(kind: 'image' | 'video', source: 'url' | 'upload', ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    this.insertSourceMenu.set(null);
-    if (kind === 'image') {
-      this.onInsertWidgetClick('image', ev);
-      return;
-    }
-    if (source === 'upload') {
-      this.onInsertWidgetClick(kind, ev);
-      return;
-    }
-    this.insertVideoByUrlPrompt();
   }
 
   protected placeReusableAsset(assetId: string, ev?: Event) {
@@ -2448,334 +2248,22 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!asset) return;
     this.errorText.set(null);
     this.cancelInsertWidgetMode();
-    this.pendingImageDataUrl = null;
     this.tool.set('text');
-    if ((asset.kind === 'image' || asset.kind === 'template') && asset.imageSrc) {
-      if (this.embeddedMediaReplaceTarget?.kind === 'image') {
-        void this.replaceEmbeddedImageTargetWithSrc(asset.imageSrc);
-        return;
-      }
-      this.pendingImageDataUrl = asset.imageSrc;
-      this.tool.set('image');
+    if (asset.kind === 'template' && asset.imageSrc) {
+      this.insertWidgetPending.set({ kind: 'table' });
       this.focusRightbarInsertPanel();
       return;
     }
-    if (asset.kind === 'video') {
-      let src = asset.videoUrl;
-      if (!src && asset.videoFile) {
-        src = URL.createObjectURL(asset.videoFile);
-      }
-      const playable = this.normalizeVideoWidgetSrc(src);
-      if (playable) {
-        this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: playable });
-        this.focusRightbarInsertPanel();
-      } else if (src) {
-        this.errorText.set(
-          'Video URL is not supported. Use http(s), //…, or blob URLs. Try refreshing the Assets Library.'
-        );
-      } else {
-        this.errorText.set(
-          'Video asset has no playable URL. Refresh the Assets Library, or re-add the video from a direct link.'
-        );
-      }
-    }
-  }
-
-  protected async onWidgetInsertImagePicked(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    input.value = '';
-    if (!file) return;
-
-    const embeddedReplace = this.embeddedMediaReplaceTarget;
-    if (embeddedReplace?.kind === 'image') {
-      this.embeddedMediaReplaceTarget = null;
-      this.errorText.set(null);
-      this.isInserting.set(true);
-      try {
-        const dataUrl = await this.readAndCropImageFile(file);
-        if (!dataUrl) return;
-        await this.placeReplacementImageInPdfMediaRect(embeddedReplace.pageIndex, dataUrl, {
-          id: embeddedReplace.id,
-          kind: 'image',
-          x: embeddedReplace.x,
-          y: embeddedReplace.y,
-          w: embeddedReplace.w,
-          h: embeddedReplace.h
-        });
-      } catch (e) {
-        this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
-      } finally {
-        this.isInserting.set(false);
-      }
-      return;
-    }
-
-    const placedReplace = this.placedImageReplaceTarget;
-    if (placedReplace) {
-      this.placedImageReplaceTarget = null;
-      this.errorText.set(null);
-      this.isInserting.set(true);
-      try {
-        const dataUrl = await this.readAndCropImageFile(file);
-        if (!dataUrl) return;
-        const img = await this.loadHtmlImage(dataUrl);
-        this.beginHistoryStep();
-        this.updatePlacedImage(placedReplace.pageIndex, placedReplace.id, (a) => {
-          const nextBounds = this.withMaxImageBounds(
-            { x: a.x, y: a.y, w: a.w, h: a.h },
-            img.naturalWidth,
-            img.naturalHeight
-          );
-          return {
-            ...a,
-            ...nextBounds,
-            dataUrl,
-            srcW: Math.max(1, img.naturalWidth),
-            srcH: Math.max(1, img.naturalHeight),
-            crop: undefined
-          };
-        });
-        this.redrawOverlay(placedReplace.pageIndex);
-      } catch (e) {
-        this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
-      } finally {
-        this.isInserting.set(false);
-      }
-      return;
-    }
-
-    const replaceTarget = this.replaceMediaTarget();
-    const layeredTargetWidgetId = this.layeredImagePickTargetWidgetId;
-    this.layeredImagePickTargetWidgetId = null;
-    if (replaceTarget?.kind === 'image') {
-      this.errorText.set(null);
-      this.isInserting.set(true);
-      try {
-        const dataUrl = await this.readAndCropImageFile(file);
-        if (!dataUrl) return;
-        const img = await this.loadHtmlImage(dataUrl);
-        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) => {
-          if (w.kind !== 'image') return w;
-          const nextBounds = this.withMaxImageBounds(
-            { x: w.x, y: w.y, w: w.w, h: w.h },
-            img.naturalWidth,
-            img.naturalHeight
-          );
-          return {
-            ...w,
-            ...nextBounds,
-            imageSrc: dataUrl,
-            imageNaturalW: Math.max(1, img.naturalWidth),
-            imageNaturalH: Math.max(1, img.naturalHeight),
-            imageCrop: undefined
-          };
-        });
-      } finally {
-        // Always clear replace target, even when crop/validation is cancelled.
-        this.replaceMediaTarget.set(null);
-        this.isInserting.set(false);
-      }
-      return;
-    }
-    if (layeredTargetWidgetId) {
-      this.errorText.set(null);
-      this.isInserting.set(true);
-      try {
-        const dataUrl = await this.readAndCropImageFile(file);
-        if (!dataUrl) return;
-        this.updateWidget(this.activePageIndex(), layeredTargetWidgetId, (w) =>
-          w.kind === 'textOverImage' || w.kind === 'imageBackgroundText'
-            ? { ...w, imageSrc: dataUrl }
-            : w
-        );
-      } finally {
-        this.isInserting.set(false);
-      }
-      return;
-    }
-
-    this.errorText.set(null);
-    this.isInserting.set(true);
-    try {
-      const dataUrl = await this.readAndCropImageFile(file);
-      if (!dataUrl) return;
-      this.pendingImageDataUrl = dataUrl;
-      this.tool.set('image');
-      this.rememberReusableAsset({
-        id: `asset_img_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
-        kind: 'image',
-        label: file.name || 'Uploaded image',
-        source: 'upload',
-        imageSrc: dataUrl,
-        createdAt: Date.now()
-      });
-    } finally {
-      this.isInserting.set(false);
-    }
-  }
-
-  private async replaceEmbeddedImageTargetWithSrc(src: string) {
-    const target = this.embeddedMediaReplaceTarget;
-    if (target?.kind !== 'image') return;
-    this.embeddedMediaReplaceTarget = null;
-    this.errorText.set(null);
-    this.isInserting.set(true);
-    try {
-      await this.placeReplacementImageInPdfMediaRect(target.pageIndex, src, {
-        id: target.id,
-        kind: 'image',
-        x: target.x,
-        y: target.y,
-        w: target.w,
-        h: target.h
-      });
-    } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
-    } finally {
-      this.isInserting.set(false);
-    }
-  }
-
-  protected onWidgetInsertVideoPicked(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    input.value = '';
-    if (!file) {
-      return;
-    }
-
-    const embeddedVideoReplace = this.embeddedMediaReplaceTarget;
-    if (embeddedVideoReplace?.kind === 'video') {
-      this.embeddedMediaReplaceTarget = null;
-      this.errorText.set(null);
-      const readerEmb = new FileReader();
-      readerEmb.onerror = () => this.errorText.set('Failed to read video.');
-      readerEmb.onload = () => {
-        const dataUrl = String(readerEmb.result ?? '');
-        if (!/^data:video\//i.test(dataUrl)) {
-          this.errorText.set('Unsupported video file.');
-          return;
-        }
-        // Keep original PDF layer/background untouched for replace flows.
-        const cx = embeddedVideoReplace.x + embeddedVideoReplace.w / 2;
-        const cy = embeddedVideoReplace.y + embeddedVideoReplace.h / 2;
-        this.tool.set('text');
-        this.addWidgetAtPoint(embeddedVideoReplace.pageIndex, 'video', cx, cy, { videoObjectUrl: dataUrl });
-      };
-      readerEmb.readAsDataURL(file);
-      return;
-    }
-
-    this.errorText.set(null);
-    const reader = new FileReader();
-    reader.onerror = () => {
-      this.errorText.set('Failed to read video.');
-    };
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? '');
-      if (!/^data:video\//i.test(dataUrl)) {
-        this.errorText.set('Unsupported video file.');
-        return;
-      }
-
-      const replaceTarget = this.replaceMediaTarget();
-      if (replaceTarget?.kind === 'video') {
-        this.updateWidget(replaceTarget.pageIndex, replaceTarget.widgetId, (w) =>
-          w.kind === 'video' ? { ...w, videoSrc: dataUrl } : w
-        );
-        this.replaceMediaTarget.set(null);
-        return;
-      }
-
-      this.tool.set('text');
-      this.rememberReusableAsset({
-        id: `asset_vid_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
-        kind: 'video',
-        label: file.name || 'Uploaded video',
-        source: 'upload',
-        videoUrl: dataUrl,
-        createdAt: Date.now()
-      });
-      this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: dataUrl });
-      this.focusRightbarInsertPanel();
-      this.redrawOverlay(this.activePageIndex());
-    };
-    reader.readAsDataURL(file);
-  }
-
-  protected onSignatureFilePicked(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    input.value = '';
-    if (!file) return;
-
-    const widgetId = this.signaturePickTargetWidgetId;
-    this.signaturePickTargetWidgetId = null;
-
-    this.errorText.set(null);
-    const reader = new FileReader();
-    reader.onerror = () => this.errorText.set('Failed to read signature image.');
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? '');
-      if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-        this.errorText.set('Unsupported signature image (use PNG or JPEG).');
-        return;
-      }
-      this.tool.set('text');
-
-      if (widgetId) {
-        const pageIndex = this.activePageIndex();
-        this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, signatureSrc: dataUrl }));
-        this.editingWidgetId.set(null);
-        return;
-      }
-
-      // Insert signature: click-to-place.
-      this.insertWidgetPending.set({ kind: 'signature', imageDataUrl: dataUrl });
-    };
-    reader.readAsDataURL(file);
-  }
-
-  protected beginSignaturePickForWidget(widgetId: string, ev?: Event) {
-    ev?.preventDefault?.();
-    ev?.stopPropagation?.();
-    this.signaturePickTargetWidgetId = widgetId;
-    const el = this.widgetSignatureFile?.nativeElement;
-    if (el) {
-      el.value = '';
-      el.click();
-    }
-  }
-
-  protected beginLayeredImagePickForWidget(widgetId: string, ev?: Event) {
-    ev?.preventDefault();
-    ev?.stopPropagation();
-    this.layeredImagePickTargetWidgetId = widgetId;
-    const el = this.widgetImageFile?.nativeElement;
-    if (el) {
-      el.value = '';
-      el.click();
-    }
+    this.errorText.set('Only template assets are supported for insertion.');
   }
 
   protected insertWidgetModeHint(): string {
     const p = this.insertWidgetPending();
     if (!p) return '';
-    if (p.kind === 'image' && !p.imageDataUrl) return 'Click on the page to place the image.';
-    if (p.kind === 'video' && !p.videoObjectUrl) return 'Click on the page to place the video.';
-    return 'Click on the page to place.';
+    return p.kind === 'table' ? 'Click on the page to place the table.' : 'Click on the page to place text.';
   }
 
   protected cancelInsertWidgetMode() {
-    const p = this.insertWidgetPending();
-    if (p?.videoObjectUrl) {
-      try {
-        URL.revokeObjectURL(p.videoObjectUrl);
-      } catch {
-        // ignore
-      }
-    }
     this.insertWidgetPending.set(null);
     this.isInserting.set(false);
   }
@@ -2784,8 +2272,7 @@ export class PdfEditorComponent implements AfterViewInit {
     pageIndex: number,
     kind: WidgetKind,
     centerX: number,
-    centerY: number,
-    opts?: { imageDataUrl?: string; videoObjectUrl?: string }
+    centerY: number
   ) {
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
@@ -2796,12 +2283,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
     const defaults: Record<WidgetKind, { w: number; h: number }> = {
       table: { w: 400, h: 220 },
-      image: { w: 220, h: 160 },
-      text: { w: 300, h: 160 },
-      video: { w: 280, h: 180 },
-      signature: { w: 240, h: 110 },
-      textOverImage: { w: 340, h: 200 },
-      imageBackgroundText: { w: 360, h: 220 }
+      text: { w: 300, h: 160 }
     };
     const d = defaults[kind];
     const { w: cw, h: ch } = this.overlayNominalCssSize(overlay);
@@ -2816,23 +2298,8 @@ export class PdfEditorComponent implements AfterViewInit {
       h: d.h
     };
 
-    if (kind === 'image' && opts?.imageDataUrl) {
-      widget.imageSrc = opts.imageDataUrl;
-    }
-    if (kind === 'video' && opts?.videoObjectUrl) {
-      widget.videoSrc = opts.videoObjectUrl;
-      if (opts.videoObjectUrl.startsWith('blob:')) {
-        this.videoObjectUrlByWidgetId.set(id, opts.videoObjectUrl);
-      }
-    }
-    if (kind === 'signature' && opts?.imageDataUrl) {
-      widget.signatureSrc = opts.imageDataUrl;
-    }
     if (kind === 'text') {
       widget.textValue = '';
-    }
-    if (kind === 'textOverImage' || kind === 'imageBackgroundText') {
-      widget.layeredTextValue = '';
     }
     if (kind === 'table') {
       const rows = 3;
@@ -2849,20 +2316,10 @@ export class PdfEditorComponent implements AfterViewInit {
       return { ...prev, [pageIndex]: [...cur, widget] };
     });
     this.selectedWidgetId.set(id);
-    if (kind === 'signature') {
-      this.editingWidgetId.set(id);
-      queueMicrotask(() => this.focusWidgetEditor(id));
-    }
     // Text widgets only mount `.widget__editor` while `editingWidgetId` matches; enter edit mode immediately.
     if (kind === 'text' && this.textFeatureEnabled()) {
       this.editingWidgetId.set(id);
       queueMicrotask(() => this.focusWidgetEditor(id));
-    }
-    if (kind === 'textOverImage' || kind === 'imageBackgroundText') {
-      queueMicrotask(() => {
-        const el = document.querySelector<HTMLElement>(`[data-widget-id="${id}"] .widget__editor`);
-        el?.focus?.();
-      });
     }
     if (kind === 'table') {
       queueMicrotask(() => {
@@ -2873,39 +2330,6 @@ export class PdfEditorComponent implements AfterViewInit {
       });
     }
 
-    if (kind === 'image' && opts?.imageDataUrl) {
-      void this.loadHtmlImage(opts.imageDataUrl).then((img) => {
-        const maxW = 280;
-        const nw = maxW;
-        const nh = Math.max(10, Math.round((img.height / img.width) * maxW));
-        this.patchWidgetSize(pageIndex, id, nw, nh);
-        this.updateWidget(pageIndex, id, (w) =>
-          w.kind === 'image'
-            ? {
-              ...w,
-              imageNaturalW: Math.max(1, img.naturalWidth),
-              imageNaturalH: Math.max(1, img.naturalHeight),
-              imageCrop: undefined
-            }
-            : w
-        );
-      });
-    }
-
-    if (kind === 'video' && opts?.videoObjectUrl) {
-      const u = opts.videoObjectUrl;
-      const vid = document.createElement('video');
-      vid.muted = true;
-      vid.preload = 'metadata';
-      vid.src = u;
-      vid.onloadedmetadata = () => {
-        const iw = Math.max(1, vid.videoWidth);
-        const ih = Math.max(1, vid.videoHeight);
-        const targetH = 180;
-        const nw = Math.round((iw / ih) * targetH);
-        this.patchWidgetSize(pageIndex, id, clamp(nw, 200, 520), targetH);
-      };
-    }
   }
 
   private focusWidgetEditor(widgetId: string) {
@@ -2967,16 +2391,6 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
-      const ta = document.querySelector<HTMLTextAreaElement>(
-        `[data-widget-id="${wid}"] textarea.widget__layeredText.widget__editor`
-      );
-      if (ta) this.updateLayeredTextWidget(pageIndex, wid, ta.value);
-      this.persistEditorStateNow();
-      this.stopEditingWidget(wid);
-      return;
-    }
-
     if (w.kind === 'table') {
       const root = document.querySelector(`[data-widget-id="${wid}"]`);
       if (root) {
@@ -3032,46 +2446,6 @@ export class PdfEditorComponent implements AfterViewInit {
     if (!this.textFeatureEnabled()) return;
     ev.preventDefault?.();
     this.startEditingWidget(widgetId, ev);
-  }
-
-  protected updateLayeredTextWidget(pageIndex: number, widgetId: string, value: string) {
-    this.updateWidget(pageIndex, widgetId, (w) =>
-      w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, layeredTextValue: value } : w
-    );
-    this.scheduleEditorStatePersist();
-  }
-
-  /** Flush layered textarea value; blur can run before the last ngModel tick. */
-  protected onLayeredTextWidgetEditorBlur(pageIndex: number, widgetId: string, ev: FocusEvent) {
-    const ta = ev.target as HTMLTextAreaElement | null;
-    if (ta) {
-      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
-      this.persistEditorStateNow();
-    }
-    this.stopEditingWidget(widgetId);
-  }
-
-  protected onLayeredTextWidgetEditorEscape(pageIndex: number, widgetId: string, ev: Event) {
-    const ta = ev.target as HTMLTextAreaElement | null;
-    if (ta) {
-      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
-      this.persistEditorStateNow();
-    }
-    this.stopEditingWidget(widgetId);
-  }
-
-  /** Enter commits and leaves edit; Shift+Enter inserts a newline. */
-  protected onLayeredTextWidgetEditorEnter(pageIndex: number, widgetId: string, ev: Event) {
-    const ke = ev as KeyboardEvent;
-    if (ke.key !== 'Enter' || ke.shiftKey) return;
-    ke.preventDefault();
-    ke.stopPropagation();
-    const ta = ke.target as HTMLTextAreaElement | null;
-    if (ta) {
-      this.updateLayeredTextWidget(pageIndex, widgetId, ta.value);
-      this.persistEditorStateNow();
-    }
-    this.stopEditingWidget(widgetId);
   }
 
   private scheduleEditorStatePersist() {
@@ -3240,83 +2614,6 @@ export class PdfEditorComponent implements AfterViewInit {
     }
   }
 
-  /**
-   * Drop PNG/JPEG onto the page: if the cursor is over an embedded PDF image or a placed overlay image,
-   * replace that image; otherwise arm the Image tool for click-to-place (existing behaviour).
-   */
-  private async handleDroppedImageFileOnPageStack(pageIndex: number, file: File, ev: DragEvent) {
-    if (this.readonlyMode()) {
-      this.errorText.set('This document is read-only.');
-      return;
-    }
-    this.errorText.set(null);
-    this.isInserting.set(true);
-    try {
-      const { overlay } = this.getCanvasPair(pageIndex);
-      if (overlay) {
-        const pt = this.eventToPoint(overlay, ev);
-        const placedHit = this.hitTestPlacedImage(pageIndex, pt.x, pt.y);
-        if (placedHit) {
-          const anno = this.getImageAnno(pageIndex, placedHit.id);
-          if (anno) {
-            const dataUrl = await this.readAndCropImageFile(file);
-            if (!dataUrl) return;
-            const img = await this.loadHtmlImage(dataUrl);
-            this.beginHistoryStep();
-            this.updatePlacedImage(pageIndex, anno.id, (a) => {
-              const nextBounds = this.withMaxImageBounds(
-                { x: a.x, y: a.y, w: a.w, h: a.h },
-                img.naturalWidth,
-                img.naturalHeight
-              );
-              return {
-                ...a,
-                ...nextBounds,
-                dataUrl,
-                srcW: Math.max(1, img.naturalWidth),
-                srcH: Math.max(1, img.naturalHeight),
-                crop: undefined
-              };
-            });
-            this.selectedPlacedImageId.set(anno.id);
-            this.selectedDetectedPdfMedia.set(null);
-            this.selectedWidgetId.set(null);
-            this.redrawOverlay(pageIndex);
-            this.cdr.markForCheck();
-            return;
-          }
-        }
-        const embedded = this.hitTestDetectedMedia(pageIndex, pt.x, pt.y);
-        if (embedded?.kind === 'image') {
-          const dataUrl = await this.readAndCropImageFile(file);
-          if (!dataUrl) return;
-          await this.placeReplacementImageInPdfMediaRect(pageIndex, dataUrl, embedded);
-          this.cdr.markForCheck();
-          return;
-        }
-      }
-
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Failed to read dropped image.'));
-        reader.onload = () => resolve(String(reader.result ?? ''));
-        reader.readAsDataURL(file);
-      });
-      if (!/^data:image\/(png|jpeg);base64,/i.test(dataUrl)) {
-        this.errorText.set('Unsupported image (use PNG or JPEG).');
-        return;
-      }
-      this.cancelInsertWidgetMode();
-      this.pendingImageDataUrl = dataUrl;
-      this.tool.set('image');
-      this.redrawOverlay(this.activePageIndex());
-    } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to load image.');
-    } finally {
-      this.isInserting.set(false);
-    }
-  }
-
   protected onPageStackDrop(pageIndex: number, ev: DragEvent) {
     ev.preventDefault();
 
@@ -3335,64 +2632,20 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    // Dragging from our sidebar "Insert Image" tile.
-    const pdfInsert = ev.dataTransfer?.getData('application/x-avyro-pdf-insert') ?? '';
-    if (pdfInsert === 'image') {
-      const el = this.pdfImageFile?.nativeElement;
-      if (!el) return;
-      el.value = '';
-      el.click();
-      return;
-    }
-
-    if (pdfInsert === 'video') {
-      const el = this.widgetVideoFile?.nativeElement;
-      if (!el) return;
-      el.value = '';
-      el.click();
-      return;
-    }
-
     const raw =
       ev.dataTransfer?.getData('application/x-avyro-widget-kind') ||
       ev.dataTransfer?.getData('text/plain') ||
       '';
-    const draggableWidgetKinds: WidgetKind[] = [
-      'table',
-      'image',
-      'text',
-      'video',
-      'signature',
-      'textOverImage',
-      'imageBackgroundText'
-    ];
+    const draggableWidgetKinds: WidgetKind[] = ['table', 'text'];
     const kind = draggableWidgetKinds.includes(raw as WidgetKind) ? (raw as WidgetKind) : null;
     if (!kind) {
       const file = ev.dataTransfer?.files?.[0] ?? null;
       if (!file) return;
-
-      if (file.type === 'image/png' || file.type === 'image/jpeg') {
-        void this.handleDroppedImageFileOnPageStack(pageIndex, file, ev);
+      if (file.type === 'image/png' || file.type === 'image/jpeg' || file.type.startsWith('video/')) {
+        this.errorText.set('Dropping images or videos onto the page is not supported.');
         return;
       }
-
-      if (file.type.startsWith('video/')) {
-        this.errorText.set(null);
-        try {
-          this.cancelInsertWidgetMode();
-          this.pendingImageDataUrl = null;
-          const objectUrl = URL.createObjectURL(file);
-          this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: objectUrl });
-          this.tool.set('text');
-          this.focusRightbarInsertPanel();
-          this.redrawOverlay(this.activePageIndex());
-        } catch (e) {
-          this.errorText.set(e instanceof Error ? e.message : 'Failed to load video.');
-        }
-        return;
-      }
-
-      this.errorText.set('Drop a PNG, JPEG, or video file.');
+      this.errorText.set('Drop a supported asset from the library or insert tools.');
       return;
     }
 
@@ -3401,7 +2654,6 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
     this.cancelInsertWidgetMode();
-    this.pendingImageDataUrl = null;
     this.insertWidgetPending.set({ kind });
     this.tool.set('text');
     this.focusRightbarInsertPanel();
@@ -3420,11 +2672,6 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedDetectedPdfMedia.set(null);
     this.selectedPlacedTextId.set(null);
     this.focusRightbarInsertPanel();
-    const w = this.getWidget(pageIndex, widgetId);
-    // Image/video: click only selects (toolbar / right bar: replace, remove). Drag from the grip handle.
-    if (w?.kind === 'image' || w?.kind === 'video') {
-      return;
-    }
     this.beginWidgetMove(pageIndex, widgetId, ev);
   }
 
@@ -3439,7 +2686,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected isUnifiedSelectionWidgetKind(kind: WidgetKind): boolean {
-    return kind === 'table' || kind === 'image' || kind === 'video' || kind === 'text';
+    return kind === 'table' || kind === 'text';
   }
 
   protected onWidgetSelectionToolbarChromePointerDown(ev: PointerEvent) {
@@ -3495,9 +2742,6 @@ export class PdfEditorComponent implements AfterViewInit {
         cells: w.table.cells.map((row) => row.slice())
       };
     }
-    if (w.kind === 'video' && w.videoSrc?.startsWith('blob:')) {
-      this.videoObjectUrlByWidgetId.set(id, w.videoSrc);
-    }
     return copy;
   }
 
@@ -3537,31 +2781,6 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   protected removeWidget(pageIndex: number, widgetId: string) {
-    const before = this.getWidget(pageIndex, widgetId);
-    if (before?.kind === 'video' && before.videoSrc) {
-      const url = this.videoObjectUrlByWidgetId.get(widgetId) ?? before.videoSrc;
-      if (url.startsWith('blob:')) {
-        this.videoObjectUrlByWidgetId.delete(widgetId);
-        const stillUsed = Object.values(this.widgetsByPage()).some((list) =>
-          (list ?? []).some(
-            (w) =>
-              w.id !== widgetId &&
-              w.kind === 'video' &&
-              (w.videoSrc === url || this.videoObjectUrlByWidgetId.get(w.id) === url)
-          )
-        );
-        if (!stillUsed) {
-          try {
-            URL.revokeObjectURL(url);
-          } catch {
-            // ignore
-          }
-        }
-      } else {
-        this.videoObjectUrlByWidgetId.delete(widgetId);
-      }
-    }
-
     this.widgetsByPage.update((prev) => {
       const cur = prev[pageIndex] ?? [];
       const next = cur.filter((w) => w.id !== widgetId);
@@ -3714,14 +2933,6 @@ export class PdfEditorComponent implements AfterViewInit {
       disabled: () => !this.textFeatureEnabled()
     },
     { kind: 'sep', id: 'sep-5' },
-    {
-      kind: 'file',
-      id: 'insert-image',
-      title: 'Insert image',
-      icon: 'image',
-      accept: 'image/png,image/jpeg',
-      onChange: (ev) => void this.onPickImageFile(ev)
-    },
     { kind: 'sep', id: 'sep-6' },
     {
       kind: 'button',
@@ -4266,13 +3477,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private beginHistoryStep(label?: string) {
     const action =
       label ??
-      (this.tool() === 'pen'
-        ? 'Pen stroke'
-        : this.tool() === 'text'
-          ? 'Text edit'
-          : this.tool() === 'image'
-            ? 'Image edit'
-            : 'Canvas edit');
+      (this.tool() === 'pen' ? 'Pen stroke' : this.tool() === 'text' ? 'Text edit' : 'Canvas edit');
     // Save the current state so Undo can restore it.
     const snap = this.createHistorySnapshot();
     this.undoStack.push(snap);
@@ -4335,9 +3540,6 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!Number.isFinite(pi) || !list) continue;
       out[pi] = list.map((w) => {
         const next: Widget = { ...w };
-        if (w.imageCrop) {
-          next.imageCrop = { x: w.imageCrop.x, y: w.imageCrop.y, w: w.imageCrop.w, h: w.imageCrop.h };
-        }
         if (w.table) {
           next.table = {
             rows: w.table.rows,
@@ -4407,15 +3609,7 @@ export class PdfEditorComponent implements AfterViewInit {
         y: w.y,
         w: w.w,
         h: w.h,
-        imageSrc: w.imageSrc !== undefined ? this.fingerprintHeavyString(w.imageSrc) : undefined,
-        imageNaturalW: w.imageNaturalW,
-        imageNaturalH: w.imageNaturalH,
-        imageCrop: w.imageCrop,
-        videoSrc: w.videoSrc !== undefined ? this.fingerprintHeavyString(w.videoSrc) : undefined,
         textValue: w.textValue !== undefined ? this.fingerprintHeavyString(w.textValue) : undefined,
-        signatureSrc: w.signatureSrc !== undefined ? this.fingerprintHeavyString(w.signatureSrc) : undefined,
-        layeredTextValue:
-          w.layeredTextValue !== undefined ? this.fingerprintHeavyString(w.layeredTextValue) : undefined,
         table: w.table
           ? {
               rows: w.table.rows,
@@ -4572,14 +3766,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }): boolean {
     const widgetsByPage = opts?.widgetsByPage ?? this.widgetsByPage();
     const editsByPage = opts?.edits ?? this.editsByPage();
-    const hasFlattenOnlyWidgets = Object.values(widgetsByPage).some((list) =>
-      (list ?? []).some((w) => {
-        if (w.kind === 'image' || w.kind === 'signature') return false;
-        // Semantic export skips video; flatten so the first frame appears in saved/exported PDFs.
-        if (w.kind === 'video') return !!w.videoSrc;
-        return true;
-      })
-    );
+    const hasFlattenOnlyWidgets = Object.values(widgetsByPage).some((list) => (list ?? []).length > 0);
     if (hasFlattenOnlyWidgets) return true;
     return Object.values(editsByPage).some((e) =>
       (e?.replaces ?? []).some((r) => r.maskMode === 'inpaint' || r.source === 'mediaErase')
@@ -4834,106 +4021,12 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private async drawSemanticWidgetsToPdf(
-    pdf: PDFDocument,
-    page: PDFPage,
-    widgets: Widget[],
-    vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] }
+    _pdf: PDFDocument,
+    _page: PDFPage,
+    _widgets: Widget[],
+    _vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] }
   ) {
-    if (!widgets.length) return;
-    for (const w of widgets) {
-      if (w.kind === 'image' && w.imageSrc) {
-        const embedded = await this.embedWidgetImageForPdf(pdf, w);
-        const rect = this.editorRectToPdfAabb(vp, w.x, w.y, w.w, w.h);
-        page.drawImage(embedded, {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        });
-        continue;
-      }
-      if (w.kind === 'signature' && w.signatureSrc) {
-        const embedded = await this.embedImageDataUrlForPdf(pdf, w.signatureSrc);
-        const rect = this.editorRectToPdfAabb(vp, w.x, w.y, w.w, w.h);
-        page.drawImage(embedded, {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        });
-        continue;
-      }
-      // Video widgets stay interactive in the editor via persisted overlay state.
-      // Do not rasterize a poster into semantic PDF bytes — that made reload look like a static image
-      // and hid the real player when overlay metadata failed to restore.
-    }
-  }
-
-  private async embedImageDataUrlForPdf(pdf: PDFDocument, dataUrl: string) {
-    const { bytes, kind } = this.dataUrlToBytes(dataUrl);
-    return kind === 'png' ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
-  }
-
-  private getSourceRectForWidgetImage(w: Widget, el: HTMLImageElement) {
-    const natW = Math.max(1, el.naturalWidth);
-    const natH = Math.max(1, el.naturalHeight);
-    if (w.kind !== 'image') return { sx: 0, sy: 0, sw: natW, sh: natH };
-    if (w.imageCrop) {
-      return { sx: w.imageCrop.x, sy: w.imageCrop.y, sw: w.imageCrop.w, sh: w.imageCrop.h };
-    }
-    const sw = w.imageNaturalW && w.imageNaturalW > 0 ? w.imageNaturalW : natW;
-    const sh = w.imageNaturalH && w.imageNaturalH > 0 ? w.imageNaturalH : natH;
-    return { sx: 0, sy: 0, sw, sh };
-  }
-
-  private async embedWidgetImageForPdf(pdf: PDFDocument, w: Widget) {
-    if (w.kind !== 'image' || !w.imageSrc) throw new Error('Invalid image widget.');
-    const el = await this.loadHtmlImage(w.imageSrc);
-    const { sx, sy, sw, sh } = this.getSourceRectForWidgetImage(w, el);
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.floor(sw));
-    c.height = Math.max(1, Math.floor(sh));
-    const cctx = c.getContext('2d');
-    if (!cctx) throw new Error('Canvas unavailable.');
-    cctx.drawImage(el, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    const png = c.toDataURL('image/png');
-    const { bytes } = this.dataUrlToBytes(png);
-    return pdf.embedPng(bytes);
-  }
-
-  private waitForVideoReady(video: HTMLVideoElement, timeoutMs = 12000): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let done = false;
-      const cleanup = () => {
-        video.onloadeddata = null;
-        video.onloadedmetadata = null;
-        video.oncanplay = null;
-        video.onerror = null;
-      };
-      const finish = (ok: boolean) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        cleanup();
-        if (ok) resolve();
-        else reject(new Error('video'));
-      };
-      const timer = window.setTimeout(() => finish(false), Math.max(500, timeoutMs));
-      const onReady = () => finish(true);
-      video.onloadeddata = onReady;
-      video.oncanplay = onReady;
-      video.onloadedmetadata = () => {
-        if (video.readyState >= 2) onReady();
-      };
-      video.onerror = () => finish(false);
-      if (video.readyState >= 2) onReady();
-      else {
-        video.muted = true;
-        void video.play().catch(() => {
-          /* autoplay may be blocked; loadeddata/canplay still used */
-        });
-      }
-    });
+    // Table/text widgets are included via the flattened export path.
   }
 
   /**
@@ -5101,27 +4194,6 @@ export class PdfEditorComponent implements AfterViewInit {
       ctx.strokeRect(x, y, ww, hh);
       ctx.restore();
 
-      if (w.kind === 'image' && w.imageSrc) {
-        try {
-          const img = await this.loadHtmlImage(w.imageSrc);
-          const { sx, sy, sw, sh } = this.getSourceRectForWidgetImage(w, img);
-          ctx.drawImage(img, sx, sy, sw, sh, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
-        } catch {
-          // ignore
-        }
-        continue;
-      }
-
-      if (w.kind === 'signature' && w.signatureSrc) {
-        try {
-          const img = await this.loadHtmlImage(w.signatureSrc);
-          ctx.drawImage(img, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
-        } catch {
-          // ignore
-        }
-        continue;
-      }
-
       if (w.kind === 'text') {
         const text = String(w.textValue ?? '');
         ctx.save();
@@ -5134,47 +4206,6 @@ export class PdfEditorComponent implements AfterViewInit {
         const lh = Math.max(1, Math.round(fontSize * 1.25));
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i] ?? '', x + pad, y + pad + i * lh);
-        }
-        ctx.restore();
-        continue;
-      }
-      if ((w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') && w.imageSrc) {
-        try {
-          const img = await this.loadHtmlImage(w.imageSrc);
-          ctx.drawImage(img, x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
-        } catch {
-          // ignore
-        }
-      }
-      if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
-        const text = String(w.layeredTextValue ?? '');
-        ctx.save();
-        if (w.kind === 'textOverImage') {
-          const grad = ctx.createLinearGradient(x, y, x, y + hh);
-          grad.addColorStop(0, 'rgba(0,0,0,0.18)');
-          grad.addColorStop(1, 'rgba(0,0,0,0.58)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
-          ctx.fillStyle = 'rgba(255,255,255,0.96)';
-          ctx.textAlign = 'center';
-        } else {
-          ctx.fillStyle = 'rgba(255,255,255,0.72)';
-          ctx.fillRect(x + 2, y + 2, Math.max(1, ww - 4), Math.max(1, hh - 4));
-          ctx.fillStyle = 'rgba(15,23,42,0.95)';
-          ctx.textAlign = 'left';
-        }
-        const fontSize = Math.max(10, Math.round(13 * Math.min(fx, fy)));
-        const lh = Math.max(1, Math.round(fontSize * 1.3));
-        const pad = 10 * Math.min(fx, fy);
-        ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`;
-        ctx.textBaseline = 'top';
-        const lines = text.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          if (w.kind === 'textOverImage') {
-            ctx.fillText(lines[i] ?? '', x + ww / 2, y + pad + i * lh);
-          } else {
-            ctx.fillText(lines[i] ?? '', x + pad, y + pad + i * lh);
-          }
         }
         ctx.restore();
         continue;
@@ -5209,31 +4240,6 @@ export class PdfEditorComponent implements AfterViewInit {
         }
         ctx.restore();
         continue;
-      }
-
-      if (w.kind === 'video' && w.videoSrc) {
-        // Best-effort: draw the first frame. If it fails, draw a placeholder.
-        try {
-          const v = document.createElement('video');
-          v.muted = true;
-          v.playsInline = true;
-          v.preload = 'metadata';
-          v.src = w.videoSrc;
-          await this.waitForVideoReady(v, 3500);
-          ctx.drawImage(v, x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
-        } catch {
-          ctx.save();
-          ctx.fillStyle = 'rgba(15,23,42,0.85)';
-          ctx.fillRect(x + 4, y + 4, Math.max(1, ww - 8), Math.max(1, hh - 8));
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
-          ctx.beginPath();
-          ctx.moveTo(x + ww / 2 - 10, y + hh / 2 - 14);
-          ctx.lineTo(x + ww / 2 - 10, y + hh / 2 + 14);
-          ctx.lineTo(x + ww / 2 + 16, y + hh / 2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        }
       }
     }
   }
@@ -5422,12 +4428,6 @@ export class PdfEditorComponent implements AfterViewInit {
             }
           };
         }
-        if (w.kind === 'image') return { ...w, imageSrc: undefined, imageNaturalW: undefined, imageNaturalH: undefined, imageCrop: undefined };
-        if (w.kind === 'textOverImage' || w.kind === 'imageBackgroundText') {
-          return { ...w, imageSrc: undefined, layeredTextValue: '' };
-        }
-        if (w.kind === 'signature') return { ...w, signatureSrc: undefined };
-        if (w.kind === 'video') return { ...w, videoSrc: undefined };
         return { ...w };
       });
       out[pageIndex] = widgets;
@@ -5923,14 +4923,6 @@ export class PdfEditorComponent implements AfterViewInit {
     if (this.insertSourceMenu() !== null) this.insertSourceMenu.set(null);
   }
 
-  protected parseWidgetVideo(src?: string): ParsedVideoEmbed | null {
-    const raw = (src ?? '').trim();
-    if (!raw) return null;
-    const parent =
-      typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
-    return parseVideoEmbedInput(raw, { embedParent: parent });
-  }
-
   protected selectedItemWidget(): { pageIndex: number; widget: Widget } | null {
     const id = this.selectedWidgetId();
     if (!id) return null;
@@ -5938,13 +4930,6 @@ export class PdfEditorComponent implements AfterViewInit {
     const widget = this.getWidget(pageIndex, id);
     if (!widget) return null;
     return { pageIndex, widget };
-  }
-
-  protected selectedMediaWidget(): { pageIndex: number; widget: Widget } | null {
-    const selected = this.selectedItemWidget();
-    if (!selected) return null;
-    if (selected.widget.kind !== 'image' && selected.widget.kind !== 'video') return null;
-    return selected;
   }
 
   protected selectedDetectedMediaItem(): { pageIndex: number; media: DetectedPdfMedia } | null {
@@ -6158,43 +5143,19 @@ export class PdfEditorComponent implements AfterViewInit {
     const selected = this.selectedItemWidget();
     if (!selected) return '';
     switch (selected.widget.kind) {
-      case 'image':
-        return 'Selected image';
-      case 'video':
-        return 'Selected video';
       case 'text':
         return 'Selected text';
       case 'table':
         return 'Selected table';
-      case 'signature':
-        return 'Selected signature';
-      case 'textOverImage':
-        return 'Selected text over image';
-      case 'imageBackgroundText':
-        return 'Selected image background text';
       default:
         return 'Selected item';
     }
   }
 
-  protected selectedVideoSourceDisplay(): string {
-    const selected = this.selectedItemWidget();
-    if (!selected || selected.widget.kind !== 'video') return '';
-    const src = (selected.widget.videoSrc ?? '').trim();
-    if (!src) return '';
-    if (src.startsWith('data:video/')) return 'Uploaded video (stored data URL)';
-    if (src.startsWith('idb-video:')) return 'Uploaded video (stored local ref)';
-    const parsed = this.parseWidgetVideo(src);
-    if (parsed && (parsed.kind === 'youtube' || parsed.kind === 'vimeo')) return src;
-    return src;
-  }
-
   protected canReplaceSelectedWidget(): boolean {
     const selected = this.selectedItemWidget();
     if (!selected) return false;
-    if (selected.widget.kind === 'image' || selected.widget.kind === 'video') return true;
-    if (selected.widget.kind === 'text') return this.textFeatureEnabled();
-    return false;
+    return selected.widget.kind === 'text' && this.textFeatureEnabled();
   }
 
   protected replaceSelectedWidget(ev: Event) {
@@ -6202,25 +5163,7 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
     const selected = this.selectedItemWidget();
     if (!selected) return;
-    const { pageIndex, widget } = selected;
-    if (widget.kind === 'image') {
-      this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind: 'image' });
-      const el = this.widgetImageFile?.nativeElement;
-      if (el) {
-        el.value = '';
-        el.click();
-      }
-      return;
-    }
-    if (widget.kind === 'video') {
-      this.replaceMediaTarget.set({ pageIndex, widgetId: widget.id, kind: 'video' });
-      const el = this.widgetVideoFile?.nativeElement;
-      if (el) {
-        el.value = '';
-        el.click();
-      }
-      return;
-    }
+    const { widget } = selected;
     if (widget.kind === 'text' && this.textFeatureEnabled()) this.startEditingWidget(widget.id);
   }
 
@@ -6232,36 +5175,6 @@ export class PdfEditorComponent implements AfterViewInit {
     this.removeWidget(selected.pageIndex, selected.widget.id);
   }
 
-  private insertVideoByUrlPrompt() {
-    const raw = window.prompt('Paste video URL');
-    if (!raw) return;
-    const input = raw.trim();
-    const maybeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`;
-    let url = '';
-    try {
-      const parsed = new URL(maybeUrl);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('invalid protocol');
-      url = parsed.toString();
-    } catch {
-      this.errorText.set('Please enter a valid video URL (http/https).');
-      return;
-    }
-    this.errorText.set(null);
-    this.cancelInsertWidgetMode();
-    this.pendingImageDataUrl = null;
-    this.tool.set('text');
-    this.insertWidgetPending.set({ kind: 'video', videoObjectUrl: url });
-    this.focusRightbarInsertPanel();
-    this.rememberReusableAsset({
-      id: `asset_vid_url_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
-      kind: 'video',
-      label: 'Video URL',
-      source: 'url',
-      videoUrl: url,
-      createdAt: Date.now()
-    });
-  }
-
   private rememberReusableAsset(next: ReusableAsset) {
     this.reusableAssets.update((prev) => {
       const duplicateIdx = prev.findIndex((a) => {
@@ -6269,9 +5182,7 @@ export class PdfEditorComponent implements AfterViewInit {
           return a.crmAssetId === next.crmAssetId;
         }
         if (a.kind !== next.kind || a.source !== next.source) return false;
-        if (next.kind === 'image' || next.kind === 'template') return a.imageSrc === next.imageSrc;
-        if (next.source === 'url') return a.videoUrl === next.videoUrl;
-        return a.label === next.label;
+        return a.imageSrc === next.imageSrc;
       });
       if (duplicateIdx === -1) return [next, ...prev].slice(0, PdfEditorComponent.maxPersistedReusableAssets);
       const existing = prev[duplicateIdx]!;
@@ -7023,19 +5934,6 @@ export class PdfEditorComponent implements AfterViewInit {
     return i > 0;
   }
 
-  protected setSelectedLayeredWidgetKind(kind: 'textOverImage' | 'imageBackgroundText', ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const sel = this.selectedItemWidget();
-    if (!sel) return;
-    const { pageIndex, widget } = sel;
-    if (widget.kind !== 'textOverImage' && widget.kind !== 'imageBackgroundText') return;
-    if (widget.kind === kind) return;
-    this.updateWidget(pageIndex, widget.id, (w) =>
-      w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? { ...w, kind } : w
-    );
-  }
-
   protected async addBlankPageAfter(pageIndex: number) {
     await this.mutatePdfPages(
       async (pdf) => {
@@ -7707,11 +6605,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private cloneWidgetForDuplicatePage(w: Widget): Widget {
     const id = this.newWidgetId();
-    const copy: Widget = { ...w, id };
-    if (w.kind === 'video' && w.videoSrc?.startsWith('blob:')) {
-      this.videoObjectUrlByWidgetId.set(id, w.videoSrc);
-    }
-    return copy;
+    return { ...w, id };
   }
 
   private remapWidgetsAfterCopy(fromIndex: number, toIndex: number) {
@@ -8011,48 +6905,10 @@ export class PdfEditorComponent implements AfterViewInit {
 
     const pending = this.insertWidgetPending();
     if (pending) {
-      if (pending.kind === 'image' && pending.imageDataUrl) {
-        const { overlay } = this.getCanvasPair(pageIndex);
-        if (!overlay) return;
-        const p = this.eventToPoint(overlay, ev);
-        this.pendingImageDataUrl = pending.imageDataUrl;
-        this.insertWidgetPending.set(null);
-        this.isInserting.set(false);
-        ev.preventDefault();
-        ev.stopPropagation();
-        void this.placePendingImage(pageIndex, p.x, p.y);
-        return;
-      }
-      if (pending.kind === 'image' && !pending.imageDataUrl) {
-        const { overlay } = this.getCanvasPair(pageIndex);
-        if (!overlay) return;
-        const p = this.eventToPoint(overlay, ev);
-        this.insertWidgetPending.set(null);
-        this.isInserting.set(false);
-        ev.preventDefault();
-        ev.stopPropagation();
-        this.addWidgetAtPoint(pageIndex, 'image', p.x, p.y);
-        return;
-      }
-      if (pending.kind === 'video' && !pending.videoObjectUrl) {
-        const { overlay } = this.getCanvasPair(pageIndex);
-        if (!overlay) return;
-        const p = this.eventToPoint(overlay, ev);
-        this.insertWidgetPending.set(null);
-        this.isInserting.set(false);
-        ev.preventDefault();
-        ev.stopPropagation();
-        this.addWidgetAtPoint(pageIndex, 'video', p.x, p.y);
-        return;
-      }
-
       const { overlay } = this.getCanvasPair(pageIndex);
       if (!overlay) return;
       const p = this.eventToPoint(overlay, ev);
-      this.addWidgetAtPoint(pageIndex, pending.kind, p.x, p.y, {
-        imageDataUrl: pending.imageDataUrl,
-        videoObjectUrl: pending.videoObjectUrl
-      });
+      this.addWidgetAtPoint(pageIndex, pending.kind, p.x, p.y);
       this.insertWidgetPending.set(null);
       this.isInserting.set(false);
       ev.preventDefault();
@@ -8060,7 +6916,7 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
 
-    if (this.tool() !== 'pen' && !(this.tool() === 'image' && this.pendingImageDataUrl)) {
+    if (this.tool() !== 'pen') {
       const { overlay } = this.getCanvasPair(pageIndex);
       if (overlay) {
         const p = this.eventToPoint(overlay, ev);
@@ -8201,7 +7057,7 @@ export class PdfEditorComponent implements AfterViewInit {
       }
     }
 
-    if (this.tool() !== 'pen' && !(this.tool() === 'image' && this.pendingImageDataUrl)) {
+    if (this.tool() !== 'pen') {
       const { overlay } = this.getCanvasPair(pageIndex);
       if (overlay) {
         const p = this.eventToPoint(overlay, ev);
@@ -8371,19 +7227,6 @@ export class PdfEditorComponent implements AfterViewInit {
       this.textDraftFreeRect.set({ w: 320, h: 44 });
       this.redrawOverlay(pageIndex);
     }
-
-    if (this.tool() === 'image') {
-      if (!this.pendingImageDataUrl) {
-        this.errorText.set('Pick an image first.');
-        return;
-      }
-
-      const { overlay } = this.getCanvasPair(pageIndex);
-      if (!overlay) return;
-      const p = this.eventToPoint(overlay, ev);
-      void this.placePendingImage(pageIndex, p.x, p.y);
-      ev.stopPropagation();
-    }
   }
 
   protected onOverlayPointerMove(pageIndex: number, ev: PointerEvent) {
@@ -8420,7 +7263,6 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private updateDetectedPdfImageHover(pageIndex: number, ev: PointerEvent) {
     if (this.tool() === 'pen') return;
-    if (this.tool() === 'image' && this.pendingImageDataUrl) return;
     const { overlay } = this.getCanvasPair(pageIndex);
     if (!overlay) return;
     const p = this.eventToPoint(overlay, ev);
@@ -10812,43 +9654,6 @@ export class PdfEditorComponent implements AfterViewInit {
     ctx.restore();
   }
 
-  protected async onPickImageFile(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    input.value = '';
-    if (!file) {
-      this.isImagePlacing.set(false);
-      return;
-    }
-
-    this.errorText.set(null);
-    this.isImagePlacing.set(true);
-    try {
-      const dataUrl = await this.readAndCropImageFile(file);
-      if (!dataUrl) {
-        this.pendingImageDataUrl = null;
-        this.tool.set('text');
-        return;
-      }
-      this.pendingImageDataUrl = dataUrl;
-      this.rememberReusableAsset({
-        id: `asset_img_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 7)}`,
-        kind: 'image',
-        label: file.name || 'Uploaded image',
-        source: 'upload',
-        imageSrc: dataUrl,
-        createdAt: Date.now()
-      });
-      this.tool.set('image');
-      this.redrawOverlay(this.activePageIndex());
-    } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Failed to pick image.');
-      this.pendingImageDataUrl = null;
-    } finally {
-      this.isImagePlacing.set(false);
-    }
-  }
-
   private readFileAsDataUrl(file: File): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -11060,43 +9865,6 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
-  protected async openSelectedWidgetImageCrop(ev: Event) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const sel = this.selectedItemWidget();
-    if (!sel || sel.widget.kind !== 'image') return;
-    const imageSrc = sel.widget.imageSrc;
-    if (!imageSrc) return;
-    const { pageIndex, widget } = sel;
-    let w = widget;
-    if (!w.imageNaturalW || !w.imageNaturalH) {
-      try {
-        const img = await this.loadHtmlImage(imageSrc);
-        const nw = Math.max(1, img.naturalWidth);
-        const nh = Math.max(1, img.naturalHeight);
-        this.updateWidget(pageIndex, w.id, (cur) =>
-          cur.kind === 'image' ? { ...cur, imageNaturalW: nw, imageNaturalH: nh } : cur
-        );
-        w = { ...w, imageNaturalW: nw, imageNaturalH: nh };
-      } catch {
-        this.errorText.set('Could not read image for cropping.');
-        return;
-      }
-    }
-    const sw = Math.max(1, w.imageNaturalW ?? 1);
-    const sh = Math.max(1, w.imageNaturalH ?? 1);
-    const c = w.imageCrop ?? { x: 0, y: 0, w: sw, h: sh };
-    this.imageCropSession.set({
-      mode: 'widget',
-      pageIndex,
-      widgetId: w.id,
-      leftPct: (c.x / sw) * 100,
-      topPct: (c.y / sh) * 100,
-      rightPct: ((sw - c.x - c.w) / sw) * 100,
-      bottomPct: ((sh - c.y - c.h) / sh) * 100
-    });
-  }
-
   protected patchImageCropField(
     field: 'leftPct' | 'topPct' | 'rightPct' | 'bottomPct',
     value: number
@@ -11139,65 +9907,10 @@ export class PdfEditorComponent implements AfterViewInit {
       this.redrawOverlay(s.pageIndex);
       return;
     }
-
-    const widget = this.getWidget(s.pageIndex, s.widgetId);
-    if (!widget || widget.kind !== 'image') return;
-    const sw = Math.max(1, widget.imageNaturalW ?? 1);
-    const sh = Math.max(1, widget.imageNaturalH ?? 1);
-    const cx = (l / 100) * sw;
-    const cy = (t / 100) * sh;
-    const cw = Math.max(1, (1 - (l + r) / 100) * sw);
-    const ch = Math.max(1, (1 - (t + b) / 100) * sh);
-    this.beginHistoryStep();
-    this.updateWidget(s.pageIndex, s.widgetId, (cur) => {
-      if (cur.kind !== 'image') return cur;
-      return {
-        ...cur,
-        imageCrop: {
-          x: Math.round(cx),
-          y: Math.round(cy),
-          w: Math.round(cw),
-          h: Math.round(ch)
-        }
-      };
-    });
-    this.imageCropSession.set(null);
   }
 
   protected cancelImageCrop() {
     this.imageCropSession.set(null);
-  }
-
-  protected widgetImageCropWrapStyle(w: Widget): Record<string, string> {
-    if (w.kind !== 'image') return {};
-    return {
-      width: `${w.w}px`,
-      height: `${w.h}px`,
-      overflow: 'hidden',
-      borderRadius: '12px',
-      background: '#0f172a'
-    };
-  }
-
-  protected widgetImageCropImgStyle(w: Widget): Record<string, string> {
-    if (w.kind !== 'image') return {};
-    const nw = Math.max(1, w.imageNaturalW ?? 1);
-    const nh = Math.max(1, w.imageNaturalH ?? 1);
-    const c = w.imageCrop ?? { x: 0, y: 0, w: nw, h: nh };
-    const scale = Math.min(w.w / c.w, w.h / c.h);
-    const dispW = nw * scale;
-    const dispH = nh * scale;
-    const ml = -c.x * scale;
-    const mt = -c.y * scale;
-    return {
-      width: `${dispW}px`,
-      height: `${dispH}px`,
-      marginLeft: `${ml}px`,
-      marginTop: `${mt}px`,
-      display: 'block',
-      maxWidth: 'none',
-      verticalAlign: 'top'
-    };
   }
 
   protected removeSelectedPlacedImage() {
@@ -11534,18 +10247,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const pageIndex = Number(k);
       const widgets: PersistedWidget[] = [];
       for (const w of list ?? []) {
-        let persistedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
-        if (w.kind === 'video' && persistedVideoSrc?.startsWith('blob:')) {
-          const blobDataUrl = await this.blobUrlToDataUrl(persistedVideoSrc);
-          if (blobDataUrl) persistedVideoSrc = blobDataUrl;
-        }
-        if (w.kind === 'video' && persistedVideoSrc?.startsWith('data:video/')) {
-          const ref = this.persistedVideoRef(id, w.id);
-          await this.putPersistedVideoDataUrl(ref, persistedVideoSrc);
-          persistedVideoSrc = ref;
-        }
-        const persistImage =
-          w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
+        if (w.kind !== 'table' && w.kind !== 'text') continue;
         widgets.push({
           id: w.id,
           kind: w.kind,
@@ -11553,15 +10255,7 @@ export class PdfEditorComponent implements AfterViewInit {
           y: w.y,
           w: w.w,
           h: w.h,
-          imageSrc: persistImage ? w.imageSrc : undefined,
-          imageNaturalW: w.kind === 'image' ? w.imageNaturalW : undefined,
-          imageNaturalH: w.kind === 'image' ? w.imageNaturalH : undefined,
-          imageCrop: w.kind === 'image' ? w.imageCrop : undefined,
-          videoSrc: persistedVideoSrc,
           textValue: w.kind === 'text' ? w.textValue : undefined,
-          signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
-          layeredTextValue:
-            w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? w.layeredTextValue : undefined,
           table: w.kind === 'table' && w.table ? this.cloneTable(w.table) : undefined
         });
       }
@@ -11624,36 +10318,14 @@ export class PdfEditorComponent implements AfterViewInit {
       const widgets: Widget[] = [];
       for (const w of list ?? []) {
         if (!w || !this.isPersistableWidgetKind(w.kind)) continue;
-        let resolvedVideoSrc = w.kind === 'video' ? w.videoSrc : undefined;
-        if (w.kind === 'video' && typeof resolvedVideoSrc === 'string' && resolvedVideoSrc.startsWith('idb-video:')) {
-          resolvedVideoSrc = await this.getPersistedVideoDataUrl(resolvedVideoSrc);
-        }
-        const restoreImage =
-          w.kind === 'image' || w.kind === 'textOverImage' || w.kind === 'imageBackgroundText';
         widgets.push({
           id: w.id,
           kind: w.kind,
           x: Number.isFinite(w.x) ? w.x : 0,
           y: Number.isFinite(w.y) ? w.y : 0,
-          w: Number.isFinite(w.w) ? w.w : 220,
-          h: Number.isFinite(w.h) ? w.h : 160,
-          imageSrc: restoreImage ? w.imageSrc : undefined,
-          imageNaturalW: w.kind === 'image' && Number.isFinite(w.imageNaturalW as number) ? w.imageNaturalW : undefined,
-          imageNaturalH: w.kind === 'image' && Number.isFinite(w.imageNaturalH as number) ? w.imageNaturalH : undefined,
-          imageCrop:
-            w.kind === 'image' && w.imageCrop && typeof w.imageCrop === 'object'
-              ? {
-                x: Number.isFinite(w.imageCrop.x) ? w.imageCrop.x : 0,
-                y: Number.isFinite(w.imageCrop.y) ? w.imageCrop.y : 0,
-                w: Number.isFinite(w.imageCrop.w) ? w.imageCrop.w : 1,
-                h: Number.isFinite(w.imageCrop.h) ? w.imageCrop.h : 1
-              }
-              : undefined,
-          videoSrc: w.kind === 'video' ? resolvedVideoSrc : undefined,
+          w: Number.isFinite(w.w) ? w.w : w.kind === 'table' ? 400 : 300,
+          h: Number.isFinite(w.h) ? w.h : w.kind === 'table' ? 220 : 160,
           textValue: w.kind === 'text' ? String(w.textValue ?? '') : undefined,
-          signatureSrc: w.kind === 'signature' ? w.signatureSrc : undefined,
-          layeredTextValue:
-            w.kind === 'textOverImage' || w.kind === 'imageBackgroundText' ? String(w.layeredTextValue ?? '') : undefined,
           table: w.kind === 'table' ? this.normalizePersistedTable(w.table) : undefined
         });
       }
@@ -11673,11 +10345,7 @@ export class PdfEditorComponent implements AfterViewInit {
           )
         : [];
       const images = Array.isArray(edit.images)
-        ? edit.images.filter(
-            (img) =>
-              !this.isBakedPdfImageReplacement(img.id) ||
-              replaces.some((r) => r.source === 'mediaErase' && this.isSameReplaceRegion(r, img))
-          )
+        ? []
         : [];
       out[pageIndex] = {
         viewportWidth: Number.isFinite(edit.viewportWidth) ? edit.viewportWidth : 1,
@@ -11716,15 +10384,7 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private isPersistableWidgetKind(kind: unknown): kind is WidgetKind {
-    return (
-      kind === 'table' ||
-      kind === 'image' ||
-      kind === 'text' ||
-      kind === 'video' ||
-      kind === 'signature' ||
-      kind === 'textOverImage' ||
-      kind === 'imageBackgroundText'
-    );
+    return kind === 'table' || kind === 'text';
   }
 
   private editorStateStorageKey(id: string): string {
