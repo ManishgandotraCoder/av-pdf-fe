@@ -259,23 +259,23 @@
           Clear all edits
         </button>
 
-        <button
-          class="docsSave"
-          type="button"
-          (click)="savePdfAsNewVersion()"
-          [disabled]="pageCount() === 0 || isLoading() || isSaving() || docId() === null || readonlyMode()"
-          title="Save"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M17 21v-8H7v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M7 3v5h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-          </svg>
-          @if (isSaving()) { Saving… } @else { Save }
-        </button>
         @if (isAutoVersionSaving() && !isSaving()) {
           <span class="docsAutoSaving">Auto-saving versions...</span>
         }
+
+        <button
+          class="docsToolbarBtn"
+          type="button"
+          (click)="saveChanges()"
+          [disabled]="pageCount() === 0 || docId() === null || isLoading() || isSaving() || readonlyMode()"
+          title="Save changes"
+        >
+          @if (isSaving()) {
+            Saving…
+          } @else {
+            Save
+          }
+        </button>
 
         <button
           class="docsToolbarBtn"
@@ -504,6 +504,8 @@
       [class.isSidebarCollapsed]="sidebarCollapsed()"
     >
       <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
+      <input #widgetImageFile class="file" type="file" accept="image/png,image/jpeg" (change)="onWidgetImagePicked($event)" hidden />
+      <input #widgetVideoFile class="file" type="file" accept="video/*" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
 
@@ -1159,6 +1161,82 @@
                   </div>
                   <div class="rightbarMediaActions__row">
                     <button type="button" class="rightbarMediaActions__btn rightbarMediaActions__btnDanger" (click)="removeSelectedWidget($event)">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (selectedPlacedImage(); as selectedImage) {
+                <div class="rightbarMediaActions" role="group" aria-label="Selected image actions">
+                  <div class="rightbarMediaActions__title">Selected image</div>
+                  <div class="rightbarAssetsHint">
+                    Page: {{ selectedImage.pageIndex + 1 }}
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="replaceSelectedPlacedImage($event)"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="openImageCrop()"
+                    >
+                      Crop
+                    </button>
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="removeSelectedPlacedImage($event)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (selectedDetectedMediaItem(); as selectedMedia) {
+                <div class="rightbarMediaActions" role="group" aria-label="Detected media actions">
+                  <div class="rightbarMediaActions__title">{{ selectedDetectedMediaTitle() }}</div>
+                  <div class="rightbarAssetsHint">
+                    Page: {{ selectedMedia.pageIndex + 1 }}
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="replaceSelectedDetectedMedia($event)"
+                    >
+                      Replace
+                    </button>
+                    @if (selectedMedia.media.kind === 'image') {
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="cropSelectedDetectedEmbeddedImage($event)"
+                      >
+                        Crop
+                      </button>
+                    }
+                  </div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="removeSelectedDetectedMedia($event)"
+                    >
                       Remove
                     </button>
                   </div>

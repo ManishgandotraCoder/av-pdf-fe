@@ -142,6 +142,14 @@ export type PageFurniture = {
   };
 };
 
+/** Persisted PDF editor overlays (edits + widgets); stored in MongoDB / backend. */
+export type PdfEditorStateV2 = {
+  version: 2;
+  fileName?: string;
+  editsByPage: Record<string, unknown>;
+  widgetsByPage: Record<string, unknown>;
+};
+
 const PROD_BACKEND_ORIGIN = 'https://av-pdf-be.vercel.app';
 const LOCAL_BACKEND_ORIGIN = 'http://localhost:5050';
 
@@ -464,6 +472,33 @@ export class PdfApiService {
     const text = await res.text();
     if (!res.ok) {
       const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to save page furniture.';
+      throw new Error(msg);
+    }
+  }
+
+  async getEditorState(id: string): Promise<PdfEditorStateV2 | null> {
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/editor-state`));
+    const text = await res.text();
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to load editor state.';
+      throw new Error(msg);
+    }
+    const payload = this.parseJsonBody<{ editorState?: PdfEditorStateV2 | null }>(text, 'editor state');
+    const st = payload?.editorState;
+    if (!st || typeof st !== 'object') return null;
+    return st as PdfEditorStateV2;
+  }
+
+  async putEditorState(id: string, editorState: PdfEditorStateV2 | null): Promise<void> {
+    const res = await fetch(this.apiUrl(`/api/pdfs/${encodeURIComponent(id)}/editor-state`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editorState })
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const msg = this.parseErrorFromBody(text, res.status) ?? 'Failed to save editor state.';
       throw new Error(msg);
     }
   }

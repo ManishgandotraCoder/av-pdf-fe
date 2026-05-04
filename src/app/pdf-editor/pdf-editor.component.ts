@@ -20,19 +20,20 @@ import { FormsModule } from '@angular/forms';
 
 import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
-import {
-  AnnotationType,
-  GlobalWorkerOptions,
-  getDocument,
-  OPS,
-  Util,
-  type PDFDocumentProxy
-} from 'pdfjs-dist';
+  import {
+    AnnotationType,
+    GlobalWorkerOptions,
+    getDocument,
+    OPS,
+    Util,
+    type PDFDocumentProxy
+  } from 'pdfjs-dist';
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import {
   PdfApiService,
   type CrmAssetLibraryCategory,
   type CrmAssetLibraryItem,
+  type PdfEditorStateV2,
   type ProposalDetails,
   type ProposalRejection,
   type ProposalVersion,
@@ -97,6 +98,7 @@ type AssetLibraryRow =
 
 type PersistedEditorState = {
   version: 2;
+  fileName?: string;
   editsByPage: Record<number, PageEdits>;
   widgetsByPage: Record<number, PersistedWidget[]>;
 };
@@ -962,7 +964,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected readonly isAutoVersionSaving = signal(false);
   protected readonly globalTypography = signal<GlobalTypographySettings>(cloneGlobalTypography(DEFAULT_GLOBAL_TYPOGRAPHY));
   private autoVersionSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  private editorStatePersistTimer: ReturnType<typeof setTimeout> | null = null;
+  private editorRemoteSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private autoVersionSaveInFlight = false;
   private autoVersionSavePending = false;
   private autoVersionSnapshotReady = false;
@@ -970,6 +972,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private pdfBytes: Uint8Array | null = null;
   private pdfDoc: PDFDocumentProxy | null = null;
+  private editorSourceProposalId: string | null = null;
 
   private clonePdfBytes(bytes: Uint8Array): Uint8Array {
     // Always copy. pdf.js can transfer/detach the underlying buffer when `data` is a TypedArray;
@@ -1164,17 +1167,8 @@ export class PdfEditorComponent implements AfterViewInit {
 
     effect(() => {
       const id = this.docId();
-      const edits = this.editsByPage();
-      const widgets = this.widgetsByPage();
-      if (!id || this.isLoading()) return;
-      void this.persistEditorStateForDoc(id, edits, widgets);
-    });
-
-    effect(() => {
-      const id = this.docId();
       const furniture = this.pageFurniture();
-      if (!id || !this.furniturePersistenceReady) return;
-      this.persistPageFurnitureForDoc(id, furniture);
+      if (!id || !this.furniturePersistenceReady || this.readonlyMode()) return;
       this.scheduleFurnitureSave(id, furniture);
     });
 
@@ -1185,7 +1179,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const furniture = this.pageFurniture();
       const pageCount = this.pageCount();
       const fileName = this.fileName();
-      if (!id || pageCount === 0) return;
+      if (!id || pageCount === 0 || this.readonlyMode()) return;
       const snapshot = this.autoVersionSnapshotFingerprint(edits, widgets, furniture, pageCount, fileName);
       if (!this.autoVersionSnapshotReady) {
         this.autoVersionSnapshotReady = true;
@@ -1195,13 +1189,6 @@ export class PdfEditorComponent implements AfterViewInit {
       if (snapshot === this.lastAutoVersionSnapshot) return;
       this.lastAutoVersionSnapshot = snapshot;
       this.scheduleAutoVersionSave();
-    });
-
-    effect(() => {
-      const id = this.docId();
-      const name = this.fileName();
-      if (!id || !name) return;
-      this.persistTitleForDoc(id, name);
     });
 
     // Auto-dismiss error banners toasts.
@@ -2364,7 +2351,7 @@ export class PdfEditorComponent implements AfterViewInit {
   protected updateTextWidget(pageIndex: number, widgetId: string, value: string) {
     if (!this.textFeatureEnabled()) return;
     this.updateWidget(pageIndex, widgetId, (w) => ({ ...w, textValue: value }));
-    this.scheduleEditorStatePersist();
+    this.markEditorContentChanged();
   }
 
   /**
@@ -2448,25 +2435,47 @@ export class PdfEditorComponent implements AfterViewInit {
     this.startEditingWidget(widgetId, ev);
   }
 
+  private scheduleRemoteEditorStateSave() {
+    if (this.editorRemoteSaveTimer !== null) clearTimeout(this.editorRemoteSaveTimer);
+    this.editorRemoteSaveTimer = setTimeout(() => {
+      this.editorRemoteSaveTimer = null;
+      void this.flushRemoteEditorStateImmediate();
+    }, 350);
+  }
+
+  private async flushRemoteEditorStateImmediate() {
+    if (this.editorRemoteSaveTimer !== null) {
+      clearTimeout(this.editorRemoteSaveTimer);
+      this.editorRemoteSaveTimer = null;
+    }
+    const id = this.docId();
+    if (!id || this.isLoading() || this.readonlyMode()) return;
+    try {
+      await this.persistEditorStateToRemote(id, this.editsByPage(), this.widgetsByPage(), this.fileName());
+    } catch {
+      // non-fatal; user can retry via Save
+    }
+  }
+
   private scheduleEditorStatePersist() {
-    if (this.editorStatePersistTimer !== null) clearTimeout(this.editorStatePersistTimer);
-    this.editorStatePersistTimer = setTimeout(() => {
-      this.editorStatePersistTimer = null;
-      this.persistEditorStateNow();
-    }, 120);
+    this.scheduleRemoteEditorStateSave();
   }
 
   private cancelEditorStatePersist() {
-    if (this.editorStatePersistTimer !== null) {
-      clearTimeout(this.editorStatePersistTimer);
-      this.editorStatePersistTimer = null;
+    if (this.editorRemoteSaveTimer !== null) {
+      clearTimeout(this.editorRemoteSaveTimer);
+      this.editorRemoteSaveTimer = null;
     }
   }
 
   private persistEditorStateNow() {
-    const id = this.docId();
-    if (!id || this.isLoading()) return;
-    void this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
+    void this.flushRemoteEditorStateImmediate();
+  }
+
+  private markEditorContentChanged() {
+    if (!this.docId() || this.isLoading()) return;
+    this.scheduleEditorStatePersist();
+    this.scheduleAutoVersionSave();
   }
 
   protected tableCellValue(w: Widget, r: number, c: number) {
@@ -2983,9 +2992,9 @@ export class PdfEditorComponent implements AfterViewInit {
         clearTimeout(this.autoVersionSaveTimer);
         this.autoVersionSaveTimer = null;
       }
-      if (this.editorStatePersistTimer !== null) {
-        clearTimeout(this.editorStatePersistTimer);
-        this.editorStatePersistTimer = null;
+      if (this.editorRemoteSaveTimer !== null) {
+        clearTimeout(this.editorRemoteSaveTimer);
+        this.editorRemoteSaveTimer = null;
       }
       try {
         this.pdfDoc?.destroy();
@@ -3017,6 +3026,12 @@ export class PdfEditorComponent implements AfterViewInit {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       this.assertReadablePdfHeader(bytes);
+      this.cancelAllPdfRenderTasks();
+      try {
+        await this.pdfDoc?.destroy();
+      } catch {
+        // ignore stale document cleanup failures
+      }
       this.pdfBytes = this.clonePdfBytes(bytes);
 
       // Use a throwaway copy for pdf.js; it may transfer/detach buffers.
@@ -3119,16 +3134,30 @@ export class PdfEditorComponent implements AfterViewInit {
     this.isLoading.set(true);
     await this.yieldForUiPaint();
     try {
-      const [meta, bytes, furniture] = await Promise.all([
+      const [meta, serverBytes, furniture, remoteEditorState] = await Promise.all([
         this.api.getMeta(id),
         this.api.getBytes(id),
-        this.api.getFurniture(id).catch(() => null)
+        this.api.getFurniture(id).catch(() => null),
+        this.api.getEditorState(id).catch(() => null)
       ]);
 
-      const persistedTitle = this.loadPersistedTitleForDoc(id);
-      this.fileName.set(persistedTitle || meta.name);
-      this.assertReadablePdfHeader(bytes);
-      this.pdfBytes = this.clonePdfBytes(bytes);
+      const nameFromState = remoteEditorState?.fileName?.trim();
+      this.fileName.set(nameFromState || meta.name);
+      this.assertReadablePdfHeader(serverBytes);
+
+      const sourceBytes = serverBytes;
+      const sourceLooksEditable = await this.pdfBytesLookEditableForDetection(serverBytes);
+      const hasMeaningfulRemoteState = this.editorStatePayloadIsMeaningful(remoteEditorState);
+      this.editorSourceProposalId = sourceLooksEditable ? id : null;
+      this.assertReadablePdfHeader(sourceBytes);
+
+      this.cancelAllPdfRenderTasks();
+      try {
+        await this.pdfDoc?.destroy();
+      } catch {
+        // ignore stale document cleanup failures
+      }
+      this.pdfBytes = this.clonePdfBytes(sourceBytes);
 
       const forPdfJs = this.clonePdfBytes(this.pdfBytes);
       const loadingTask = getDocument({ data: forPdfJs });
@@ -3140,7 +3169,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.openPageMenuIndex.set(null);
       this.sidebarSlideMenuOpenIndex.set(null);
       this.pageThumbUrlByPage.set({});
-      const persistedEditorState = await this.loadPersistedEditorStateForDoc(id, doc.numPages);
+      const persistedEditorState = await this.parseEditorStateForLoad(remoteEditorState, doc.numPages);
       this.editsByPage.set(persistedEditorState.editsByPage);
       this.embeddedImageReplacementByDetectedId.clear();
       this.detectedTextByPage.set({});
@@ -3152,13 +3181,15 @@ export class PdfEditorComponent implements AfterViewInit {
       this.customKeySlots.set([]);
       this.ensureKeySlotSectionOverrides();
       this.widgetsByPage.set(persistedEditorState.widgetsByPage);
-      const localFurniture = this.loadPersistedPageFurnitureForDoc(id);
       this.pageFurniture.set(
-        this.normalizePageFurniture(localFurniture ?? furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
+        this.normalizePageFurniture(furniture ?? clonePageFurniture(DEFAULT_PAGE_FURNITURE))
       );
       this.syncDynamicFieldDrafts(this.pageFurniture());
       this.furniturePersistenceReady = true;
       this.resetHistory();
+      if (hasMeaningfulRemoteState && !sourceLooksEditable) {
+        this.errorText.set('This saved PDF is flattened, so original text/image detection cannot be recovered for this version. Reopen the original upload or clear saved edits to restore detection.');
+      }
 
       // Ensure the first page is fully rendered before we drop the loading banner.
       await this.waitForActiveCanvasReady(1600);
@@ -3629,30 +3660,6 @@ export class PdfEditorComponent implements AfterViewInit {
     };
   }
 
-  private removeBakedPdfImageEdits(edits: Record<number, PageEdits>): Record<number, PageEdits> {
-    const out: Record<number, PageEdits> = {};
-    for (const [k, e] of Object.entries(edits)) {
-      const pageIndex = Number(k);
-      if (!Number.isFinite(pageIndex) || !e) continue;
-      const images = (e.images ?? []).filter((img) => !this.isBakedPdfImageReplacement(img.id));
-      const replaces = (e.replaces ?? []).filter((r) => r.source !== 'mediaErase');
-      if (
-        (e.ink?.length ?? 0) === 0 &&
-        (e.text?.length ?? 0) === 0 &&
-        images.length === 0 &&
-        replaces.length === 0
-      ) {
-        continue;
-      }
-      out[pageIndex] = { ...e, images, replaces };
-    }
-    return out;
-  }
-
-  private isBakedPdfImageReplacement(id: string): boolean {
-    return id.startsWith('pdfmedia_replace_p');
-  }
-
   private pdfImageReplacementPageIndex(id: string): number | null {
     const match = /^pdfmedia_replace_p(\d+)_/.exec(id);
     if (!match) return null;
@@ -3706,10 +3713,6 @@ export class PdfEditorComponent implements AfterViewInit {
     }
 
     return out;
-  }
-
-  private editorStateForSavedPdf(): Record<number, PageEdits> {
-    return this.removeBakedPdfImageEdits(this.editsByPage());
   }
 
   private restoreHistorySnapshot(snapshot: EditorHistorySnapshot) {
@@ -4121,7 +4124,7 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         // Images
-        for (const img of edit.images) {
+        for (const img of edit.images ?? []) {
           const image = await this.loadHtmlImage(img.dataUrl);
           const { sx, sy, sw, sh } = this.getSourceRectForPlaced(img, image);
           ctx.drawImage(
@@ -4310,7 +4313,7 @@ export class PdfEditorComponent implements AfterViewInit {
       // Download is an export action. Keep the editable editor document state separate
       // so a refresh does not turn layers into baked, non-editable PDF pixels.
       const id = this.docId();
-      if (id) void this.persistEditorStateForDoc(id, this.editsByPage(), this.widgetsByPage());
+      if (id) void this.persistEditorStateToRemote(id, this.editsByPage(), this.widgetsByPage(), this.fileName());
 
       // Some builds type pdf-lib output buffers as ArrayBufferLike (SharedArrayBuffer),
       // which TS won't accept as BlobPart. Force a real ArrayBuffer-backed copy.
@@ -4437,55 +4440,6 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected readonly isSaving = signal(false);
 
-  /** Default save behavior: create a new immutable proposal version. */
-  protected async savePdfAsNewVersion() {
-    if (this.readonlyMode()) return;
-    const id = this.docId();
-    if (!id) {
-      this.errorText.set('Open a document from the library to save to the server.');
-      return;
-    }
-    if (!this.pdfBytes || this.pageCount() === 0) return;
-
-    this.errorText.set(null);
-    this.isSaving.set(true);
-    try {
-      const safeBytes = await this.buildSavedProposalPdfBytes();
-      const nextName = this.buildVersionName(this.fileName() ?? 'Proposal.pdf');
-      const currentWidgets = this.widgetsByPage();
-      const currentFurniture = this.pageFurniture();
-      const currentTitle = this.fileName();
-      const created = await this.api.saveAsNewProposal(id, safeBytes, {
-        name: nextName,
-        editedBy: this.getEditedBy()
-      });
-      if (!created?.id || typeof created.id !== 'string') {
-        throw new Error('Save did not return a new document id. Check the API and try again.');
-      }
-      // New version gets a new doc id; carry local editor state forward
-      // so layers remain editable after navigation/refresh.
-      this.cancelEditorStatePersist();
-      await this.persistEditorStateForDoc(created.id, this.editorStateForSavedPdf(), currentWidgets);
-      this.persistPageFurnitureForDoc(created.id, currentFurniture);
-      if (currentTitle) this.persistTitleForDoc(created.id, currentTitle);
-      try {
-        await this.api.putFurniture(created.id, this.normalizePageFurniture(currentFurniture));
-      } catch {
-        // PDF is stored; furniture remains in localStorage for this browser.
-      }
-      this.showSlideToast('New version saved');
-      const nav = await this.router.navigate(['/edit', created.id]);
-      if (nav === false) {
-        this.errorText.set('Version saved, but navigation failed. Open the new version from the library.');
-        await this.loadProposalVersions(id);
-      }
-    } catch (e) {
-      this.errorText.set(e instanceof Error ? e.message : 'Save failed - reconnecting.');
-    } finally {
-      this.isSaving.set(false);
-    }
-  }
-
   protected openOverwriteConfirmation() {
     if (this.readonlyMode()) return;
     this.overwriteConfirmOpen.set(true);
@@ -4520,17 +4474,63 @@ export class PdfEditorComponent implements AfterViewInit {
       const safeBytes = await this.buildSavedProposalPdfBytes();
       await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
       this.cancelEditorStatePersist();
-      await this.persistEditorStateForDoc(id, this.editorStateForSavedPdf(), this.widgetsByPage());
+      await this.persistEditorStateToRemote(id, this.editsByPage(), this.widgetsByPage(), this.fileName());
       try {
         await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
       } catch {
-        // Bytes updated; furniture still in localStorage.
+        // Bytes updated; furniture sync is best-effort.
       }
       this.showSlideToast('Original overwritten successfully');
+      await this.loadFromApi(id);
       await this.loadProposalVersions(id);
       this.closeOverwriteConfirmation();
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to overwrite proposal.');
+    } finally {
+      this.isSaving.set(false);
+    }
+  }
+
+  /** Persists edits, source PDF, and furniture (same snapshot as auto-save), with explicit feedback. */
+  protected async saveChanges() {
+    if (this.readonlyMode()) return;
+    const id = this.docId();
+    if (!id || !this.pdfBytes || this.pageCount() === 0) return;
+    if (this.isLoading() || this.isSaving()) return;
+
+    if (this.autoVersionSaveTimer !== null) {
+      clearTimeout(this.autoVersionSaveTimer);
+      this.autoVersionSaveTimer = null;
+    }
+
+    const waitStart = Date.now();
+    while (this.autoVersionSaveInFlight && Date.now() - waitStart < 10_000) {
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    if (this.autoVersionSaveInFlight) return;
+
+    if (this.hasUnsavedDynamicFields()) {
+      this.pageFurniture.update((prev) => ({
+        ...prev,
+        proposalTitle: this.proposalTitleDraft(),
+        clientName: this.clientNameDraft()
+      }));
+    }
+
+    this.errorText.set(null);
+    this.isSaving.set(true);
+    this.autoVersionSavePending = false;
+    try {
+      this.cancelEditorStatePersist();
+      await this.persistEditorStateToRemote(id, this.editsByPage(), this.widgetsByPage(), this.fileName());
+      try {
+        await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
+      } catch {
+        // Editor state is on the server; furniture can retry.
+      }
+      this.showSlideToast('Saved');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Save failed');
     } finally {
       this.isSaving.set(false);
     }
@@ -4579,12 +4579,13 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private clearLocalDocPersistence(ids: string[]) {
-    if (typeof localStorage === 'undefined') return;
     for (const docId of ids) {
-      localStorage.removeItem(this.editorStateStorageKey(docId));
-      localStorage.removeItem(this.titleStorageKey(docId));
-      localStorage.removeItem(this.pageFurnitureStorageKey(docId));
-      localStorage.removeItem(this.legacyMediaWidgetsStorageKey(docId));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(this.editorStateStorageKey(docId));
+        localStorage.removeItem(this.titleStorageKey(docId));
+        localStorage.removeItem(this.pageFurnitureStorageKey(docId));
+        localStorage.removeItem(this.legacyMediaWidgetsStorageKey(docId));
+      }
     }
   }
 
@@ -4646,6 +4647,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private async flushAutoVersionSave() {
     const id = this.docId();
     if (!id || !this.pdfBytes || this.pageCount() === 0) return;
+    if (this.readonlyMode()) return;
     if (this.isLoading() || this.isSaving()) {
       this.autoVersionSavePending = true;
       return;
@@ -4657,11 +4659,13 @@ export class PdfEditorComponent implements AfterViewInit {
     this.autoVersionSaveInFlight = true;
     this.isAutoVersionSaving.set(true);
     try {
-      const safeBytes = await this.buildSavedProposalPdfBytes();
-      await this.api.overwriteProposal(id, safeBytes, this.getEditedBy());
       this.cancelEditorStatePersist();
-      await this.persistEditorStateForDoc(id, this.editorStateForSavedPdf(), this.widgetsByPage());
-      await this.loadProposalVersions(id);
+      await this.persistEditorStateToRemote(id, this.editsByPage(), this.widgetsByPage(), this.fileName());
+      try {
+        await this.api.putFurniture(id, this.normalizePageFurniture(this.pageFurniture()));
+      } catch {
+        // Editor state is on the server; furniture can retry.
+      }
     } catch {
       // Avoid blocking editing flow for auto-version failures.
     } finally {
@@ -4703,6 +4707,21 @@ export class PdfEditorComponent implements AfterViewInit {
   private overlayNominalCssSize(overlay: HTMLCanvasElement): { w: number; h: number } {
     const dpr = window.devicePixelRatio || 1;
     return { w: overlay.width / dpr, h: overlay.height / dpr };
+  }
+
+  /** Keeps export/replace math aligned with the canvas when edits lack viewport metadata (e.g. 1×1 placeholder). */
+  private mergePageEditViewport(pageIndex: number, existing: PageEdits): { viewportWidth: number; viewportHeight: number } {
+    const ew = existing.viewportWidth;
+    const eh = existing.viewportHeight;
+    if (ew > 1 && eh > 1) return { viewportWidth: ew, viewportHeight: eh };
+    if (pageIndex === this.activePageIndex()) {
+      const { overlay } = this.getCanvasPair(pageIndex);
+      if (overlay) {
+        const { w, h } = this.overlayNominalCssSize(overlay);
+        if (w > 1 && h > 1) return { viewportWidth: w, viewportHeight: h };
+      }
+    }
+    return { viewportWidth: Math.max(1, ew), viewportHeight: Math.max(1, eh) };
   }
 
   private async renderActivePage() {
@@ -5017,6 +5036,64 @@ export class PdfEditorComponent implements AfterViewInit {
       el.value = '';
       el.click();
     }
+  }
+
+  protected async onWidgetImagePicked(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    if (!file) return;
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+      this.errorText.set('Please select a PNG or JPEG image.');
+      return;
+    }
+    this.errorText.set(null);
+    this.isInserting.set(true);
+    try {
+      const dataUrl = await this.readAndCropImageFile(file);
+      if (!dataUrl) return;
+
+      const placedTarget = this.placedImageReplaceTarget;
+      if (placedTarget) {
+        this.placedImageReplaceTarget = null;
+        await this.replacePlacedImageFromDataUrl(placedTarget.pageIndex, placedTarget.id, dataUrl);
+        return;
+      }
+
+      const embeddedTarget = this.embeddedMediaReplaceTarget;
+      if (embeddedTarget && embeddedTarget.kind === 'image') {
+        this.embeddedMediaReplaceTarget = null;
+        await this.placeReplacementImageInPdfMediaRect(embeddedTarget.pageIndex, dataUrl, {
+          id: embeddedTarget.id,
+          kind: 'image',
+          x: embeddedTarget.x,
+          y: embeddedTarget.y,
+          w: embeddedTarget.w,
+          h: embeddedTarget.h
+        });
+        return;
+      }
+
+      this.errorText.set('Select an image in the page first, then use Replace.');
+    } catch (e) {
+      this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
+    } finally {
+      this.isInserting.set(false);
+    }
+  }
+
+  private async replacePlacedImageFromDataUrl(pageIndex: number, id: string, dataUrl: string) {
+    const src = await this.loadHtmlImage(dataUrl);
+    this.beginHistoryStep();
+    this.updatePlacedImage(pageIndex, id, (a) => ({
+      ...a,
+      dataUrl,
+      srcW: Math.max(1, src.naturalWidth),
+      srcH: Math.max(1, src.naturalHeight),
+      crop: undefined
+    }));
+    this.selectedPlacedImageId.set(id);
+    this.redrawOverlay(pageIndex);
   }
 
   protected replaceSelectedDetectedMedia(ev: Event) {
@@ -6838,6 +6915,7 @@ export class PdfEditorComponent implements AfterViewInit {
       body = t;
     }
     if (!body || this.isSidebarTitleTrivial(body)) return '';
+    if (/^\d+\s*\/\s*\d+(?:\s*\/\s*\d+)*$/.test(body)) return '';
     return body;
   }
 
@@ -7007,6 +7085,7 @@ export class PdfEditorComponent implements AfterViewInit {
         }
 
         const hitDetectedImage = this.hitTestDetectedPdfImageInteractive(pageIndex, p.x, p.y);
+        console.log("hitDetectedImage  :  updateDetectedPdfImageHover ::  ", hitDetectedImage);
         if (hitDetectedImage) {
           const { media: hitMedia, part } = hitDetectedImage;
           this.selectedWidgetId.set(null);
@@ -7111,6 +7190,9 @@ export class PdfEditorComponent implements AfterViewInit {
       if (this.editExistingText()) {
         const hitReplace = this.hitTestExistingReplace(pageIndex, p.x, p.y);
         if (hitReplace) {
+          this.selectedWidgetId.set(null);
+          this.selectedPlacedImageId.set(null);
+          this.imageCropSession.set(null);
           const { r, idx } = hitReplace;
           const bounds = this.textReplaceEditBounds(pageIndex, r);
           this.editingReplace = { pageIndex, idx };
@@ -7157,6 +7239,9 @@ export class PdfEditorComponent implements AfterViewInit {
             this.cancelTextDraft();
           }
 
+          this.selectedWidgetId.set(null);
+          this.selectedPlacedImageId.set(null);
+          this.imageCropSession.set(null);
           this.editingReplace = null;
           const sameStyleBounds = this.sameStyleTextBoundsForBlock(pageIndex, hit);
           const editBounds = {
@@ -7215,6 +7300,9 @@ export class PdfEditorComponent implements AfterViewInit {
       if (closingFloatingTextDraft) return;
 
       // New text
+      this.selectedWidgetId.set(null);
+      this.selectedPlacedImageId.set(null);
+      this.imageCropSession.set(null);
       this.editingReplace = null;
       this.isTextPlacing.set(true);
       this.textDraft.set('');
@@ -7276,6 +7364,7 @@ export class PdfEditorComponent implements AfterViewInit {
       return;
     }
     const hit = this.hitTestDetectedPdfImageInteractive(pageIndex, p.x, p.y);
+    console.log("hit  :  updateDetectedPdfImageHover ::  ", hit);
     overlay.style.cursor = hit ? this.cursorForImagePart(hit.part) : '';
     const prev = this.hoveredDetectedPdfImage;
     const changed =
@@ -7835,6 +7924,7 @@ export class PdfEditorComponent implements AfterViewInit {
         [pageIndex]: { ...existing, text: [...existing.text, anno] }
       };
     });
+    this.markEditorContentChanged();
   }
 
   protected readonly textWeight = computed(() => weightFromStyle(this.textStyle()));
@@ -7954,6 +8044,7 @@ export class PdfEditorComponent implements AfterViewInit {
         [pageIndex]: { ...existing, replaces: [...replaces, rep] }
       };
     });
+    this.markEditorContentChanged();
   }
 
   private isSameReplaceRegion(
@@ -7985,6 +8076,7 @@ export class PdfEditorComponent implements AfterViewInit {
       replaces[idx] = { ...replaces[idx]!, ...rep, oldText: replaces[idx]!.oldText };
       return { ...prev, [pageIndex]: { ...existing, replaces } };
     });
+    this.markEditorContentChanged();
   }
 
   private hitTestExistingReplace(pageIndex: number, x: number, y: number): { r: TextReplace; idx: number } | null {
@@ -8012,6 +8104,7 @@ export class PdfEditorComponent implements AfterViewInit {
         [pageIndex]: { ...existing, images: [...existing.images, anno] }
       };
     });
+    this.markEditorContentChanged();
   }
 
   private newPlacedImageId(): string {
@@ -8033,6 +8126,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const text = (ex.text ?? []).map((t) => (t.id === id ? updater(t) : t));
       return { ...prev, [pageIndex]: { ...ex, text } };
     });
+    this.markEditorContentChanged();
   }
 
   private updatePlacedImage(pageIndex: number, id: string, updater: (a: ImageAnno) => ImageAnno) {
@@ -8042,6 +8136,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const images = (ex.images ?? []).map((im) => (im.id === id ? updater(im) : im));
       return { ...prev, [pageIndex]: { ...ex, images } };
     });
+    this.markEditorContentChanged();
   }
 
   private placedImageRectDiffersFromOrig(
@@ -8443,13 +8538,19 @@ export class PdfEditorComponent implements AfterViewInit {
     y: number
   ): { media: DetectedPdfMedia; part: 'body' | PlacedImageEdge } | null {
     const items = this.detectedMediaByPage()[pageIndex] ?? [];
-    for (let i = items.length - 1; i >= 0; i--) {
-      const media = items[i]!;
+    let best: { media: DetectedPdfMedia; part: 'body' | PlacedImageEdge } | null = null;
+    let bestArea = Infinity;
+    for (const media of items) {
       if (media.kind !== 'image') continue;
       const part = this.hitTestImageRectPart(media, x, y);
-      if (part) return { media, part };
+      if (!part) continue;
+      const area = Math.max(1, media.w) * Math.max(1, media.h);
+      if (area < bestArea) {
+        bestArea = area;
+        best = { media, part };
+      }
     }
-    return null;
+    return best;
   }
 
   private cursorForImagePart(part: 'body' | PlacedImageEdge): string {
@@ -8868,24 +8969,42 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private async detectPdfMediaForPage(pageIndex: number, page: any, cssViewport: any) {
-    const opList = await page.getOperatorList();
-    const imageRects = this.collectImageRectsFromOperatorList(opList, cssViewport);
+    console.log("deletcte on page", pageIndex);
+    
+    let imageRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+    try {
+      const opList = await page.getOperatorList();
+      imageRects = this.collectImageRectsFromOperatorList(opList, cssViewport);
+    } catch {
+      // Keep video/media annotation detection alive even if image operator extraction fails.
+      imageRects = [];
+    }
     const videoRects = await this.collectVideoRectsFromAnnotations(page, cssViewport);
     const items: DetectedPdfMedia[] = [];
-    let seq = 0;
-    const rnd = () => Math.random().toString(16).slice(2, 9);
+    const dedupe = new Map<string, number>();
+    const stableId = (kind: 'image' | 'video', r: { x: number; y: number; w: number; h: number }) => {
+      const rx = Math.round(r.x);
+      const ry = Math.round(r.y);
+      const rw = Math.round(r.w);
+      const rh = Math.round(r.h);
+      const base = `pdfmedia_p${pageIndex}_${kind}_${rx}_${ry}_${rw}_${rh}`;
+      const seen = dedupe.get(base) ?? 0;
+      dedupe.set(base, seen + 1);
+      return seen === 0 ? base : `${base}_${seen}`;
+    };
     for (const r of imageRects) {
       if (r.w < 3 || r.h < 3) continue;
+      // Skip page-covering rasters (backgrounds / flattened pages); only surface real inset images.
       if (this.isWholePageLikeMediaRect(r, cssViewport)) continue;
       items.push({
-        id: `pdfmedia_p${pageIndex}_i${seq++}_${rnd()}`,
+        id: stableId('image', r),
         kind: 'image',
         ...r
       });
     }
     for (const r of videoRects) {
       items.push({
-        id: `pdfmedia_p${pageIndex}_v${seq++}_${rnd()}`,
+        id: stableId('video', r),
         kind: 'video',
         ...r
       });
@@ -8894,8 +9013,8 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   /**
-   * Skip page-covering/background raster ops from PDF operator lists.
-   * Those are not user-targeted media and can appear after save/reload.
+   * Skip near–full-bleed rasters (flattened page / background). Uses strict coverage only —
+   * the old “large centered” heuristic matched normal inset photos and hid all real images.
    */
   private isWholePageLikeMediaRect(
     rect: { x: number; y: number; w: number; h: number },
@@ -8906,9 +9025,9 @@ export class PdfEditorComponent implements AfterViewInit {
     const wRatio = rect.w / pageW;
     const hRatio = rect.h / pageH;
     const areaRatio = (rect.w * rect.h) / (pageW * pageH);
-
-    // Only ignore true full-page raster backgrounds. Large hero/project images are still editable.
-    return (wRatio >= 0.985 && hRatio >= 0.985) || areaRatio >= 0.975;
+    const nearFullAxes = wRatio >= 0.985 && hRatio >= 0.985;
+    const nearFullArea = areaRatio >= 0.97;
+    return nearFullAxes || nearFullArea;
   }
 
   private dropDetectedMediaEntry(pageIndex: number, id: string) {
@@ -9061,6 +9180,7 @@ export class PdfEditorComponent implements AfterViewInit {
         images: [],
         replaces: []
       };
+      const vp = this.mergePageEditViewport(pageIndex, existingPage);
       const images = [...(existingPage.images ?? []).filter((im) => im.id !== id), anno];
       const replaces = [
         ...(existingPage.replaces ?? []).filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, erase))),
@@ -9068,7 +9188,7 @@ export class PdfEditorComponent implements AfterViewInit {
       ];
       return {
         ...prev,
-        [pageIndex]: { ...existingPage, images, replaces }
+        [pageIndex]: { ...existingPage, ...vp, images, replaces }
       };
     });
 
@@ -9076,6 +9196,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.dropDetectedMediaEntry(pageIndex, media.id);
     this.applyReplacesToBase(pageIndex);
     this.redrawOverlay(pageIndex);
+    this.markEditorContentChanged();
     return anno;
   }
 
@@ -9146,6 +9267,7 @@ export class PdfEditorComponent implements AfterViewInit {
         images: [],
         replaces: []
       };
+      const vp = this.mergePageEditViewport(pageIndex, existing);
       const images = [...(existing.images ?? []).filter((im) => im.id !== id), anno];
       const replaces = [
         ...(existing.replaces ?? []).filter((r) => !(r.source === 'mediaErase' && this.isSameReplaceRegion(r, erase))),
@@ -9153,7 +9275,7 @@ export class PdfEditorComponent implements AfterViewInit {
       ];
       return {
         ...prev,
-        [pageIndex]: { ...existing, images, replaces }
+        [pageIndex]: { ...existing, ...vp, images, replaces }
       };
     });
     this.embeddedImageReplacementByDetectedId.set(this.detectedMediaLinkKey(pageIndex, box.id), id);
@@ -9165,6 +9287,7 @@ export class PdfEditorComponent implements AfterViewInit {
     this.selectedPlacedImageId.set(id);
     this.applyReplacesToBase(pageIndex);
     this.redrawOverlay(pageIndex);
+    this.markEditorContentChanged();
   }
 
   private replacementImageIdForBox(pageIndex: number, box: { x: number; y: number; w: number; h: number }): string {
@@ -9206,11 +9329,18 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private hitTestDetectedMedia(pageIndex: number, x: number, y: number): DetectedPdfMedia | null {
     const items = this.detectedMediaByPage()[pageIndex] ?? [];
-    for (let i = items.length - 1; i >= 0; i--) {
-      const it = items[i]!;
-      if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) return it;
+    let best: DetectedPdfMedia | null = null;
+    let bestArea = Infinity;
+    for (const it of items) {
+      if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) {
+        const area = Math.max(1, it.w) * Math.max(1, it.h);
+        if (area < bestArea) {
+          bestArea = area;
+          best = it;
+        }
+      }
     }
-    return null;
+    return best;
   }
 
   private hitTestDetectedText(pageIndex: number, x: number, y: number): DetectedText | null {
@@ -9664,6 +9794,9 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private async requestImageCrop(dataUrl: string): Promise<string | null> {
+    // If the crop UI is not present in the current template build, do not block the
+    // image replacement flow waiting for a resolver that can never be triggered.
+    if (!this.uploadCropSurface?.nativeElement) return dataUrl;
     const existing = this.imageUploadCropResolve;
     if (existing) existing(null);
     return new Promise<string | null>((resolve) => {
@@ -9913,7 +10046,9 @@ export class PdfEditorComponent implements AfterViewInit {
     this.imageCropSession.set(null);
   }
 
-  protected removeSelectedPlacedImage() {
+  protected removeSelectedPlacedImage(ev?: Event) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
     const sel = this.selectedPlacedImage();
     if (!sel) return;
     const { pageIndex, image } = sel;
@@ -9955,7 +10090,7 @@ export class PdfEditorComponent implements AfterViewInit {
     edit: PageEdits,
     vp: { width: number; height: number; convertToPdfPoint: (x: number, y: number) => number[] }
   ) {
-    if (edit.images.length === 0) return;
+    if ((edit.images?.length ?? 0) === 0) return;
 
     for (const img of edit.images) {
       const embedded = await this.embedPlacedImageForPdf(pdf, img);
@@ -10200,48 +10335,47 @@ export class PdfEditorComponent implements AfterViewInit {
     return `avyro:pdf-title:v1:${id}`;
   }
 
-  private persistTitleForDoc(id: string, title: string) {
-    try {
-      localStorage.setItem(this.titleStorageKey(id), title);
-    } catch {
-      // ignore storage issues
-    }
+  private editorStatePayloadIsMeaningful(remote: PdfEditorStateV2 | null): boolean {
+    if (!remote || typeof remote !== 'object') return false;
+    const widgets = remote.widgetsByPage as Record<string, unknown> | undefined;
+    if (widgets && Object.values(widgets).some((list) => Array.isArray(list) && list.length > 0)) return true;
+    const edits = remote.editsByPage as Record<string, unknown> | undefined;
+    if (!edits) return false;
+    return Object.values(edits).some((edit) => {
+      if (!edit || typeof edit !== 'object') return false;
+      const e = edit as PageEdits;
+      return (
+        (e.ink?.length ?? 0) > 0 ||
+        (e.text?.length ?? 0) > 0 ||
+        (e.images?.length ?? 0) > 0 ||
+        (e.replaces?.length ?? 0) > 0
+      );
+    });
   }
 
-  private loadPersistedTitleForDoc(id: string): string | null {
-    try {
-      const raw = localStorage.getItem(this.titleStorageKey(id));
-      const title = typeof raw === 'string' ? raw.trim() : '';
-      return title.length > 0 ? title : null;
-    } catch {
-      return null;
+  private async parseEditorStateForLoad(
+    remote: PdfEditorStateV2 | null,
+    pageCount: number
+  ): Promise<{ editsByPage: Record<number, PageEdits>; widgetsByPage: Record<number, Widget[]> }> {
+    if (!remote || remote.version !== 2) {
+      return { editsByPage: {}, widgetsByPage: {} };
     }
+    const stateWidgets = (remote.widgetsByPage ?? {}) as unknown as PersistedMediaWidgetsByPage;
+    const editsByPage = this.normalizePersistedEdits(
+      remote.editsByPage as unknown as Record<number, PageEdits> | undefined,
+      pageCount
+    );
+    const widgetsByPage = await this.normalizePersistedWidgets(stateWidgets, pageCount);
+    return { editsByPage, widgetsByPage };
   }
 
-  private persistPageFurnitureForDoc(id: string, furniture: PageFurniture) {
-    try {
-      localStorage.setItem(this.pageFurnitureStorageKey(id), JSON.stringify(this.normalizePageFurniture(furniture)));
-    } catch {
-      // ignore storage issues
-    }
-  }
-
-  private loadPersistedPageFurnitureForDoc(id: string): PageFurniture | null {
-    try {
-      const raw = localStorage.getItem(this.pageFurnitureStorageKey(id));
-      if (!raw) return null;
-      return this.normalizePageFurniture(JSON.parse(raw));
-    } catch {
-      return null;
-    }
-  }
-
-  private async persistEditorStateForDoc(
+  private async persistEditorStateToRemote(
     id: string,
     editsByPage: Record<number, PageEdits>,
-    widgetsByPage: Record<number, Widget[]>
-  ) {
-    const key = this.editorStateStorageKey(id);
+    widgetsByPage: Record<number, Widget[]>,
+    fileName: string | null | undefined
+  ): Promise<void> {
+    if (this.readonlyMode()) return;
     const widgetsOut: PersistedMediaWidgetsByPage = {};
     for (const [k, list] of Object.entries(widgetsByPage)) {
       const pageIndex = Number(k);
@@ -10261,50 +10395,14 @@ export class PdfEditorComponent implements AfterViewInit {
       }
       if (widgets.length > 0) widgetsOut[pageIndex] = widgets;
     }
-    try {
-      const state: PersistedEditorState = {
-        version: 2,
-        editsByPage: this.cloneEdits(editsByPage),
-        widgetsByPage: widgetsOut
-      };
-      localStorage.setItem(key, JSON.stringify(state));
-    } catch {
-      // ignore storage issues
-    }
-  }
-
-  private async loadPersistedEditorStateForDoc(
-    id: string,
-    pageCount: number
-  ): Promise<{ editsByPage: Record<number, PageEdits>; widgetsByPage: Record<number, Widget[]> }> {
-    const key = this.editorStateStorageKey(id);
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return { editsByPage: {}, widgetsByPage: await this.loadLegacyPersistedMediaWidgetsForDoc(id, pageCount) };
-      const parsed = JSON.parse(raw) as Partial<PersistedEditorState> | PersistedMediaWidgetsByPage;
-      const stateWidgets =
-        typeof (parsed as Partial<PersistedEditorState>).version === 'number'
-          ? ((parsed as Partial<PersistedEditorState>).widgetsByPage ?? {})
-          : (parsed as PersistedMediaWidgetsByPage);
-      const editsByPage =
-        typeof (parsed as Partial<PersistedEditorState>).version === 'number'
-          ? this.normalizePersistedEdits((parsed as Partial<PersistedEditorState>).editsByPage, pageCount)
-          : {};
-      const widgetsByPage = await this.normalizePersistedWidgets(stateWidgets, pageCount);
-      return { editsByPage, widgetsByPage };
-    } catch {
-      return { editsByPage: {}, widgetsByPage: {} };
-    }
-  }
-
-  private async loadLegacyPersistedMediaWidgetsForDoc(id: string, pageCount: number): Promise<Record<number, Widget[]>> {
-    try {
-      const raw = localStorage.getItem(this.legacyMediaWidgetsStorageKey(id));
-      if (!raw) return {};
-      return await this.normalizePersistedWidgets(JSON.parse(raw) as PersistedMediaWidgetsByPage, pageCount);
-    } catch {
-      return {};
-    }
+    const fn = (fileName ?? '').trim();
+    const payload: PdfEditorStateV2 = {
+      version: 2,
+      ...(fn ? { fileName: fn } : {}),
+      editsByPage: this.cloneEdits(editsByPage) as unknown as Record<string, unknown>,
+      widgetsByPage: widgetsOut as unknown as Record<string, unknown>
+    };
+    await this.api.putEditorState(id, payload);
   }
 
   private async normalizePersistedWidgets(
@@ -10345,7 +10443,36 @@ export class PdfEditorComponent implements AfterViewInit {
           )
         : [];
       const images = Array.isArray(edit.images)
-        ? []
+        ? edit.images
+            .filter((img): img is ImageAnno => {
+              if (!img || typeof (img as ImageAnno).id !== 'string') return false;
+              if (typeof (img as ImageAnno).dataUrl !== 'string') return false;
+              if (!/^data:image\/(png|jpeg);base64,/i.test((img as ImageAnno).dataUrl)) return false;
+              return (
+                Number.isFinite((img as ImageAnno).x) &&
+                Number.isFinite((img as ImageAnno).y) &&
+                Number.isFinite((img as ImageAnno).w) &&
+                Number.isFinite((img as ImageAnno).h)
+              );
+            })
+            .map((img) => ({
+              id: img.id,
+              x: img.x,
+              y: img.y,
+              w: Math.max(1, img.w),
+              h: Math.max(1, img.h),
+              dataUrl: img.dataUrl,
+              srcW: Number.isFinite(img.srcW) && img.srcW > 0 ? img.srcW : 1,
+              srcH: Number.isFinite(img.srcH) && img.srcH > 0 ? img.srcH : 1,
+              crop: img.crop
+                ? {
+                    x: Number.isFinite(img.crop.x) ? img.crop.x : 0,
+                    y: Number.isFinite(img.crop.y) ? img.crop.y : 0,
+                    w: Number.isFinite(img.crop.w) && img.crop.w > 0 ? img.crop.w : 1,
+                    h: Number.isFinite(img.crop.h) && img.crop.h > 0 ? img.crop.h : 1
+                  }
+                : undefined
+            }))
         : [];
       out[pageIndex] = {
         viewportWidth: Number.isFinite(edit.viewportWidth) ? edit.viewportWidth : 1,
@@ -10397,6 +10524,51 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private persistedVideoRef(docId: string, widgetId: string): string {
     return `idb-video:${docId}:${widgetId}`;
+  }
+
+  private async pdfBytesLookEditableForDetection(bytes: Uint8Array): Promise<boolean> {
+    let doc: PDFDocumentProxy | null = null;
+    try {
+      const loadingTask = getDocument({ data: this.clonePdfBytes(bytes) });
+      doc = await loadingTask.promise;
+      const pagesToCheck = Math.min(5, doc.numPages);
+      let meaningfulText = 0;
+      let editableMedia = 0;
+      for (let pageIndex = 0; pageIndex < pagesToCheck; pageIndex++) {
+        const page = await doc.getPage(pageIndex + 1);
+        try {
+          const textContent = await page.getTextContent();
+          for (const it of textContent.items as any[]) {
+            const text = String(it?.str ?? '').replace(/\s+/g, ' ').trim();
+            if (!/[a-z]{3,}/i.test(text)) continue;
+            if (/^\d+\s*\/\s*\d+$/.test(text)) continue;
+            meaningfulText++;
+            if (meaningfulText >= 3) return true;
+          }
+        } catch {
+          // keep checking media
+        }
+        try {
+          const viewport = this.getCssViewportForPdfPage(page as any);
+          const opList = await (page as any).getOperatorList();
+          editableMedia += this.collectImageRectsFromOperatorList(opList, viewport).filter(
+            (r) => !this.isWholePageLikeMediaRect(r, viewport)
+          ).length;
+          if (editableMedia > 0) return true;
+        } catch {
+          // ignore candidate inspection failures
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      try {
+        await doc?.destroy();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private openPersistedVideoDb(): Promise<IDBDatabase> {
