@@ -1335,6 +1335,85 @@
   color: rgba(153, 27, 27, 0.95);
 }
 
+.detectedMediaFloatingToolbarAnchor,
+.placedImageFloatingToolbarAnchor {
+  pointer-events: none;
+}
+
+.detectedMediaFloatingToolbarAnchor .rightbarImageFloatingToolbar,
+.placedImageFloatingToolbarAnchor .rightbarImageFloatingToolbar {
+  pointer-events: auto;
+  margin-top: 0;
+}
+
+.rightbarImageFloatingToolbar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 5px 7px;
+  max-width: min(100vw, 520px);
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
+}
+
+.rightbarImageFloatingToolbar__btn {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(71, 85, 105, 0.96);
+  cursor: pointer;
+}
+
+.rightbarImageFloatingToolbar__btn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.rightbarImageFloatingToolbar__btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 1px;
+}
+
+.rightbarImageFloatingToolbar__btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.rightbarImageFloatingToolbar__btn--grip {
+  background: rgba(241, 245, 249, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.rightbarImageFloatingToolbar__btn--grip:hover:not(:disabled) {
+  background: rgba(226, 232, 240, 0.98);
+}
+
+.rightbarImageFloatingToolbar__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.rightbarImageFloatingToolbar__btn--danger {
+  color: rgba(153, 27, 27, 0.96);
+}
+
+.rightbarImageFloatingToolbar__btn--danger:hover:not(:disabled) {
+  background: rgba(254, 226, 226, 0.65);
+}
+
 .rightbarTextGate {
   display: flex;
   flex-direction: row;

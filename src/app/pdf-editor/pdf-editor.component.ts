@@ -4931,6 +4931,8 @@ export class PdfEditorComponent implements AfterViewInit {
     if (target.closest('.imageCropBar')) return;
     if (target.closest('.insertSourceMenu')) return;
     if (target.closest('.rightbarMediaActions')) return;
+    if (target.closest('.detectedMediaFloatingToolbarAnchor')) return;
+    if (target.closest('.placedImageFloatingToolbarAnchor')) return;
     if (target.closest('.textDraft')) return;
     if (this.selectedWidgetId() !== null) this.selectedWidgetId.set(null);
     if (this.selectedDetectedPdfMedia() !== null) this.selectedDetectedPdfMedia.set(null);
@@ -4983,8 +4985,19 @@ export class PdfEditorComponent implements AfterViewInit {
       position: 'absolute',
       left: `${im.x + im.w / 2}px`,
       top: `${im.y}px`,
-      transform: `translate(-50%, calc(-100% - 5px))`,
-      zIndex: '9'
+      transform: `translate(-50%, calc(-100% - 6px))`,
+      zIndex: '20'
+    };
+  }
+
+  protected detectedMediaFloatingToolbarStyle(dm: { pageIndex: number; media: DetectedPdfMedia }): Record<string, string> {
+    const m = dm.media;
+    return {
+      position: 'absolute',
+      left: `${m.x + m.w / 2}px`,
+      top: `${m.y}px`,
+      transform: 'translate(-50%, calc(-100% - 6px))',
+      zIndex: '20'
     };
   }
 
@@ -4992,13 +5005,63 @@ export class PdfEditorComponent implements AfterViewInit {
     ev.stopPropagation();
   }
 
+  protected onDetectedMediaFloatingToolbarChromePointerDown(ev: PointerEvent) {
+    ev.stopPropagation();
+  }
+
   protected cancelPlacedImageSelection(ev: Event) {
     ev.preventDefault();
     ev.stopPropagation();
+    const pageBefore = this.selectedPlacedImage()?.pageIndex ?? this.activePageIndex();
     this.selectedPlacedImageId.set(null);
     this.activePlacedImageOp = null;
     this.imageCropSession.set(null);
-    this.redrawOverlay(this.activePageIndex());
+    this.redrawOverlay(pageBefore);
+  }
+
+  protected cancelDetectedMediaSelectionOnly(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedDetectedPdfMedia();
+    if (!sel) return;
+    const page = sel.pageIndex;
+    this.selectedDetectedPdfMedia.set(null);
+    this.redrawOverlay(page);
+  }
+
+  protected duplicateSelectedPlacedImage(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = this.selectedPlacedImage();
+    if (!sel) return;
+    this.duplicatePlacedImageAt(sel.pageIndex, sel.image);
+  }
+
+  protected duplicateDetectedMediaReplacement(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const det = this.selectedDetectedPdfMedia();
+    if (!det || det.media.kind !== 'image') return;
+    const anno = this.findReplacementImageAnnoForDetected(det.pageIndex, det.media);
+    if (!anno) {
+      this.errorText.set('Replace the image first, then you can duplicate it.');
+      return;
+    }
+    this.errorText.set(null);
+    this.duplicatePlacedImageAt(det.pageIndex, anno);
+    this.selectedDetectedPdfMedia.set(null);
+  }
+
+  private duplicatePlacedImageAt(pageIndex: number, image: ImageAnno) {
+    const copy: ImageAnno = {
+      ...image,
+      id: this.newPlacedImageId(),
+      x: image.x + 16,
+      y: image.y + 16
+    };
+    this.pushImageAnno(pageIndex, copy);
+    this.selectedPlacedImageId.set(copy.id);
+    this.redrawOverlay(pageIndex);
   }
 
   protected onPlacedImageToolbarGripPointerDown(ev: PointerEvent) {
