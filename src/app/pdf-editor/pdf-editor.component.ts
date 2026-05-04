@@ -7684,11 +7684,15 @@ export class PdfEditorComponent implements AfterViewInit {
     const fontSize = this.textSize();
     const measured = this.measureTextBlockCss(text, fontSize, this.textStyle(), this.textFamily());
     const pad = Math.max(12, Math.ceil(fontSize * 0.75));
-    const maxW = Math.max(120, Math.min(this.textDraftBox.w, this.textDraftBox.maskW));
-    const maxH = Math.max(40, this.textDraftBox.h);
+    const box = this.textDraftBox;
+    /** Outer bound for the editor: user resize (`box.w` / `box.h`) must be visible, not shrunk to text-only size. */
+    const capW = Math.max(120, Math.min(box.w, box.maskW));
+    const capH = Math.max(40, Math.min(box.h, box.maskH));
+    const contentW = Math.ceil(measured.w + pad);
+    const contentH = Math.ceil(measured.h + Math.max(8, fontSize * 0.35));
     return {
-      w: Math.max(120, Math.min(maxW, Math.ceil(measured.w + pad))),
-      h: Math.max(40, Math.min(maxH, Math.ceil(measured.h + Math.max(8, fontSize * 0.35))))
+      w: Math.max(120, Math.min(capW, Math.max(contentW, box.w))),
+      h: Math.max(40, Math.min(capH, Math.max(contentH, box.h)))
     };
   }
 

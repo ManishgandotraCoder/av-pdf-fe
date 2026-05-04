@@ -681,7 +681,7 @@
 
 .workspaceWrap {
   --left-rail-width: 220px;
-  --right-rail-width: 280px;
+  --right-rail-width: 320px;
   min-height: 0;
   height: 100%;
   display: grid;
@@ -692,11 +692,11 @@
 }
 
 .workspaceWrap.isSidebarCollapsed {
-  --left-rail-width: 52px;
+  --left-rail-width: 0;
 }
 
 .workspaceWrap.isRightbarCollapsed {
-  --right-rail-width: 52px;
+  --right-rail-width: 0;
 }
 
 .workspaceWrap > .sidebar {
@@ -720,6 +720,7 @@
 }
 
 .rightbar {
+  position: relative;
   border-left: 1px solid rgba(15, 23, 42, 0.12);
   background: rgba(248, 250, 252, 0.92);
   backdrop-filter: blur(10px);
@@ -731,7 +732,8 @@
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 5;
 }
 
 /* Studio sidebar (Elements / Assets Library) — same light shell as .rightbar */
@@ -1548,6 +1550,7 @@
 }
 
 .sidebar {
+  position: relative;
   border-right: 1px solid rgba(15, 23, 42, 0.12);
   background:
     radial-gradient(1200px 900px at -20% -10%, rgba(139, 92, 246, 0.10), transparent 55%),
@@ -1559,6 +1562,84 @@
   padding: 12px;
   display: flex;
   flex-direction: column;
+}
+
+.sidebarRailToggle,
+.rightbarRailToggle {
+  position: absolute;
+  top: 50%;
+  z-index: 35;
+  width: 24px;
+  height: 68px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.96);
+  color: rgba(15, 23, 42, 0.74);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.sidebarRailToggle {
+  right: -12px;
+  border-radius: 0 999px 999px 0;
+}
+
+.rightbarRailToggle {
+  left: -12px;
+  border-radius: 999px 0 0 999px;
+}
+
+.sidebarRailToggle:hover,
+.rightbarRailToggle:hover {
+  background: #ffffff;
+  border-color: rgba(59, 130, 246, 0.38);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow:
+    0 14px 34px rgba(15, 23, 42, 0.16),
+    0 0 0 3px rgba(59, 130, 246, 0.10);
+}
+
+.sidebarRailToggle svg,
+.rightbarRailToggle svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.sidebar.isCollapsed {
+  border-right: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.sidebar.isCollapsed .sidebarRailToggle {
+  right: -24px;
+}
+
+.sidebar.isCollapsed .sidebar__scroll {
+  display: none;
+}
+
+.rightbar.isCollapsed {
+  border-left: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.rightbar.isCollapsed .rightbarRailToggle {
+  left: -24px;
+}
+
+.rightbar.isCollapsed > :not(.rightbarRailToggle) {
+  display: none;
 }
 
 .sidebar__scroll {
@@ -2172,20 +2253,8 @@
   height: 18px;
 }
 
-.sidebar.isCollapsed {
-  padding: 10px 8px;
-}
-
 .sidebar.isCollapsed .sidebar__title {
   display: none;
-}
-
-.rightbar.isCollapsed {
-  padding: 10px 8px;
-}
-
-.rightbar.isCollapsed .rightbarCollapseBar {
-  margin: 0;
 }
 
 .sidebar.isCollapsed .sidebar__list {
@@ -2704,6 +2773,9 @@
   align-items: center;
   pointer-events: auto;
   box-sizing: border-box;
+  --text-draft-purple: #7c3aed;
+  --text-draft-purple-soft: rgba(124, 58, 237, 0.14);
+  --text-draft-purple-mid: rgba(124, 58, 237, 0.35);
 }
 
 .textDraftToolbar {
@@ -2713,10 +2785,10 @@
   padding: 5px 8px;
   margin: 0 0 4px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.97);
+  border: 1px dashed var(--text-draft-purple-mid);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(250, 245, 255, 0.96));
   box-shadow:
-    0 12px 28px rgba(0, 0, 0, 0.12),
+    0 12px 28px rgba(124, 58, 237, 0.1),
     0 0 0 1px rgba(255, 255, 255, 0.65);
   max-width: 100%;
 }
@@ -2731,8 +2803,8 @@
   margin: 0;
   display: grid;
   place-items: center;
-  background: rgba(15, 23, 42, 0.06);
-  color: rgba(15, 23, 42, 0.45);
+  background: var(--text-draft-purple-soft);
+  color: var(--text-draft-purple);
   cursor: grab;
 }
 
@@ -2744,12 +2816,13 @@
   width: 10px;
   height: 14px;
   background:
-    radial-gradient(circle at 30% 22%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px),
-    radial-gradient(circle at 70% 22%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px),
-    radial-gradient(circle at 30% 50%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px),
-    radial-gradient(circle at 70% 50%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px),
-    radial-gradient(circle at 30% 78%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px),
-    radial-gradient(circle at 70% 78%, rgba(15, 23, 42, 0.42) 1.2px, transparent 1.4px);
+    radial-gradient(circle at 30% 22%, var(--text-draft-purple) 1.2px, transparent 1.4px),
+    radial-gradient(circle at 70% 22%, var(--text-draft-purple) 1.2px, transparent 1.4px),
+    radial-gradient(circle at 30% 50%, var(--text-draft-purple) 1.2px, transparent 1.4px),
+    radial-gradient(circle at 70% 50%, var(--text-draft-purple) 1.2px, transparent 1.4px),
+    radial-gradient(circle at 30% 78%, var(--text-draft-purple) 1.2px, transparent 1.4px),
+    radial-gradient(circle at 70% 78%, var(--text-draft-purple) 1.2px, transparent 1.4px);
+  opacity: 0.85;
 }
 
 .textDraftToolbar__actions {
@@ -2768,7 +2841,7 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: rgba(15, 23, 42, 0.72);
+  color: rgba(91, 33, 182, 0.88);
   font-size: 17px;
   font-weight: 500;
   line-height: 1;
@@ -2776,8 +2849,8 @@
 }
 
 .textDraftToolbar__btn:hover {
-  background: rgba(15, 23, 42, 0.06);
-  color: rgba(15, 23, 42, 0.92);
+  background: var(--text-draft-purple-soft);
+  color: var(--text-draft-purple);
 }
 
 .textDraftToolbar__btn--danger {
@@ -2794,24 +2867,26 @@
   position: relative;
   flex-shrink: 0;
   align-self: stretch;
-  border-radius: 6px;
+  border-radius: 10px;
   box-sizing: border-box;
+  border: 2px dashed var(--text-draft-purple-mid);
+  background: rgba(255, 255, 255, 0.55);
   box-shadow:
-    0 0 0 1px rgba(15, 23, 42, 0.18),
-    0 1px 4px rgba(15, 23, 42, 0.08);
+    0 0 0 3px var(--text-draft-purple-soft),
+    0 10px 26px rgba(124, 58, 237, 0.08);
 }
 
 .textDraft__handle {
   position: absolute;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.38);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+  border: 2px solid var(--text-draft-purple);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.25);
   padding: 0;
   margin: 0;
-  z-index: 3;
+  z-index: 4;
   touch-action: none;
 }
 
@@ -2875,8 +2950,8 @@
   width: 100%;
   height: 100%;
   min-height: 44px;
-  padding: 0;
-  border-radius: 9px;
+  padding: 6px 8px;
+  border-radius: 8px;
   border: none;
   outline: none;
   background: transparent;
@@ -2889,12 +2964,12 @@
 }
 
 .textDraft__textarea:focus-visible {
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.14);
-  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.35);
+  border-radius: 8px;
 }
 
 .textDraft__textarea::selection {
-  background: rgba(59, 130, 246, 0.22);
+  background: rgba(124, 58, 237, 0.22);
 }
 
 .widget__media {

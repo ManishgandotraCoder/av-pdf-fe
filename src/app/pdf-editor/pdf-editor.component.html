@@ -502,13 +502,30 @@
     <main
       class="workspaceWrap"
       [class.isSidebarCollapsed]="sidebarCollapsed()"
+      [class.isRightbarCollapsed]="rightbarCollapsed()"
     >
       <input #furnitureLogoFile class="file" type="file" accept="image/*" (change)="onFurnitureLogoPicked($event)" hidden />
       <input #widgetImageFile class="file" type="file" accept="image/png,image/jpeg" (change)="onWidgetImagePicked($event)" hidden />
       <input #widgetVideoFile class="file" type="file" accept="video/*" hidden />
 
       <aside class="sidebar" [class.isCollapsed]="sidebarCollapsed()">
-
+        <button
+          type="button"
+          class="sidebarRailToggle"
+          [attr.aria-label]="sidebarCollapsed() ? 'Open slide sidebar' : 'Close slide sidebar'"
+          [title]="sidebarCollapsed() ? 'Open slide sidebar' : 'Close slide sidebar'"
+          (click)="toggleSidebar()"
+        >
+          @if (sidebarCollapsed()) {
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          } @else {
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          }
+        </button>
         <div class="sidebar__scroll">
           <div class="sidebar__list">
             @for (pageIndex of pages(); track pageIndex) {
@@ -1219,7 +1236,24 @@
         }
       </section>
 
-      <aside class="rightbar rightbar--studio" aria-label="Editor tools">
+      <aside class="rightbar rightbar--studio" [class.isCollapsed]="rightbarCollapsed()" aria-label="Editor tools">
+        <button
+          type="button"
+          class="rightbarRailToggle"
+          [attr.aria-label]="rightbarCollapsed() ? 'Open editor tools sidebar' : 'Close editor tools sidebar'"
+          [title]="rightbarCollapsed() ? 'Open editor tools sidebar' : 'Close editor tools sidebar'"
+          (click)="toggleRightbar()"
+        >
+          @if (rightbarCollapsed()) {
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          } @else {
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          }
+        </button>
         <header class="rightbarStudio__header">
           <nav class="rightbarStudio__primaryTabs" role="tablist" aria-label="Sidebar panels">
             <button
