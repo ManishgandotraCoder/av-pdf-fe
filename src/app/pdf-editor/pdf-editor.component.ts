@@ -2228,6 +2228,19 @@ export class PdfEditorComponent implements AfterViewInit {
     this.insertWidgetPending.set({ kind });
   }
 
+  protected onInsertImageClick(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (this.pageCount() === 0 || this.isLoading() || this.readonlyMode()) return;
+    this.errorText.set(null);
+    this.placedImageReplaceTarget = null;
+    this.embeddedMediaReplaceTarget = null;
+    const el = this.widgetImageFile?.nativeElement;
+    if (!el) return;
+    el.value = '';
+    el.click();
+  }
+
   protected placeReusableAsset(assetId: string, ev?: Event) {
     ev?.preventDefault();
     ev?.stopPropagation();
@@ -5137,7 +5150,8 @@ export class PdfEditorComponent implements AfterViewInit {
         return;
       }
 
-      this.errorText.set('Select an image in the page first, then use Replace.');
+      this.pendingImageDataUrl = dataUrl;
+      this.errorText.set('Click on the page to place the image.');
     } catch (e) {
       this.errorText.set(e instanceof Error ? e.message : 'Failed to replace image.');
     } finally {
@@ -7051,6 +7065,17 @@ export class PdfEditorComponent implements AfterViewInit {
       const p = this.eventToPoint(overlay, ev);
       this.addWidgetAtPoint(pageIndex, pending.kind, p.x, p.y);
       this.insertWidgetPending.set(null);
+      this.isInserting.set(false);
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+
+    if (this.pendingImageDataUrl) {
+      const { overlay } = this.getCanvasPair(pageIndex);
+      if (!overlay) return;
+      const p = this.eventToPoint(overlay, ev);
+      void this.placePendingImage(pageIndex, p.x, p.y);
       this.isInserting.set(false);
       ev.preventDefault();
       ev.stopPropagation();
