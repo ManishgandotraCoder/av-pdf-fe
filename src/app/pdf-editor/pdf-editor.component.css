@@ -680,17 +680,23 @@
 }
 
 .workspaceWrap {
+  --left-rail-width: 220px;
+  --right-rail-width: 280px;
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 220px 1fr 280px;
+  grid-template-columns: var(--left-rail-width) 1fr var(--right-rail-width);
   /* Allow sidebar dropdowns to extend into the workspace area. */
   overflow: visible;
   width: 100%;
 }
 
 .workspaceWrap.isSidebarCollapsed {
-  grid-template-columns: 52px 1fr 280px;
+  --left-rail-width: 52px;
+}
+
+.workspaceWrap.isRightbarCollapsed {
+  --right-rail-width: 52px;
 }
 
 .workspaceWrap > .sidebar {
@@ -732,6 +738,26 @@
 .rightbar.rightbar--studio {
   padding: 0;
   gap: 0;
+}
+
+.rightbarCollapseBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 6px 2px;
+  padding: 8px 8px 10px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.rightbarCollapseBar__title {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: rgba(15, 23, 42, 0.8);
 }
 
 .rightbarStudio__header {
@@ -2152,6 +2178,14 @@
 
 .sidebar.isCollapsed .sidebar__title {
   display: none;
+}
+
+.rightbar.isCollapsed {
+  padding: 10px 8px;
+}
+
+.rightbar.isCollapsed .rightbarCollapseBar {
+  margin: 0;
 }
 
 .sidebar.isCollapsed .sidebar__list {

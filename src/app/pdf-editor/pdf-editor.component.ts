@@ -743,6 +743,7 @@ export class PdfEditorComponent implements AfterViewInit {
   private static readonly zoomStep = 0.1;
   protected readonly scale = signal(0.8);
   protected readonly sidebarCollapsed = signal(false);
+  protected readonly rightbarCollapsed = signal(false);
 
   /** Fixed key-page slots always present in the left navigation. */
   private static readonly fixedKeySlots: KeySlot[] = [
@@ -1284,6 +1285,10 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected toggleSidebar() {
     this.sidebarCollapsed.set(!this.sidebarCollapsed());
+  }
+
+  protected toggleRightbar() {
+    this.rightbarCollapsed.set(!this.rightbarCollapsed());
   }
 
   protected toggleRightbarInsertLibrary() {
