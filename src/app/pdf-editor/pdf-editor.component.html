@@ -891,6 +891,33 @@
                         >
                           <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                         </button>
+                        @if (isEditingExistingPdfText()) {
+                          <div class="textDraftToolbar__sizeStepper" role="group" aria-label="Text size">
+                            <button
+                              type="button"
+                              class="textDraftToolbar__btn"
+                              title="Decrease text size"
+                              aria-label="Decrease text size"
+                              (click)="decreaseTextDraftSize()"
+                            >
+                              <svg class="textDraftToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" />
+                              </svg>
+                            </button>
+                            <span class="textDraftToolbar__sizeValue">{{ textSize() }}</span>
+                            <button
+                              type="button"
+                              class="textDraftToolbar__btn"
+                              title="Increase text size"
+                              aria-label="Increase text size"
+                              (click)="increaseTextDraftSize()"
+                            >
+                              <svg class="textDraftToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" />
+                              </svg>
+                            </button>
+                          </div>
+                        }
                       </div>
                     }
                     <div
@@ -901,8 +928,8 @@
                       <textarea
                         #textDraftEditor
                         class="textDraft__textarea"
-                        [(ngModel)]="textDraft"
-                        [attr.wrap]="isEditingExistingPdfText() ? 'off' : null"
+                        [ngModel]="textDraft()"
+                        (ngModelChange)="onTextDraftModelChange($event)"
                         placeholder="Type…"
                         (keydown)="onTextDraftKeydown($event)"
                         (keydown.escape)="cancelTextDraft()"

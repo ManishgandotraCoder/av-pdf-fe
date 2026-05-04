@@ -1943,6 +1943,7 @@ export class PdfEditorComponent implements AfterViewInit {
 
     this.editsByPage.set(next);
     await this.renderActivePage();
+    this.markEditorContentChanged();
   }
 
   /** Rebuilds auto-applied typography masks so repeated global font changes do not stack duplicates. */
@@ -3979,11 +3980,12 @@ export class PdfEditorComponent implements AfterViewInit {
             const textY = r.textY ?? r.y;
             const fontPdf = r.fontSize * scalePub;
             const wrapPdf = (r.textWrapWidth ?? r.w) * (vp.width / editW);
-            const lines = this.wrapTextLinesByWidth(r.newText, wrapPdf, (line) =>
+            const lines = this.textReplaceRenderLines(r, wrapPdf, (line) =>
               font.widthOfTextAtSize(line, fontPdf)
             );
             const lhVp = Math.max(1, Math.round(r.fontSize * 1.2));
-            for (let i = 0; i < lines.length; i++) {
+            const visibleLineCount = this.textReplaceVisibleLineCount(r, lhVp);
+            for (let i = 0; i < Math.min(lines.length, visibleLineCount); i++) {
               const [bx, by] = vp.convertToPdfPoint(textX, textY + r.fontSize * 0.88 + i * lhVp);
               page.drawText(lines[i] ?? '', {
                 x: bx,
@@ -4141,11 +4143,12 @@ export class PdfEditorComponent implements AfterViewInit {
             ctx.font = `${style} ${weight} ${r.fontSize * fy}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`;
             ctx.textBaseline = 'top';
             const wrapWidth = (r.textWrapWidth ?? r.w) * fx;
-            const lines = this.wrapTextLinesByWidth(r.newText, wrapWidth, (line) => ctx.measureText(line).width);
+            const lines = this.textReplaceRenderLines(r, wrapWidth, (line) => ctx.measureText(line).width);
             const lh = Math.max(1, Math.round(r.fontSize * fy * 1.2));
             const textX = (r.textX ?? r.x) * fx;
             const textY = (r.textY ?? r.y) * fy;
-            for (let i = 0; i < lines.length; i++) {
+            const visibleLineCount = this.textReplaceVisibleLineCount(r, Math.max(1, Math.round(r.fontSize * 1.2)));
+            for (let i = 0; i < Math.min(lines.length, visibleLineCount); i++) {
               ctx.fillText(lines[i], textX, textY + i * lh);
             }
           }
@@ -7736,19 +7739,11 @@ export class PdfEditorComponent implements AfterViewInit {
 
   private getTextDraftVisibleFrameSize(): { w: number; h: number } | null {
     if (!this.textDraftBox) return null;
-    const text = this.textDraft();
-    const fontSize = this.textSize();
-    const measured = this.measureTextBlockCss(text, fontSize, this.textStyle(), this.textFamily());
-    const pad = Math.max(12, Math.ceil(fontSize * 0.75));
     const box = this.textDraftBox;
-    /** Outer bound for the editor: user resize (`box.w` / `box.h`) must be visible, not capped to the detected mask. */
-    const capW = Math.max(120, box.w);
-    const capH = Math.max(40, box.h);
-    const contentW = Math.ceil(measured.w + pad);
-    const contentH = Math.ceil(measured.h + Math.max(8, fontSize * 0.35));
+    const fixedW = Math.max(120, box.w);
     return {
-      w: Math.max(120, Math.min(capW, Math.max(contentW, box.w))),
-      h: Math.max(40, Math.min(capH, Math.max(contentH, box.h)))
+      w: fixedW,
+      h: Math.max(40, box.h)
     };
   }
 
@@ -7902,11 +7897,10 @@ export class PdfEditorComponent implements AfterViewInit {
   }
 
   private textEditWrapWidthForPage(pageIndex: number, x: number, y: number, requestedWidth: number, height: number) {
-    const pad = 8;
     const mediaRight = this.nearestMediaBoundaryRight(pageIndex, x, y, height);
     const requestedRight = x + Math.max(8, requestedWidth);
     const right = mediaRight ?? requestedRight;
-    return Math.max(8, right - x - pad);
+    return Math.max(8, right - x);
   }
 
   private sameStyleTextBoundsForBlock(pageIndex: number, block: DetectedBlock) {
@@ -8011,6 +8005,19 @@ export class PdfEditorComponent implements AfterViewInit {
     return { w, h: Math.max(lh, wrapped.length * lh) };
   }
 
+  private textReplaceRenderLines(r: TextReplace, maxWidth: number, measure: (line: string) => number): string[] {
+    return this.wrapTextLinesByWidth(r.newText, maxWidth, measure);
+  }
+
+  private textReplaceAvailableHeight(r: TextReplace): number {
+    const textY = r.textY ?? r.y;
+    return Math.max(1, r.y + r.h - textY);
+  }
+
+  private textReplaceVisibleLineCount(r: TextReplace, lineHeight: number): number {
+    return Math.max(0, Math.floor(this.textReplaceAvailableHeight(r) / Math.max(1, lineHeight)));
+  }
+
   private wrapTextLinesByWidth(text: string, maxWidth: number, measure: (line: string) => number): string[] {
     const limit = Math.max(8, Number.isFinite(maxWidth) ? maxWidth : 0);
     const out: string[] = [];
@@ -8099,7 +8106,9 @@ export class PdfEditorComponent implements AfterViewInit {
 
   protected setTextSize(size: number) {
     this.applyTextToolbarChange(() => {
-      this.textSize.set(size);
+      const next = clamp(Math.round(Number(size)), 6, 120);
+      this.textSize.set(next);
+      this.textSizeInput.set(String(next));
     });
   }
 
@@ -8141,6 +8150,18 @@ export class PdfEditorComponent implements AfterViewInit {
     this.setTextSize(parsed);
   }
 
+  protected onTextDraftModelChange(value: string) {
+    this.textDraft.set(String(value ?? ''));
+  }
+
+  protected decreaseTextDraftSize() {
+    this.setTextSize(this.textSize() - 1);
+  }
+
+  protected increaseTextDraftSize() {
+    this.setTextSize(this.textSize() + 1);
+  }
+
   protected setTextColor(color: string) {
     this.applyTextToolbarChange(() => {
       this.textColor.set(color);
@@ -8156,7 +8177,28 @@ export class PdfEditorComponent implements AfterViewInit {
   private applyTextToolbarChange(mutator: () => void) {
     this.captureTextDraftSelection();
     mutator();
+    this.fitExistingTextDraftIntoBox();
     queueMicrotask(() => this.restoreTextDraftSelection());
+  }
+
+  private fitExistingTextDraftIntoBox() {
+    if (!this.textDraftBox) return;
+    const box = this.textDraftBox;
+    const text = this.textDraftEditor?.nativeElement?.value ?? this.textDraft();
+    const wrapWidth = Math.max(8, box.w);
+    const maxHeight = Math.max(1, box.h);
+    let size = clamp(Math.round(this.textSize()), 6, 120);
+
+    while (size > 6) {
+      const measured = this.measureTextBlockCss(text, size, this.textStyle(), this.textFamily(), wrapWidth);
+      if (measured.h <= maxHeight) break;
+      size -= 1;
+    }
+
+    if (size !== this.textSize()) {
+      this.textSize.set(size);
+      this.textSizeInput.set(String(size));
+    }
   }
 
   private captureTextDraftSelection() {
@@ -8907,11 +8949,12 @@ export class PdfEditorComponent implements AfterViewInit {
         const weight = r.fontStyle.includes('bold') ? '700' : '400';
         ctx.font = `${style} ${weight} ${r.fontSize}px ${cssFontFamily(r.fontFamily ?? 'helvetica')}`;
         ctx.textBaseline = 'top';
-        const lines = this.wrapTextLinesByWidth(r.newText, r.textWrapWidth ?? r.w, (line) => ctx.measureText(line).width);
+        const lines = this.textReplaceRenderLines(r, r.textWrapWidth ?? r.w, (line) => ctx.measureText(line).width);
         const lh = Math.max(1, Math.round(r.fontSize * 1.2));
         const textX = r.textX ?? r.x;
         const textY = r.textY ?? r.y;
-        for (let i = 0; i < lines.length; i++) {
+        const visibleLineCount = this.textReplaceVisibleLineCount(r, lh);
+        for (let i = 0; i < Math.min(lines.length, visibleLineCount); i++) {
           ctx.fillText(lines[i], textX, textY + i * lh);
         }
       }
@@ -9523,6 +9566,13 @@ export class PdfEditorComponent implements AfterViewInit {
 
     const fontSizes = sorted.map((s) => s.fontSize).sort((a, b) => a - b);
     const medianFont = fontSizes[Math.floor(fontSizes.length / 2)] ?? 12;
+    // Baseline for "body" size: slightly above median so footnotes/small chrome don't drag the
+    // threshold down and mislabel normal paragraphs as headings.
+    const bodyBaselineFont =
+      fontSizes.length === 0
+        ? 12
+        : fontSizes[Math.min(fontSizes.length - 1, Math.max(0, Math.floor(fontSizes.length * 0.62)))] ??
+          medianFont;
 
     const yTol = Math.max(4, medianFont * 0.6);
     const lines: {
@@ -9663,7 +9713,15 @@ export class PdfEditorComponent implements AfterViewInit {
       const allText = chunks.join('');
       const firstText = cur.lines[0]?.text ?? '';
       const isList = /^(\s*([-•]|(\d+)[.)]))\s+/.test(firstText);
-      const isHeading = cur.fontSize >= medianFont * 1.25 && allText.length <= 120;
+      const nonEmptyLines = cur.lines.filter((l) => (l.text ?? '').trim());
+      const lineCount = nonEmptyLines.length;
+      // Headings are typically few wrapped lines; long multi-line blocks should stay body/paragraph
+      // so global body typography still applies.
+      const isHeading =
+        lineCount > 0 &&
+        lineCount <= 4 &&
+        allText.length <= 120 &&
+        cur.fontSize >= bodyBaselineFont * 1.32;
       const kind: DetectedBlockKind = isHeading ? 'heading' : isList ? 'list' : 'paragraph';
       const blockStyle = dominantFontStyle(cur.lines.map((l) => l.fontStyle));
       const blockFamily = dominantFontFamily(cur.lines.map((l) => l.fontFamily));

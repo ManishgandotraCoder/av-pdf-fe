@@ -2840,6 +2840,27 @@
   display: block;
 }
 
+.textDraftToolbar__sizeStepper {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  border-radius: 9px;
+  background: rgba(124, 58, 237, 0.08);
+  color: rgba(91, 33, 182, 0.88);
+}
+
+.textDraftToolbar__sizeValue {
+  min-width: 24px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  color: rgba(91, 33, 182, 0.92);
+  user-select: none;
+}
+
 .textDraftToolbar__btn {
   width: 32px;
   height: 30px;
@@ -2985,8 +3006,9 @@
 .textDraft__frame--existingPdfText .textDraft__textarea {
   min-height: 0;
   padding: 0;
-  overflow: hidden;
-  white-space: pre;
+  overflow: auto;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .textDraft__textarea:focus-visible {
