@@ -680,8 +680,8 @@
 }
 
 .workspaceWrap {
-  --left-rail-width: 220px;
-  --right-rail-width: 320px;
+  --left-rail-width: 250px;
+  --right-rail-width: 250px;
   min-height: 0;
   height: 100%;
   display: grid;
