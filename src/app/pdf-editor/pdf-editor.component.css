@@ -1374,72 +1374,43 @@
   margin-top: 0;
 }
 
-.rightbarImageFloatingToolbar {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  margin-top: 8px;
-  padding: 5px 7px;
-  max-width: min(100vw, 520px);
-  box-sizing: border-box;
-  background: #fff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 999px;
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
-}
-
-.rightbarImageFloatingToolbar__btn {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+/* Placed / detected image toolbars reuse .textDraftToolbar (purple pill); this class is a layout hook */
+.rightbarImageFloatingToolbar.textDraftToolbar {
   margin: 0;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: rgba(71, 85, 105, 0.96);
-  cursor: pointer;
+  max-width: min(100vw - 16px, 520px);
+  box-sizing: border-box;
 }
 
-.rightbarImageFloatingToolbar__btn:hover:not(:disabled) {
-  background: rgba(15, 23, 42, 0.06);
-}
+@media (max-width: 520px) {
+  .placedImageFloatingToolbarAnchor .rightbarImageFloatingToolbar.textDraftToolbar,
+  .detectedMediaFloatingToolbarAnchor .rightbarImageFloatingToolbar.textDraftToolbar {
+    padding: 4px 6px;
+    gap: 6px;
+    row-gap: 6px;
+  }
 
-.rightbarImageFloatingToolbar__btn:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.55);
-  outline-offset: 1px;
-}
+  .placedImageFloatingToolbarAnchor .textDraftToolbar__grip,
+  .detectedMediaFloatingToolbarAnchor .textDraftToolbar__grip {
+    width: 20px;
+    height: 24px;
+  }
 
-.rightbarImageFloatingToolbar__btn:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
+  .placedImageFloatingToolbarAnchor .textDraftToolbar__actions,
+  .detectedMediaFloatingToolbarAnchor .textDraftToolbar__actions {
+    gap: 3px;
+  }
 
-.rightbarImageFloatingToolbar__btn--grip {
-  background: rgba(241, 245, 249, 0.98);
-  border: 1px solid rgba(15, 23, 42, 0.1);
-}
+  .placedImageFloatingToolbarAnchor .textDraftToolbar__btn,
+  .detectedMediaFloatingToolbarAnchor .textDraftToolbar__btn {
+    width: 28px;
+    height: 26px;
+  }
 
-.rightbarImageFloatingToolbar__btn--grip:hover:not(:disabled) {
-  background: rgba(226, 232, 240, 0.98);
-}
-
-.rightbarImageFloatingToolbar__icon {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-.rightbarImageFloatingToolbar__btn--danger {
-  color: rgba(153, 27, 27, 0.96);
-}
-
-.rightbarImageFloatingToolbar__btn--danger:hover:not(:disabled) {
-  background: rgba(254, 226, 226, 0.65);
+  .placedImageFloatingToolbarAnchor .textDraftToolbar__icon,
+  .detectedMediaFloatingToolbarAnchor .textDraftToolbar__icon {
+    width: 15px;
+    height: 15px;
+  }
 }
 
 .rightbarTextGate {
@@ -2608,6 +2579,12 @@
   pointer-events: none;
 }
 
+/* When PDF text / image / widget selection actions live in the right sidebar, shrink the page preview slightly. */
+.workspace.singlePage.workspace--compactPdfCanvas .page__stack {
+  transform: scale(0.92);
+  transform-origin: top center;
+}
+
 .pages {
   display: grid;
   gap: 18px;
@@ -2767,21 +2744,27 @@
   text-align: right;
 }
 
+.textDraft,
+.textDraftToolbar {
+  --text-draft-purple: #7c3aed;
+  --text-draft-purple-soft: rgba(124, 58, 237, 0.14);
+  --text-draft-purple-mid: rgba(124, 58, 237, 0.35);
+}
+
 .textDraft {
   display: flex;
   flex-direction: column;
   align-items: center;
   pointer-events: auto;
   box-sizing: border-box;
-  --text-draft-purple: #7c3aed;
-  --text-draft-purple-soft: rgba(124, 58, 237, 0.14);
-  --text-draft-purple-mid: rgba(124, 58, 237, 0.35);
 }
 
 .textDraftToolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  row-gap: 6px;
   padding: 5px 8px;
   margin: 0 0 4px;
   border-radius: 999px;
@@ -2791,6 +2774,7 @@
     0 12px 28px rgba(124, 58, 237, 0.1),
     0 0 0 1px rgba(255, 255, 255, 0.65);
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .textDraftToolbar__grip {
@@ -2812,6 +2796,20 @@
   cursor: grabbing;
 }
 
+.textDraftToolbar__grip:focus-visible {
+  outline: 2px solid var(--text-draft-purple-mid);
+  outline-offset: 1px;
+}
+
+.textDraftToolbar__grip:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.textDraftToolbar__grip:disabled:active {
+  cursor: not-allowed;
+}
+
 .textDraftToolbar__gripDots {
   width: 10px;
   height: 14px;
@@ -2827,8 +2825,19 @@
 
 .textDraftToolbar__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  row-gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.textDraftToolbar__icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  display: block;
 }
 
 .textDraftToolbar__btn {
@@ -2848,9 +2857,19 @@
   cursor: pointer;
 }
 
-.textDraftToolbar__btn:hover {
+.textDraftToolbar__btn:hover:not(:disabled) {
   background: var(--text-draft-purple-soft);
   color: var(--text-draft-purple);
+}
+
+.textDraftToolbar__btn:focus-visible {
+  outline: 2px solid var(--text-draft-purple-mid);
+  outline-offset: 1px;
+}
+
+.textDraftToolbar__btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .textDraftToolbar__btn--danger {
@@ -2858,7 +2877,7 @@
   font-size: 20px;
 }
 
-.textDraftToolbar__btn--danger:hover {
+.textDraftToolbar__btn--danger:hover:not(:disabled) {
   background: rgba(254, 242, 242, 0.95);
   color: rgba(153, 27, 27, 0.95);
 }

@@ -1090,10 +1090,32 @@ export class PdfEditorComponent implements AfterViewInit {
       fontSize: number;
       fontStyle: FontStyle;
       fontFamily: FontFamily;
+      originalX: number;
+      originalY: number;
+      originalW: number;
+      originalH: number;
     }
     | null = null;
   /** When adding new overlay text (no mask box), layout size for the in-page editor. */
   private readonly textDraftFreeRect = signal<{ w: number; h: number }>({ w: 320, h: 44 });
+
+  /**
+   * Slightly shrink the page preview when inline edit controls are surfaced in the right sidebar
+   * so the canvas and inspector feel balanced.
+   */
+  protected readonly compactPdfCanvas = computed(() => {
+    const pi = this.activePageIndex();
+    if (this.isTextPlacing() && this.textDraftPageIndex() === pi) return true;
+    const sid = this.selectedWidgetId();
+    if (sid) {
+      const w = this.getWidget(pi, sid);
+      if (w && this.isUnifiedSelectionWidgetKind(w.kind)) return true;
+    }
+    const imgId = this.selectedPlacedImageId();
+    if (imgId && this.getImageAnno(pi, imgId)) return true;
+    const dm = this.selectedDetectedPdfMedia();
+    return dm !== null && dm.pageIndex === pi;
+  });
 
   protected readonly isImagePlacing = signal(false);
   private pendingImageDataUrl: string | null = null;
@@ -7154,6 +7176,7 @@ export class PdfEditorComponent implements AfterViewInit {
           if (hit.part === 'body') {
             ev.preventDefault();
             ev.stopPropagation();
+            this.focusRightbarInsertPanel();
             this.redrawOverlay(pageIndex);
             this.cdr.markForCheck();
             return;
@@ -7192,6 +7215,7 @@ export class PdfEditorComponent implements AfterViewInit {
             if (part === 'body') {
               ev.preventDefault();
               ev.stopPropagation();
+              this.focusRightbarInsertPanel();
               this.redrawOverlay(pageIndex);
               this.cdr.markForCheck();
               return;
@@ -7315,10 +7339,15 @@ export class PdfEditorComponent implements AfterViewInit {
             maskMode: 'color',
             fontSize: r.fontSize,
             fontStyle: r.fontStyle,
-            fontFamily: r.fontFamily ?? 'helvetica'
+            fontFamily: r.fontFamily ?? 'helvetica',
+            originalX: r.textX ?? r.x,
+            originalY: r.textY ?? r.y,
+            originalW: bounds.w,
+            originalH: bounds.h
           };
           // While editing, mask the old content on the overlay so the textarea
           // sits on a clean (white) region.
+          this.focusRightbarInsertPanel();
           this.redrawOverlay(pageIndex);
           return;
         }
@@ -7378,10 +7407,15 @@ export class PdfEditorComponent implements AfterViewInit {
             maskMode: 'color',
             fontSize: hitFontSize,
             fontStyle: hit.fontStyle,
-            fontFamily: hit.fontFamily
+            fontFamily: hit.fontFamily,
+            originalX: hit.x,
+            originalY: hit.y,
+            originalW: wrapWidth + pad * 2,
+            originalH: editBounds.h + pad * 2
           };
           // While editing, mask the old content on the overlay so the textarea
           // sits on a clean (white) region.
+          this.focusRightbarInsertPanel();
           this.redrawOverlay(pageIndex);
           return;
         }
@@ -7406,6 +7440,7 @@ export class PdfEditorComponent implements AfterViewInit {
       this.textBgEnabled.set(false);
       this.textDraftBox = null;
       this.textDraftFreeRect.set({ w: 320, h: 44 });
+      this.focusRightbarInsertPanel();
       this.redrawOverlay(pageIndex);
     }
   }
@@ -7500,9 +7535,14 @@ export class PdfEditorComponent implements AfterViewInit {
         this.textSize() !== this.textDraftBox.fontSize ||
         this.textStyle() !== this.textDraftBox.fontStyle ||
         this.textFamily() !== this.textDraftBox.fontFamily;
+      const geometryChanged =
+        Math.round(this.textDraftX()) !== Math.round(this.textDraftBox.originalX) ||
+        Math.round(this.textDraftY()) !== Math.round(this.textDraftBox.originalY) ||
+        Math.round(this.textDraftBox.w) !== Math.round(this.textDraftBox.originalW) ||
+        Math.round(this.textDraftBox.h) !== Math.round(this.textDraftBox.originalH);
       // If user didn't change anything, don't create a replacement (avoids flashing/white patches).
       const norm = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      if (norm(text) === norm(this.textDraftBox.oldText) && !styleChanged) {
+      if (norm(text) === norm(this.textDraftBox.oldText) && !styleChanged && !geometryChanged) {
         this.isTextPlacing.set(false);
         this.textDraft.set('');
         this.textDraftPageIndex.set(null);
@@ -7588,12 +7628,24 @@ export class PdfEditorComponent implements AfterViewInit {
     });
   }
 
+  /** Same blur guard as the header toolbar when using text-draft actions in the right sidebar. */
+  protected onRightbarCanvasContextPointerDown(ev: PointerEvent) {
+    const target = ev.target as HTMLElement | null;
+    if (target?.closest('button, label')) ev.preventDefault();
+    this.captureTextDraftSelection();
+    this.suppressCommitOnBlurOnce = true;
+    queueMicrotask(() => {
+      this.suppressCommitOnBlurOnce = false;
+    });
+  }
+
   /** Save whenever focus leaves the inline editor unless it stays inside the draft chrome. */
   protected onTextDraftFocusOut(ev: FocusEvent) {
     if (this.suppressCommitOnBlurOnce) return;
     if (this.activeTextDraftGesture) return;
     const next = (ev.relatedTarget ?? null) as HTMLElement | null;
     if (next?.closest?.('.textDraft')) return;
+    if (next?.closest?.('.rightbarCanvasContext')) return;
     this.commitTextDraft();
   }
 
@@ -7685,9 +7737,9 @@ export class PdfEditorComponent implements AfterViewInit {
     const measured = this.measureTextBlockCss(text, fontSize, this.textStyle(), this.textFamily());
     const pad = Math.max(12, Math.ceil(fontSize * 0.75));
     const box = this.textDraftBox;
-    /** Outer bound for the editor: user resize (`box.w` / `box.h`) must be visible, not shrunk to text-only size. */
-    const capW = Math.max(120, Math.min(box.w, box.maskW));
-    const capH = Math.max(40, Math.min(box.h, box.maskH));
+    /** Outer bound for the editor: user resize (`box.w` / `box.h`) must be visible, not capped to the detected mask. */
+    const capW = Math.max(120, box.w);
+    const capH = Math.max(40, box.h);
     const contentW = Math.ceil(measured.w + pad);
     const contentH = Math.ceil(measured.h + Math.max(8, fontSize * 0.35));
     return {

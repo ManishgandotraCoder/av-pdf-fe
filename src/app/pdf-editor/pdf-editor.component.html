@@ -597,6 +597,7 @@
         class="workspace singlePage"
         [class.isPan]="tool() === 'pan'"
         [class.isInsertingWidget]="insertWidgetPending() !== null"
+        [class.workspace--compactPdfCanvas]="compactPdfCanvas()"
       >
         @if (pageCount() > 0) {
           <div class="pages">
@@ -671,38 +672,6 @@
                           >
                             <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                           </button>
-                          <div class="textDraftToolbar__actions">
-                            <button
-                              type="button"
-                              class="textDraftToolbar__btn"
-                              title="Duplicate"
-                              aria-label="Duplicate"
-                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
-                              (click)="duplicateWidgetUnified(activePageIndex(), w.id, $event)"
-                            >
-                              ⧉
-                            </button>
-                            <button
-                              type="button"
-                              class="textDraftToolbar__btn"
-                              title="Cancel selection"
-                              aria-label="Cancel selection"
-                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
-                              (click)="cancelWidgetSelection($event)"
-                            >
-                              ×
-                            </button>
-                            <button
-                              type="button"
-                              class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                              title="Delete"
-                              aria-label="Delete"
-                              (pointerdown)="onWidgetSelectionToolbarChromePointerDown($event)"
-                              (click)="removeWidget(activePageIndex(), w.id); $event.stopPropagation()"
-                            >
-                              ⌫
-                            </button>
-                          </div>
                         </div>
                       }
 
@@ -863,118 +832,20 @@
                       [ngStyle]="placedImageToolbarPositionStyle(pi)"
                     >
                       <div
-                        class="rightbarImageFloatingToolbar"
+                        class="textDraftToolbar rightbarImageFloatingToolbar"
                         role="toolbar"
                         aria-label="Image tools"
                         (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
                       >
                         <button
                           type="button"
-                          class="rightbarImageFloatingToolbar__btn rightbarImageFloatingToolbar__btn--grip"
+                          class="textDraftToolbar__grip"
                           title="Drag to move"
                           aria-label="Drag to move image"
                           [disabled]="readonlyMode() || isLoading() || isSaving()"
                           (pointerdown)="onPlacedImageToolbarGripPointerDown($event)"
                         >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            @for (row of [0, 1]; track row) {
-                              @for (col of [0, 1, 2]; track col) {
-                                <circle
-                                  [attr.cx]="7 + col * 5"
-                                  [attr.cy]="8 + row * 8"
-                                  r="1.35"
-                                  fill="currentColor"
-                                />
-                              }
-                            }
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Replace image"
-                          aria-label="Replace image"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="replaceSelectedPlacedImage($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M8 11h3l2-3h4v3h3l-5 5-5-5zM5 19h14v2H5zM19 8V5h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.85"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Crop"
-                          aria-label="Crop"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="openImageCrop()"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.85"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Duplicate"
-                          aria-label="Duplicate"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="duplicateSelectedPlacedImage($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <rect x="9" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.85" />
-                            <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.85" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Deselect"
-                          aria-label="Deselect"
-                          [disabled]="isLoading() || isSaving()"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="cancelPlacedImageSelection($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn rightbarImageFloatingToolbar__btn--danger"
-                          title="Remove"
-                          aria-label="Remove"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onPlacedImageToolbarChromePointerDown($event)"
-                          (click)="removeSelectedPlacedImage($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M6 10h12l-1 10H7L6 10zM9 10V7h6v3M10 13.5v4M14 13.5v4"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.75"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
+                          <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                         </button>
                       </div>
                     </div>
@@ -988,119 +859,19 @@
                       [ngStyle]="detectedMediaFloatingToolbarStyle(dm)"
                     >
                       <div
-                        class="rightbarImageFloatingToolbar"
+                        class="textDraftToolbar rightbarImageFloatingToolbar"
                         role="toolbar"
                         aria-label="Detected image tools"
                         (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
                       >
                         <button
                           type="button"
-                          class="rightbarImageFloatingToolbar__btn rightbarImageFloatingToolbar__btn--grip"
+                          class="textDraftToolbar__grip"
                           title="Drag handle"
                           aria-label="Toolbar handle"
                           (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
                         >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            @for (row of [0, 1]; track row) {
-                              @for (col of [0, 1, 2]; track col) {
-                                <circle
-                                  [attr.cx]="7 + col * 5"
-                                  [attr.cy]="8 + row * 8"
-                                  r="1.35"
-                                  fill="currentColor"
-                                />
-                              }
-                            }
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Replace"
-                          aria-label="Replace"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
-                          (click)="replaceSelectedDetectedMedia($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M8 11h3l2-3h4v3h3l-5 5-5-5zM5 19h14v2H5zM19 8V5h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.85"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
-                        </button>
-                        @if (dm.media.kind === 'image') {
-                          <button
-                            type="button"
-                            class="rightbarImageFloatingToolbar__btn"
-                            title="Crop"
-                            aria-label="Crop"
-                            [disabled]="readonlyMode() || isLoading() || isSaving()"
-                            (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
-                            (click)="cropSelectedDetectedEmbeddedImage($event)"
-                          >
-                            <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                              <path
-                                d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.85"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              />
-                            </svg>
-                          </button>
-                        }
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Duplicate"
-                          aria-label="Duplicate"
-                          [disabled]="readonlyMode() || isLoading() || isSaving() || dm.media.kind !== 'image'"
-                          (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
-                          (click)="duplicateDetectedMediaReplacement($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <rect x="9" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.85" />
-                            <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.85" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn"
-                          title="Deselect"
-                          aria-label="Deselect"
-                          [disabled]="isLoading() || isSaving()"
-                          (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
-                          (click)="cancelDetectedMediaSelectionOnly($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          class="rightbarImageFloatingToolbar__btn rightbarImageFloatingToolbar__btn--danger"
-                          title="Remove"
-                          aria-label="Remove"
-                          [disabled]="readonlyMode() || isLoading() || isSaving()"
-                          (pointerdown)="onDetectedMediaFloatingToolbarChromePointerDown($event)"
-                          (click)="removeSelectedDetectedMedia($event)"
-                        >
-                          <svg class="rightbarImageFloatingToolbar__icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M6 10h12l-1 10H7L6 10zM9 10V7h6v3M10 13.5v4M14 13.5v4"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.75"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
+                          <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                         </button>
                       </div>
                     </div>
@@ -1120,38 +891,6 @@
                         >
                           <span class="textDraftToolbar__gripDots" aria-hidden="true"></span>
                         </button>
-                        <div class="textDraftToolbar__actions">
-                          <button
-                            type="button"
-                            class="textDraftToolbar__btn"
-                            title="Copy"
-                            aria-label="Copy text box"
-                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
-                            (click)="duplicateTextDraft(); $event.stopPropagation()"
-                          >
-                            ⧉
-                          </button>
-                          <button
-                            type="button"
-                            class="textDraftToolbar__btn"
-                            title="Cancel"
-                            aria-label="Cancel text editing"
-                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
-                            (click)="cancelTextDraft(); $event.stopPropagation()"
-                          >
-                            ×
-                          </button>
-                          <button
-                            type="button"
-                            class="textDraftToolbar__btn textDraftToolbar__btn--danger"
-                            title="Delete"
-                            aria-label="Delete text box"
-                            (pointerdown)="onTextDraftChromePointerDown($event); $event.stopPropagation()"
-                            (click)="deleteTextDraftFromToolbar(); $event.stopPropagation()"
-                          >
-                            ⌫
-                          </button>
-                        </div>
                       </div>
                     }
                     <div class="textDraft__frame" [ngStyle]="textDraftFrameStyle()">
@@ -1336,6 +1075,185 @@
           <div class="rightbar__panel rightbar__panelOptions" role="tabpanel">
             <div class="rightbar__row">
 
+              @if (textFeatureEnabled() && isTextPlacing() && textDraftPageIndex() === activePageIndex()) {
+                <div
+                  class="rightbarMediaActions rightbarCanvasContext"
+                  role="group"
+                  aria-label="PDF text actions"
+                  (pointerdown)="onRightbarCanvasContextPointerDown($event)"
+                >
+                  <div class="rightbarMediaActions__title">Text Settings</div>
+                  <div class="rightbarMediaActions__row">
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      title="Duplicate text box"
+                      aria-label="Duplicate text box"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="duplicateTextDraft()"
+                    >
+                      <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                        <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn"
+                      title="Cancel editing"
+                      aria-label="Cancel editing"
+                      [disabled]="isLoading() || isSaving()"
+                      (click)="cancelTextDraft()"
+                    >
+                      <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+                        <path d="M15 9l-6 6M9 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                      title="Delete text box"
+                      aria-label="Delete text box"
+                      [disabled]="readonlyMode() || isLoading() || isSaving()"
+                      (click)="deleteTextDraftFromToolbar()"
+                    >
+                      <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 7h16M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        <path d="M9 7V5h6v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (selectedPlacedImage(); as rpi) {
+                @if (rpi.pageIndex === activePageIndex()) {
+                  <div class="rightbarMediaActions rightbarCanvasContext" role="group" aria-label="Image settings">
+                    <div class="rightbarMediaActions__title">Image settings</div>
+                    <div class="rightbarMediaActions__row">
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Replace image"
+                        aria-label="Replace image"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="replaceSelectedPlacedImage($event)"
+                      >
+                        <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M7 8H3V4M3 8l3-3M17 16h4v4m0-4l-3 3"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                          <path d="M17 8H7M7 16h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Duplicate"
+                        aria-label="Duplicate"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="duplicateSelectedPlacedImage($event)"
+                      >
+                        <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <rect x="9" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                          <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Deselect"
+                        aria-label="Deselect"
+                        [disabled]="isLoading() || isSaving()"
+                        (click)="cancelPlacedImageSelection($event)"
+                      >
+                        <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+                          <path d="M15 9l-6 6M9 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                        title="Remove"
+                        aria-label="Remove"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="removeSelectedPlacedImage($event)"
+                      >
+                        <svg class="rightbarMediaActions__icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 7h16M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                          <path d="M9 7V5h6v2M7 7l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                }
+              }
+
+              @if (selectedDetectedMediaItem(); as rdm) {
+                @if (rdm.pageIndex === activePageIndex()) {
+                  <div class="rightbarMediaActions rightbarCanvasContext" role="group" aria-label="Detected media actions">
+                    <div class="rightbarMediaActions__title">{{ selectedDetectedMediaTitle() }}</div>
+                    <p class="rightbarAssetsHint">Drag the purple grip on the page if you need to move the handle.</p>
+                    <div class="rightbarMediaActions__row">
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Replace"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="replaceSelectedDetectedMedia($event)"
+                      >
+                        Replace
+                      </button>
+                      @if (rdm.media.kind === 'image') {
+                        <button
+                          type="button"
+                          class="rightbarMediaActions__btn"
+                          title="Crop"
+                          [disabled]="readonlyMode() || isLoading() || isSaving()"
+                          (click)="cropSelectedDetectedEmbeddedImage($event)"
+                        >
+                          Crop
+                        </button>
+                      }
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Duplicate"
+                        [disabled]="readonlyMode() || isLoading() || isSaving() || rdm.media.kind !== 'image'"
+                        (click)="duplicateDetectedMediaReplacement($event)"
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Deselect"
+                        [disabled]="isLoading() || isSaving()"
+                        (click)="cancelDetectedMediaSelectionOnly($event)"
+                      >
+                        Deselect
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn rightbarMediaActions__btnDanger"
+                        title="Remove"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="removeSelectedDetectedMedia($event)"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                }
+              }
+
               <div class="rightbarStudio__libraryBlock">
                 <button
                   type="button"
@@ -1435,6 +1353,29 @@
                   <div class="rightbarAssetsHint">
                     Type: {{ selectedItem.widget.kind }}
                   </div>
+                  @if (isUnifiedSelectionWidgetKind(selectedItem.widget.kind)) {
+                    <div class="rightbarMediaActions__row">
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Duplicate"
+                        [disabled]="readonlyMode() || isLoading() || isSaving()"
+                        (click)="duplicateWidgetUnified(selectedItem.pageIndex, selectedItem.widget.id, $event)"
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        class="rightbarMediaActions__btn"
+                        title="Clear selection"
+                        [disabled]="isLoading() || isSaving()"
+                        (click)="cancelWidgetSelection($event)"
+                      >
+                        Deselect
+                      </button>
+                    </div>
+                    <p class="rightbarAssetsHint">Drag the grip on the widget to move.</p>
+                  }
                   <div class="rightbarAssetsHint">
                     Overlapping widgets: send backward or bring forward to change which one is on top.
                   </div>
