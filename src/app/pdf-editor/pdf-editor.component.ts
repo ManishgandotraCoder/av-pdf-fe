@@ -7372,7 +7372,10 @@ export class PdfEditorComponent implements AfterViewInit {
           this.selectedPlacedImageId.set(null);
           this.imageCropSession.set(null);
           this.editingReplace = null;
-          const sameStyleBounds = this.sameStyleTextBoundsForBlock(pageIndex, hit);
+          const sameStyleBounds =
+            hit.kind === 'list'
+              ? { x: hit.x, y: hit.y, w: hit.w, h: hit.h }
+              : this.sameStyleTextBoundsForBlock(pageIndex, hit);
           const editBounds = {
             x: Math.min(hit.x, sameStyleBounds.x),
             y: Math.min(hit.y, sameStyleBounds.y),
@@ -7924,6 +7927,7 @@ export class PdfEditorComponent implements AfterViewInit {
       const overlapsY = item.y + item.h >= y0 && item.y <= y1;
       if (!overlapsY) continue;
       if (item.x < block.x - xPad || item.x >= rightLimit) continue;
+      if (item.x > block.x + block.w + xPad) continue;
 
       x0 = Math.min(x0, item.x);
       yMin = Math.min(yMin, item.y);
@@ -9689,6 +9693,48 @@ export class PdfEditorComponent implements AfterViewInit {
     lines.length = 0;
     lines.push(...finalizedLines);
 
+    // Keep columns/lane-local text together before block grouping. pdf.js returns text in a visual
+    // top-to-bottom stream, so two-column layouts can interleave right-column lines between bullets
+    // and their wrapped continuation lines.
+    type DetectedLine = (typeof lines)[number];
+    const laneTol = Math.max(18, medianFont * 2.2);
+    const laneOverlapsLine = (
+      lane: { x0: number; x1: number; lines: DetectedLine[] },
+      ln: DetectedLine
+    ): boolean => {
+      const overlap = Math.min(lane.x1, ln.x1) - Math.max(lane.x0, ln.x0);
+      const lnW = Math.max(1, ln.x1 - ln.x0);
+      const laneW = Math.max(1, lane.x1 - lane.x0);
+      const overlapRatio = overlap / Math.min(lnW, laneW);
+      const leftEdgeClose = Math.abs(ln.x0 - lane.lines[0]!.x0) <= laneTol;
+      const startsInsideLane = ln.x0 >= lane.x0 - laneTol && ln.x0 <= lane.x1 + laneTol;
+      return overlapRatio >= 0.25 || leftEdgeClose || startsInsideLane;
+    };
+    const readingLanes: { x0: number; x1: number; lines: DetectedLine[] }[] = [];
+    for (const ln of lines) {
+      let bestLane: (typeof readingLanes)[number] | null = null;
+      let bestOverlap = -Infinity;
+      for (const lane of readingLanes) {
+        if (!laneOverlapsLine(lane, ln)) continue;
+        const overlap = Math.min(lane.x1, ln.x1) - Math.max(lane.x0, ln.x0);
+        if (overlap > bestOverlap) {
+          bestOverlap = overlap;
+          bestLane = lane;
+        }
+      }
+      if (bestLane) {
+        bestLane.lines.push(ln);
+        bestLane.x0 = Math.min(bestLane.x0, ln.x0);
+        bestLane.x1 = Math.max(bestLane.x1, ln.x1);
+      } else {
+        readingLanes.push({ x0: ln.x0, x1: ln.x1, lines: [ln] });
+      }
+    }
+
+    const blockLines = readingLanes
+      .sort((a, b) => a.x0 - b.x0 || (a.lines[0]?.y0 ?? 0) - (b.lines[0]?.y0 ?? 0))
+      .flatMap((lane) => lane.lines.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0));
+
     // Group lines into blocks (paragraph/list/heading-ish).
     const indentTol = Math.max(10, medianFont * 0.9);
 
@@ -9741,7 +9787,7 @@ export class PdfEditorComponent implements AfterViewInit {
       if (!c || typeof c !== 'string') return '';
       return c.trim().toLowerCase();
     }
-    for (const ln of lines) {
+    for (const ln of blockLines) {
       if (!ln.text) continue;
       if (!cur) {
         cur = { lines: [ln] as any, x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, fontSize: ln.fontSize };
@@ -9800,7 +9846,7 @@ export class PdfEditorComponent implements AfterViewInit {
         fillChanged ||
         likelyNewColumn ||
         !verticalFlowContinues ||
-        (!continuingText && (sameStyle ? largeStylePreservingJump : indentDelta > indentTol));
+        (!sameListFlow && !continuingText && (sameStyle ? largeStylePreservingJump : indentDelta > indentTol));
 
 
       if (newBlock) {
